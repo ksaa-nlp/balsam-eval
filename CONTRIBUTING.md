@@ -31,7 +31,7 @@ After cloning the repository, follow these steps to get your environment ready.
    ```bash
    cp .env.example .env
    ```
-4. Run the evaluation. To run the evaluation:
+4. **Run the evaluation**. To run the evaluation _locally_:
    ```bash
    python3 run_local.py
    ```
