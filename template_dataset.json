@@ -1,0 +1,43 @@
+{
+  "name": "task1",
+  "generation_kwargs": {
+    "until": [
+      ".",
+      "\n",
+      "،"
+    ],
+    "temperature": 0.0
+  },
+  "filter_list": [
+    {
+      "name": "remove_whitespace",
+      "filter": [
+        {
+          "function": "remove_whitespace"
+        },
+        {
+          "function": "take_first"
+        }
+      ]
+    }
+  ],
+  "metric_list": [
+    {
+      "metric": "exact_match",
+      "ignore_punctuation": true
+    }
+  ],
+  "data": {
+    "test": [
+      {
+        "instruction": "",
+        "instruction_en": [
+          ""
+        ],
+        "input": "",
+        "output": "",
+        "id": 1
+      }
+    ]
+  }
+}
