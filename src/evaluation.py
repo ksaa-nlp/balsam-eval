@@ -22,6 +22,14 @@ SERVER_TOKEN = os.getenv("SERVER_TOKEN", "none")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# disable ssl warning
+requests.packages.urllib3.disable_warnings()
+
+# override the methods which you use
+requests.post = lambda url, timeout=5000, **kwargs: requests.request(
+    method="POST", url=url, timeout=timeout, verify=False, **kwargs
+)
+
 
 class Adapter(str, Enum):
     """The adapter to use for the evaluation job."""
