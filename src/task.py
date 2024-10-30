@@ -128,7 +128,7 @@ class LMHDataset:
             doc_to_text = "{{instruction}}\n{{input}}"
         doc_to_target = "output"
         if isinstance(self.data["test"][0].get("output"), list):
-            doc_to_target = "{{ output|join(',')}}"
+            doc_to_target = "{{ output[0] }}"
         data_files = {}
         if self.data.get("train"):
             data_files["train"] = f"{self.directory}/{self.file_name}_train.json"
