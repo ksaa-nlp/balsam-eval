@@ -9,13 +9,108 @@ from lm_eval.api.registry import register_aggregation, register_metric
 import rouge_scorer  # type: ignore
 
 
+import nltk
+import evaluate
+import pyarabic.araby as araby
+import unicodedata
+import numpy as np
+import sys
+from scipy.optimize import linear_sum_assignment
+from lm_eval.api.registry import register_aggregation, register_metric
+
+# Download necessary resources
+nltk.download('punkt_tab')
+
+# Load Rouge evaluator from `evaluate` library
+rouge = evaluate.load('rouge')
+# Punctuation table
+PUNCT_TABLE = dict.fromkeys(i for i in range(sys.maxunicode)
+                            if unicodedata.category(chr(i)).startswith('P'))
+ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
+others = '''`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!”…“–ـ'''
+ALL_PUNCTUATIONS += ''.join([o for o in others if o not in ALL_PUNCTUATIONS])
+
+def prepare_texts(text, change_curly_braces, remove_diactrics):
+    """
+    Preprocess the text by handling punctuation, curly braces, and diacritics.
+    """
+    # 1. put spaces before and after each punctuation
+    text = re.sub('([' + ALL_PUNCTUATIONS + '])', ' \\1 ', text)
+
+    # 2. change all {} to []
+    if change_curly_braces:
+        text = text.replace('{', '[').replace('}', ']')
+
+    # 3. Remove diacritics
+    if remove_diactrics:
+        text = araby.strip_diacritics(text)
+
+    return text
+
+def get_answers(doc):
+    """
+    Extract answers from the document, ensuring no duplicates.
+    """
+    answers = []
+    answers_set = set()
+    candidates = [doc["output"]]
+    for candidate in candidates:
+        answer = candidate
+        if answer in answers_set:
+            continue
+        answers_set.add(answer)
+        answers.append(answer)
+    return answers
+
 @register_aggregation("rouge")
-def rouge(items):
+def rouge_aggregation(items):
+    """
+    Aggregate the Rouge scores across the dataset for all types of ROUGE.
+    """
+    #print("self.name",self.name)
+    tokenizer = lambda x: x.split()
     refs = list(zip(*items))[0]
     preds = list(zip(*items))[1]
-    scorer = rouge_scorer.RougeScorer(["rouge2"])
-    score = scorer.score(refs[0], preds[0])
-    return float(score["rouge2"].fmeasure)
+    #print(items)
+    #remove_diacritics = True if 'morphological_pattern' not in row['metadata']['name'] else False
+    # Preprocess the texts
+    refs = [prepare_texts(ref, change_curly_braces=False, remove_diactrics=True).strip() for ref in refs]
+    preds = [prepare_texts(pred, change_curly_braces=True, remove_diactrics=True).strip() for pred in preds]
+    
+    # Initialize sums for each ROUGE score
+    rouge1= 0.0
+    rouge2 = 0.0
+    rougeL= 0.0
+    rougeLsum = 0.0
+    
+    
+    for i in range(len(refs)):
+        # Compute ROUGE scores
+        score = rouge.compute(references=[refs[i]], predictions=[preds[i]], tokenizer=tokenizer)
+        
+        # Print each score for debugging
+        print(f"Reference: {refs[i]}")
+        print(f"Prediction: {preds[i]}")
+        print(f"ROUGE Scores: {score}")
+        
+        # Aggregate each type of ROUGE score
+        rouge1 += score["rouge1"]
+        rouge2 += score["rouge2"]
+        rougeL += score["rougeL"]
+        rougeLsum += score["rougeLsum"]
+
+    count = len(refs)
+    avg_rouge1 = rouge1 / count
+    avg_rouge2 = rouge2 / count
+    avg_rougeL = rougeL / count
+    avg_rougeLsum = rougeLsum / count
+
+    return {
+        "rouge1": avg_rouge1,
+        "rouge2": avg_rouge2,
+        "rougeL": avg_rougeL,
+        "rougeLsum": avg_rougeLsum,
+    }
 
 
 @register_metric(
@@ -44,19 +139,6 @@ def process_docs(dataset):
         }
 
     return dataset.map(_process)
-
-
-def get_answers(doc):
-    answers = []
-    answers_set = set()
-    candidates = [doc["output"]]
-    for candidate in candidates:
-        answer = candidate
-        if answer in answers_set:
-            continue
-        answers_set.add(answer)
-        answers.append(answer)
-    return answers
 
 
 def process_results(doc, results):

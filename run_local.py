@@ -20,6 +20,8 @@ if __name__ == "__main__":
     print(f"Reading tasks from directory '{TASKS_DIR}'")
 
     for file in os.listdir(f"./{TASKS_DIR}"):
+        if not file.endswith("json"):
+            continue
         # Open the file and extract content
         with open(f"./{TASKS_DIR}/{file}", "r", encoding="utf-8") as f:
             content = f.read()

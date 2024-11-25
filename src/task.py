@@ -15,34 +15,50 @@ ValidationError = {
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
-
-storage_client = storage.Client()
-
-
-def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]:
+def load_dataset_from_local(dataset_id: str, directory: str = "tasks") -> dict[str, Any]:
     """
-    Download a dataset from GCS. The dataset is identified by a dataset ID
-    which corresponds to its primary key in the database.
+    Load a dataset from a local directory. The dataset is identified by a dataset ID
+    which corresponds to the file name without the `.json` extension.
     """
-    bucket_name = os.getenv("GCLOUD_BUCKET")
-    bucket = storage_client.bucket(bucket_name)
-    # Create a temporary directory to store the dataset
-    os.makedirs(directory, exist_ok=True)
-    blob = bucket.blob(f"datasets/{dataset_id}.json")
-    blob.download_to_filename(f".temp/{dataset_id}.json")
-
-    print(f"Downloaded {dataset_id}.json from GCS bucket.")
-
-    # Read the dataset from the file
-    with open(f".temp/{dataset_id}.json", "r", encoding="utf8") as fp:
+    # Create the path for the file
+    file_path = f"{directory}/{dataset_id}.json"
+    
+    # Check if the file exists
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"{file_path} not found.")
+    
+    # Load the dataset
+    with open(file_path, "r", encoding="utf8") as fp:
+        fp=fp.endwith('.json')
         dataset = json.load(fp)
-        dd = dataset["json"]
-        dd["task"] = dataset["task"]
-        dd["category"] = dataset["category"]
-        # Overwrite the dataset with the new data
-        with open(f".temp/{dataset_id}.json", "w", encoding="utf8") as fp:
-            json.dump(dd, fp, ensure_ascii=False)
-        return dd
+        return dataset
+# storage_client = storage.Client()
+
+
+# def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]:
+#     """
+#     Download a dataset from GCS. The dataset is identified by a dataset ID
+#     which corresponds to its primary key in the database.
+#     """
+#     bucket_name = os.getenv("GCLOUD_BUCKET")
+#     bucket = storage_client.bucket(bucket_name)
+#     # Create a temporary directory to store the dataset
+#     os.makedirs(directory, exist_ok=True)
+#     blob = bucket.blob(f"datasets/{dataset_id}.json")
+#     blob.download_to_filename(f".temp/{dataset_id}.json")
+
+#     print(f"Downloaded {dataset_id}.json from GCS bucket.")
+
+#     # Read the dataset from the file
+#     with open(f".temp/{dataset_id}.json", "r", encoding="utf8") as fp:
+#         dataset = json.load(fp)
+#         dd = dataset["json"]
+#         dd["task"] = dataset["task"]
+#         dd["category"] = dataset["category"]
+#         # Overwrite the dataset with the new data
+#         with open(f".temp/{dataset_id}.json", "w", encoding="utf8") as fp:
+#             json.dump(dd, fp, ensure_ascii=False)
+#         return dd
 
 
 class LMHDataset:
@@ -66,6 +82,7 @@ class LMHDataset:
         self.name = task.pop("name")
         self.data = task.pop("data")
         self.category_id = task.pop("category")
+        #self.metric = task.pop("metric")
         self.task_id = task.pop("task")
 
         # Remaining fields
@@ -128,10 +145,10 @@ class LMHDataset:
             doc_to_text = "{{instruction}}\n{{input}}"
         doc_to_target = "output"
         if isinstance(self.data["test"][0].get("output"), list):
-            doc_to_target = "{{ output[0] }}"
+            doc_to_target = " "+"{{output[0]}}"
         data_files = {}
-        if self.data.get("train"):
-            data_files["train"] = f"{self.directory}/{self.file_name}_train.json"
+        #if self.data.get("train"):
+            #data_files["train"] = f"{self.directory}/{self.file_name}_train.json"
         if self.data.get("validation"):
             data_files["validation"] = (
                 f"{self.directory}/{self.file_name}_validation.json"
@@ -145,7 +162,7 @@ class LMHDataset:
             "dataset_name": None,
             "test_split": "test" if self.data.get("test") else None,
             "validation_split": "validation" if self.data.get("validation") else None,
-            "training_split": "train" if self.data.get("train") else None,
+            #"training_split": "train" if self.data.get("train") else None,
             "doc_to_text": doc_to_text,
             "doc_to_target": doc_to_target,
             "output_type": "generate_until",
