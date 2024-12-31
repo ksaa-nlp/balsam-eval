@@ -16,6 +16,7 @@ from . import aixplain
 # This import is necessary for the rouge metric to work.
 from . import metric
 
+
 API_HOST = os.getenv("API_HOST", "none")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN", "none")
 
