@@ -16,15 +16,18 @@ from . import aixplain
 # This import is necessary for the rouge metric to work.
 from . import metric
 
+from dotenv import load_dotenv
+load_dotenv()
 
 API_HOST = os.getenv("API_HOST", "none")
-SERVER_TOKEN = os.getenv("SERVER_TOKEN", "none")
+BASE_URL = os.getenv("BASE_URL", "none")
 
+SERVER_TOKEN = os.getenv("SERVER_TOKEN", "none")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # disable ssl warning
-requests.packages.urllib3.disable_warnings()
+# requests.packages.urllib3.disable_warnings()
 
 # override the methods which you use
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
@@ -131,7 +134,6 @@ class EvaluatationJob:
     def run(self):
         """Run a simple evaluation job."""
         self._update_status(JobStatus.RUNNING)
-        print(self.model_args)
         try:
             results = lm_eval.simple_evaluate(
                 model=self.adapter,
@@ -174,16 +176,13 @@ class EvaluatationJob:
             for m in metrics:
                 logger.info("Inspecting metric: %s", m)
                 if m == 'rouge':
-                    logger.info("Inspecting metric in if statment: %s", m)
                     # Initialize ROUGE metrics if not already initialized
                     if not total_scores:
                         total_scores = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
-                        logger.info("for the total score intialization")
                     try:
                         # Aggregate ROUGE scores
                         logger.info("for the total score intialization")
                         logger.info("Available keys for task '%s': %s", task, list(results["results"][task].keys()))
-                        #results["results"][task][f"{m},none"]
                         total_scores["rouge1"] += results["results"][task]["rouge,none"]["rouge1"]
                         total_scores["rouge2"] += results["results"][task]["rouge,none"]["rouge2"]
                         total_scores["rougeL"] += results["results"][task]["rouge,none"]["rougeL"]
@@ -222,7 +221,7 @@ class EvaluatationJob:
         # Add average scores to results for export
         average_scores = self._calculate_average_scores(results)
         results_with_averages = {**results, "average_scores": average_scores}
-
+        self.output_path = self.output_path.replace('/','-')
         # Save results to a JSON file
         with open(f"{self.output_path}.json", "w", encoding="UTF-8") as fp:
              json.dump(results_with_averages, fp, ensure_ascii=False)
