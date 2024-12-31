@@ -82,7 +82,7 @@ class LMHDataset:
         self.name = task.pop("name")
         self.data = task.pop("data")
         self.category_id = task.pop("category")
-        #self.metric = task.pop("metric")
+        self.metric = task.pop("metric")
         self.task_id = task.pop("task")
 
         # Remaining fields
@@ -172,8 +172,126 @@ class LMHDataset:
             # Dump the rest of the task
             **self.task,
         }
-        with open(
-            f"{self.directory}/{self.file_name}.yaml", "w", encoding="utf8"
-        ) as fp:
-            fp.write(yaml.dump(yaml_data))
-        logger.info("Exported task to %s.yaml", self.name)
+
+        if "morphological" in self.name.lower():
+            yaml_data = f"""task: {self.name}
+dataset_path: "json"
+dataset_name: "null"
+test_split: {"test" if self.data.get("test") else 'null'}
+doc_to_text: "{doc_to_text}"
+doc_to_target: "{doc_to_target}"
+process_results: !function utils_morph.process_results
+output_type: "generate_until"
+metric_list:
+  - metric: {self.metric}
+    aggregation: !function utils_morph.custom_rouge_agg
+    higher_is_better: true
+
+
+
+dataset_kwargs:
+    data_files: {data_files}
+        """
+           
+           
+            process_results= """
+import re
+import nltk
+import evaluate
+import pyarabic.araby as araby
+import unicodedata
+import numpy as np
+import sys
+from scipy.optimize import linear_sum_assignment
+from lm_eval.api.registry import register_aggregation, register_metric
+
+# Download necessary resources
+nltk.download('punkt_tab')
+
+# Load Rouge evaluator from `evaluate` library
+rouge = evaluate.load('rouge')
+
+# Punctuation table
+PUNCT_TABLE = dict.fromkeys(i for i in range(sys.maxunicode)
+                            if unicodedata.category(chr(i)).startswith('P'))
+ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
+others = '''`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!”…“–ـ'''
+ALL_PUNCTUATIONS += ''.join([o for o in others if o not in ALL_PUNCTUATIONS])
+ 
+def prepare_texts(text, change_curly_braces):
+
+    # 1. put spaces before and after each punctuation
+    text = re.sub('([' + ALL_PUNCTUATIONS + '])', ' \\1 ', text)
+
+    # 2. change all {} to []
+    if change_curly_braces:
+        text = text.replace('{', '[').replace('}', ']')
+
+    return text
+def rouge1_scores(predictions, references):  # This is a passthrough function
+
+    return (predictions[0], references[0])
+
+
+def custom_rouge_agg(items):
+    tokenizer = lambda x: x.split()
+    refs = list(zip(*items))[0]
+    preds = list(zip(*items))[1]
+    # Preprocess the texts
+    refs = [prepare_texts(ref, change_curly_braces=False).strip() for ref in refs]
+    preds = [prepare_texts(pred, change_curly_braces=True).strip() for pred in preds]
+    # Initialize sums for each ROUGE score
+    rouge1= 0.0
+    rouge2 = 0.0
+    rougeL= 0.0
+    rougeLsum = 0.0
+    
+    for i in range(len(refs)):
+        # Compute ROUGE scores
+        score = rouge.compute(references=[refs[i]], predictions=[preds[i]], tokenizer=tokenizer)
+        
+        # Aggregate each type of ROUGE score
+        rouge1 += score["rouge1"]
+        rouge2 += score["rouge2"]
+        rougeL += score["rougeL"]
+        rougeLsum += score["rougeLsum"]
+
+    count = len(refs)
+    avg_rouge1 = rouge1 / count
+    avg_rouge2 = rouge2 / count
+    avg_rougeL = rougeL / count
+    avg_rougeLsum = rougeLsum / count
+
+    return {
+        "rouge1": avg_rouge1,
+        "rouge2": avg_rouge2,
+        "rougeL": avg_rougeL,
+        "rougeLsum": avg_rougeLsum,
+    }
+    
+def process_results(doc, results):
+    preds, golds = results[0], doc["output"]
+    # rouge_scores = evaluate_rouge_metric(preds, golds)
+    # print(f"ROUGE Scores: {rouge_scores}")
+    return {'rouge':[golds, preds]}
+    
+    	"""
+    
+            with open(
+                f"{self.directory}/{self.file_name}.yaml", "w", encoding="utf8"
+            ) as fp:
+                fp.write(yaml_data)
+            with open(f"{self.directory}/utils_morph.py", "w", encoding="utf8") as f:
+                f.write(process_results)
+            logger.info("Exported task to %s.yaml", self.name)
+        else:
+            
+
+            #print("self.name.lower():",self.name.lower())
+            with open(
+                f"{self.directory}/{self.file_name}.yaml", "w", encoding="utf8"
+            ) as fp:
+                fp.write(yaml.dump(yaml_data))
+            logger.info("Exported task to %s.yaml", self.name)
+
+
