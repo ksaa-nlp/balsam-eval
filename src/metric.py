@@ -71,8 +71,6 @@ def rouge_aggregation(items):
     tokenizer = lambda x: x.split()
     refs = list(zip(*items))[0]
     preds = list(zip(*items))[1]
-    #print(items)
-    #remove_diacritics = True if 'morphological_pattern' not in row['metadata']['name'] else False
     # Preprocess the texts
     refs = [prepare_texts(ref, change_curly_braces=False, remove_diactrics=True).strip() for ref in refs]
     preds = [prepare_texts(pred, change_curly_braces=True, remove_diactrics=True).strip() for pred in preds]
@@ -88,10 +86,10 @@ def rouge_aggregation(items):
         # Compute ROUGE scores
         score = rouge.compute(references=[refs[i]], predictions=[preds[i]], tokenizer=tokenizer)
         
-        # Print each score for debugging
-        print(f"Reference: {refs[i]}")
-        print(f"Prediction: {preds[i]}")
-        print(f"ROUGE Scores: {score}")
+        # # Print each score for debugging
+        # print(f"Reference: {refs[i]}")
+        # print(f"Prediction: {preds[i]}")
+        # print(f"ROUGE Scores: {score}")
         
         # Aggregate each type of ROUGE score
         rouge1 += score["rouge1"]
@@ -231,7 +229,6 @@ def _compute_f1(predicted_bag, gold_bag):
         else 0.0
     )
     return f1
-
 
 
 def _match_answers_if_present(gold_bag, predicted_bag):
