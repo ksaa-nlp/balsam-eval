@@ -233,6 +233,7 @@ def _compute_f1(predicted_bag, gold_bag):
     return f1
 
 
+
 def _match_answers_if_present(gold_bag, predicted_bag):
     gold_answer = set()
     predicted_answer = set()
