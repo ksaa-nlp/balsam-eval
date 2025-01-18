@@ -20,6 +20,8 @@ if __name__ == "__main__":
     print(f"Reading tasks from directory '{TASKS_DIR}'")
 
     for file in os.listdir(f"./{TASKS_DIR}"):
+        if not file.endswith("json"):
+            continue
         # Open the file and extract content
         with open(f"./{TASKS_DIR}/{file}", "r", encoding="utf-8") as f:
             content = f.read()
@@ -30,14 +32,14 @@ if __name__ == "__main__":
                 continue
 
             with open(
-                f"./{TEMP_DIR}/{file.split('.')[0]}.json", "w", encoding="utf-8"
+                f"./{TEMP_DIR}/{file.split(".")[0]}.json", "w", encoding="utf-8"
             ) as f:
                 d["json"]["category"] = d["category"]
                 d["json"]["task"] = d["task"]
                 json.dump(d["json"], f, ensure_ascii=False)
 
             # Initialize LMHDataset
-            dataset = LMHDataset(f"{file.split('.')[0]}", TEMP_DIR)
+            dataset = LMHDataset(f"{file.split(".")[0]}", TEMP_DIR)
             dataset.export()
 
             if tasks.get(d["category"]) is None:

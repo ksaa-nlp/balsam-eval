@@ -16,16 +16,19 @@ from . import aixplain
 # This import is necessary for the rouge metric to work.
 from . import metric
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 API_HOST = os.getenv("API_HOST", "none")
+BASE_URL = os.getenv("BASE_URL", "none")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN", "none")
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # disable ssl warning
-requests.packages.urllib3.disable_warnings()
-
-# override the methods which you use
+# requests.packages.urllib3.disable_warnings()
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
     method="POST", url=url, timeout=timeout, verify=False, **kwargs
 )
@@ -130,7 +133,6 @@ class EvaluatationJob:
     def run(self):
         """Run a simple evaluation job."""
         self._update_status(JobStatus.RUNNING)
-        print(self.model_args)
         try:
             results = lm_eval.simple_evaluate(
                 model=self.adapter,
@@ -158,51 +160,122 @@ class EvaluatationJob:
             self._update_status(JobStatus.FAILED, str(e))
             raise e
 
-    def _calculate_average_score(self, results: dict[str, Any]) -> float:
-        """Calculate the average score of the model."""
-        # Get the metrics for each task
-        total_score = 0
+    def _calculate_average_scores(self, results: dict[str, Any]) -> dict[str, float]:
+        """Calculate the average scores of the model for ROUGE or other metrics."""
+        total_scores = {}
         total_tasks = 0
-        for task in results["configs"]:
-            # Extract the metrics in the task.
+
+        for task in results.get("configs", {}):
+            # Extract metrics for the current task
             metrics = [
-                metric["metric"] for metric in results["configs"][task]["metric_list"]
+                metric["metric"]
+                for metric in results["configs"][task].get("metric_list", [])
             ]
             logger.info("Metrics found for task %s: %s", task, metrics)
+
             for m in metrics:
-                total_score += results["results"][task][f"{m},none"]
-            total_tasks += 1
-        return total_score / total_tasks
+                logger.info("Inspecting metric: %s", m)
+                if m == "rouge":
+                    # Initialize ROUGE metrics if not already initialized
+                    if not total_scores:
+                        total_scores = {
+                            "rouge1": 0.0,
+                            "rouge2": 0.0,
+                            "rougeL": 0.0,
+                            "rougeLsum": 0.0,
+                        }
+                    try:
+                        # Aggregate ROUGE scores
+                        logger.info("for the total score intialization")
+                        logger.info(
+                            "Available keys for task '%s': %s",
+                            task,
+                            list(results["results"][task].keys()),
+                        )
+                        total_scores["rouge1"] += results["results"][task][
+                            "rouge,none"
+                        ]["rouge1"]
+                        total_scores["rouge2"] += results["results"][task][
+                            "rouge,none"
+                        ]["rouge2"]
+                        total_scores["rougeL"] += results["results"][task][
+                            "rouge,none"
+                        ]["rougeL"]
+                        total_scores["rougeLsum"] += results["results"][task][
+                            "rouge,none"
+                        ]["rougeLsum"]
+                    except KeyError as e:
+                        logger.warning(
+                            "ROUGE score '%s' not found in task '%s': %s", m, task, e
+                        )
+                else:
+                    # Handle other metrics
+                    if m not in total_scores:
+                        total_scores[m] = 0.0
+                    try:
+                        total_scores[m] += results["results"][task][f"{m},none"]
+                    except KeyError as e:
+                        logger.warning(
+                            "Metric '%s' not found in task '%s': %s", m, task, e
+                        )
+
+                total_tasks += 1
+
+        if total_tasks == 0:
+            logger.error("No tasks found to calculate scores")
+            return {key: 0.0 for key in total_scores}
+
+        # Calculate averages for all scores
+        average_scores = {key: total_scores[key] / total_tasks for key in total_scores}
+
+        logger.info("Average Scores: %s", average_scores)
+        return average_scores
 
     def _export_results(self, results: dict[str, Any]):
         """Export the results to a JSON file in the current working directory."""
-        self._add_results_to_db(results)
+        # Add average scores to results for export
+        average_scores = self._calculate_average_scores(results)
+        results_with_averages = {**results, "average_scores": average_scores}
+        self.output_path = self.output_path.replace("/", "-")
+        # Save results to a JSON file
         with open(f"{self.output_path}.json", "w", encoding="UTF-8") as fp:
-            json.dump(results, fp, ensure_ascii=False)
+            json.dump(results_with_averages, fp, ensure_ascii=False)
 
-        logger.info(os.path.abspath(f"{self.output_path}.json"))
+        logger.info(
+            "Results exported to %s", os.path.abspath(f"{self.output_path}.json")
+        )
+
+        # Add results to the database
+        self._add_results_to_db(results)
 
     def _add_results_to_db(self, results: dict[str, Any]):
         """Calls a webhook to add the results to the database."""
         logger.info("Adding the results to the database")
-        # Request to webhook to add the results to the database
-        webhook_url = f"https://{API_HOST}/api/webhook/job"
-        logger.info("Sending request to %s", webhook_url)
-        average = self._calculate_average_score(results)
-        logger.info("Average score for job with ID %s: %s", self.job_id, average)
+
+        # Calculate average scores
+        average_scores = self._calculate_average_scores(results)  # Returns a dictionary
+        logger.info(
+            "Average scores for job with ID %s: %s", self.job_id, average_scores
+        )
 
         if API_HOST == "none":
             logger.warning("API_HOST is not set, skipping status update")
             return
 
+        # Prepare payload
+        payload = {
+            "id": self.job_id,
+            "results": json.dumps(results, ensure_ascii=False),
+            "status": JobStatus.COMPLETED.value,
+            "average": average_scores,  # Pass the dictionary
+        }
+
+        # Send request
+        webhook_url = f"https://{API_HOST}/api/webhook/job"
+        logger.info("Sending request to %s", webhook_url)
         response = requests.post(
             webhook_url,
-            json={
-                "id": self.job_id,
-                "results": json.dumps(results, ensure_ascii=False),
-                "status": JobStatus.COMPLETED.value,
-                "average": average,
-            },
+            json=payload,
             headers={
                 "Content-Type": "application/json",
                 "x-server-token": SERVER_TOKEN,
@@ -219,7 +292,6 @@ class EvaluatationJob:
             return
 
         logger.info("Updating the status of the job to %s", status.value)
-        # Request to webhook to update the status of the job
         webhook_url = f"https://{API_HOST}/api/webhook/job"
         logger.info("Sending request to %s", webhook_url)
         response = requests.post(
