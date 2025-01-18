@@ -28,7 +28,5 @@ COPY . .
 ENV API_KEY $$API_KEY
 ENV SERVER_TOKEN $$SERVER_TOKEN
 ENV PATH="/opt/venv/bin:$PATH"
-ENV GCLOUD_BUCKET=
-ENV API_HOST=
 
 CMD ["python", "-u", "/app/run.py"]

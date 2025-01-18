@@ -6,8 +6,7 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment  # type: ignore
 from lm_eval.api.registry import register_aggregation, register_metric
 
-import rouge_scorer  # type: ignore
-
+from . import rouge_scorer
 
 import nltk
 import evaluate

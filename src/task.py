@@ -87,7 +87,9 @@ class LMHDataset:
         self.name = task.pop("name")
         self.data = task.pop("data")
         self.category_id = task.pop("category")
-        self.metric = task.pop("metric")
+        self.metric = task["metric_list"][0]
+        if not self.metric:
+            print(f"Skipping task {self.name} as it has no metric.")
         self.task_id = task.pop("task")
 
         # Remaining fields
