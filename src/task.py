@@ -120,6 +120,11 @@ class LMHDataset:
 
     def _export_data(self, split: str) -> None:
         """Export the data for a given split to a JSON file."""
+        # A static check to ensure `output` is a string
+        for example in self.data.get(split, []):
+            if isinstance(example.get("output"), list):
+                example["output"] = example["output"][0]
+
         if self.data.get(split):
             with open(
                 f"{self.directory}/{self.file_name}_{split}.json", "w", encoding="utf8"
@@ -154,9 +159,11 @@ class LMHDataset:
         doc_to_text = "{{input}}"
         if self.data["test"][0].get("instruction"):
             doc_to_text = "{{instruction}}\n{{input}}"
+
         doc_to_target = "output"
         if isinstance(self.data["test"][0].get("output"), list):
             doc_to_target = " " + "{{output[0]}}"
+
         data_files = {}
         # if self.data.get("train"):
         # data_files["train"] = f"{self.directory}/{self.file_name}_train.json"
