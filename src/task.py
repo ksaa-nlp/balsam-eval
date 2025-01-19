@@ -3,9 +3,11 @@
 import json
 import logging
 import os
-from typing import Any
-
 import yaml
+from typing import Any
+from pathlib import Path
+
+
 from google.cloud import storage
 
 from . import utils
@@ -206,7 +208,9 @@ class LMHDataset:
                 fp.write(yaml.dump(yaml_data))
             with open(f"{self.directory}/utils.py", "w", encoding="utf8") as f:
                 # Copy the contents of the utils.py file
-                with open("src/utils.py", "r", encoding="utf8") as u:
+                with open(
+                    f"{Path(__file__).parent.absolute()}/utils.py", "r", encoding="utf8"
+                ) as u:
                     f.write(u.read())
             logger.info("Exported task to %s.yaml", self.name)
         else:
