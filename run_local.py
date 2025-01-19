@@ -48,10 +48,6 @@ if __name__ == "__main__":
 
     # Initialize the evaluation job
     for category, t in tasks.items():
-
-        if category != "Question Answering":
-            continue
-
         print(f"Running evaluation for category: {category}")
         print(f"Total tasks: {len(t)}")
         try:
@@ -61,6 +57,7 @@ if __name__ == "__main__":
                 api_key=os.getenv("API_KEY", "123"),
                 adapter=Adapter.from_str(os.environ["ADAPTER"]),
                 model=os.environ["MODEL"],
+                task_id=category,
                 output_path=category,
             )
             job.run()

@@ -89,6 +89,7 @@ if __name__ == "__main__":
                 api_key=os.getenv("API_KEY", "openai-api-key"),
                 adapter=Adapter.from_str(os.environ["ADAPTER"]),
                 model=os.environ["MODEL"],
+                task_id=task,
                 output_path=f"{task}",
             )
             job.run()

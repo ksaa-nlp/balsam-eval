@@ -84,6 +84,7 @@ class EvaluatationJob:
     def __init__(
         self,
         tasks: List[str],
+        task_id: str,
         adapter: Adapter,
         model: str,
         api_key: str,
@@ -126,6 +127,7 @@ class EvaluatationJob:
             os.environ["OPENAI_API_KEY"] = api_key
 
         self.tasks = tasks
+        self.task_id = task_id
         self.adapter = adapter
         self.job_id = os.getenv("JOB_ID")
         self.output_path = output_path or "results"
@@ -265,6 +267,7 @@ class EvaluatationJob:
         # Prepare payload
         payload = {
             "id": self.job_id,
+            "taskId": self.task_id,
             "results": json.dumps(results, ensure_ascii=False),
             "status": JobStatus.COMPLETED.value,
             "average": average_scores,  # Pass the dictionary
