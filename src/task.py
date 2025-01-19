@@ -8,8 +8,10 @@ from typing import Any
 import yaml
 from google.cloud import storage
 
+from . import utils
+
 ValidationError = {
-    "missing_split": "Expected 'test' or 'validation' keys in the data.",
+    "missing_split": "Expected 'test' or 'dev' keys in the data.",
     "missing_key": "Expected 'instruction', 'input', and 'output' keys in the split.",
 }
 
@@ -125,12 +127,12 @@ class LMHDataset:
 
     def validate(self) -> None:
         """Validate the task."""
-        # Check that the data contains either a test or validation split.
+        # Check that the data contains either a test or dev split.
         # One of these is required for the task to be valid.
-        if not self.data.get("test") and not self.data.get("validation"):
-            raise ValueError("Expected 'test' or 'validation' keys in the data.")
+        if not self.data.get("test") and not self.data.get("dev"):
+            raise ValueError("Expected 'test' or 'dev' keys in the data.")
         # Check the splits for the required keys
-        for split in ["train", "validation", "test"]:
+        for split in ["train", "dev", "test"]:
             if self.data.get(split):
                 for example in self.data[split]:
                     if any(key not in example for key in ["input", "output"]):
@@ -143,7 +145,7 @@ class LMHDataset:
         """
         self.validate()
         # Write a JSON file for each split
-        for split in ["train", "validation", "test"]:
+        for split in ["train", "dev", "test"]:
             self._export_data(split)
         # We know at this point that the data is valid
         # and each split has the required keys so we can proceed.
@@ -156,10 +158,8 @@ class LMHDataset:
         data_files = {}
         # if self.data.get("train"):
         # data_files["train"] = f"{self.directory}/{self.file_name}_train.json"
-        if self.data.get("validation"):
-            data_files["validation"] = (
-                f"{self.directory}/{self.file_name}_validation.json"
-            )
+        if self.data.get("dev"):
+            data_files["dev"] = f"{self.directory}/{self.file_name}_dev.json"
         if self.data.get("test"):
             data_files["test"] = f"{self.directory}/{self.file_name}_test.json"
 
@@ -168,7 +168,7 @@ class LMHDataset:
             "dataset_path": "json",
             "dataset_name": None,
             "test_split": "test" if self.data.get("test") else None,
-            "validation_split": "validation" if self.data.get("validation") else None,
+            "validation_split": "dev" if self.data.get("dev") else None,
             "doc_to_text": doc_to_text,
             "doc_to_target": doc_to_target,
             "output_type": "generate_until",
@@ -183,110 +183,31 @@ class LMHDataset:
             yaml_data = {
                 "task": self.name,
                 "dataset_path": "json",
-                "dataset_name": "null",
-                "test_split": {"test" if self.data.get("test") else "null"},
+                "dataset_name": None,
+                "test_split": "test" if self.data.get("test") else None,
+                "validation_split": "dev" if self.data.get("dev") else None,
                 "doc_to_text": doc_to_text,
                 "doc_to_target": doc_to_target,
-                "process_results": "!function utils_morph.process_results",
+                "process_results": utils.process_results,
                 "output_type": "generate_until",
                 "metric_list": [
                     {
-                        "metric": self.metric,
-                        "aggregation": "!function utils_morph.custom_rouge_agg",
+                        "metric": self.metric["metric"],
+                        "aggregation": utils.custom_rouge_agg,
                         "higher_is_better": True,
                     }
                 ],
                 "dataset_kwargs": {"data_files": data_files},
             }
 
-            process_results = """
-import re
-import nltk
-import evaluate
-import pyarabic.araby as araby
-import unicodedata
-import numpy as np
-import sys
-from scipy.optimize import linear_sum_assignment
-from lm_eval.api.registry import register_aggregation, register_metric
-
-# Download necessary resources
-nltk.download('punkt_tab')
-
-# Load Rouge evaluator from `evaluate` library
-rouge = evaluate.load('rouge')
-
-# Punctuation table
-PUNCT_TABLE = dict.fromkeys(i for i in range(sys.maxunicode)
-                            if unicodedata.category(chr(i)).startswith('P'))
-ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
-others = '''`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!”…“–ـ'''
-ALL_PUNCTUATIONS += ''.join([o for o in others if o not in ALL_PUNCTUATIONS])
- 
-def prepare_texts(text, change_curly_braces):
-
-    # 1. put spaces before and after each punctuation
-    text = re.sub('([' + ALL_PUNCTUATIONS + '])', ' \\1 ', text)
-
-    # 2. change all {} to []
-    if change_curly_braces:
-        text = text.replace('{', '[').replace('}', ']')
-
-    return text
-def rouge1_scores(predictions, references):  # This is a passthrough function
-
-    return (predictions[0], references[0])
-
-
-def custom_rouge_agg(items):
-    tokenizer = lambda x: x.split()
-    refs = list(zip(*items))[0]
-    preds = list(zip(*items))[1]
-    # Preprocess the texts
-    refs = [prepare_texts(ref, change_curly_braces=False).strip() for ref in refs]
-    preds = [prepare_texts(pred, change_curly_braces=True).strip() for pred in preds]
-    # Initialize sums for each ROUGE score
-    rouge1= 0.0
-    rouge2 = 0.0
-    rougeL= 0.0
-    rougeLsum = 0.0
-    
-    for i in range(len(refs)):
-        # Compute ROUGE scores
-        score = rouge.compute(references=[refs[i]], predictions=[preds[i]], tokenizer=tokenizer)
-        
-        # Aggregate each type of ROUGE score
-        rouge1 += score["rouge1"]
-        rouge2 += score["rouge2"]
-        rougeL += score["rougeL"]
-        rougeLsum += score["rougeLsum"]
-
-    count = len(refs)
-    avg_rouge1 = rouge1 / count
-    avg_rouge2 = rouge2 / count
-    avg_rougeL = rougeL / count
-    avg_rougeLsum = rougeLsum / count
-
-    return {
-        "rouge1": avg_rouge1,
-        "rouge2": avg_rouge2,
-        "rougeL": avg_rougeL,
-        "rougeLsum": avg_rougeLsum,
-    }
-    
-def process_results(doc, results):
-    preds, golds = results[0], doc["output"]
-    # rouge_scores = evaluate_rouge_metric(preds, golds)
-    # print(f"ROUGE Scores: {rouge_scores}")
-    return {'rouge':[golds, preds]}
-    	"""
-
             with open(
                 f"{self.directory}/{self.file_name}.yaml", "w", encoding="utf8"
             ) as fp:
                 fp.write(yaml.dump(yaml_data))
-            with open(f"{self.directory}/utils_morph.py", "w", encoding="utf8") as f:
-                f.write(process_results)
+            with open(f"{self.directory}/utils.py", "w", encoding="utf8") as f:
+                # Copy the contents of the utils.py file
+                with open("src/utils.py", "r", encoding="utf8") as u:
+                    f.write(u.read())
             logger.info("Exported task to %s.yaml", self.name)
         else:
             with open(

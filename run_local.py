@@ -11,7 +11,7 @@ from src.task import LMHDataset
 load_dotenv()
 
 TEMP_DIR = ".temp"
-TASKS_DIR = "tasks"
+TASKS_DIR = ".tasks"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 if __name__ == "__main__":
@@ -48,6 +48,10 @@ if __name__ == "__main__":
 
     # Initialize the evaluation job
     for category, t in tasks.items():
+
+        if category != "Question Answering":
+            continue
+
         print(f"Running evaluation for category: {category}")
         print(f"Total tasks: {len(t)}")
         try:

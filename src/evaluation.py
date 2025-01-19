@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_HOST = os.getenv("API_HOST", "none")
+API_HOST = os.getenv("API_HOST")
 BASE_URL = os.getenv("BASE_URL", "none")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN", "none")
 
@@ -258,7 +258,7 @@ class EvaluatationJob:
             "Average scores for job with ID %s: %s", self.job_id, average_scores
         )
 
-        if API_HOST == "none":
+        if not API_HOST:
             logger.warning("API_HOST is not set, skipping status update")
             return
 
@@ -287,7 +287,7 @@ class EvaluatationJob:
 
     def _update_status(self, status: JobStatus, error_message: Optional[str] = None):
         """Update the status of the job."""
-        if API_HOST == "none":
+        if not API_HOST:
             logger.warning("API_HOST is not set, skipping status update")
             return
 
