@@ -111,7 +111,7 @@ class EvaluatationJob:
 
             elif adapter in (Adapter.OPENAI_CHAT, Adapter.LOCAL_CHAT_COMPLETIONS):
                 self.model_args = {
-                    "base_url": base_url + "/v1/chat/completions",
+                    "base_url": base_url,
                     "model": model,
                 }
 
