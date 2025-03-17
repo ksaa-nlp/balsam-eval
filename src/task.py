@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 from google.cloud import storage
-
+from . import bleu_score
 from . import utils
 
 ValidationError = {
@@ -222,6 +222,38 @@ class LMHDataset:
                 ) as u:
                     f.write(u.read())
             logger.info("Exported task to %s.yaml", self.name)
+            
+        elif "bleu" in self.metric.lower():
+            yaml_data = {
+                "task": self.name,
+                "dataset_path": "json",
+                "dataset_name": None,
+                "test_split": "test" if self.data.get("test") else None,
+                # "validation_split": "dev" if self.data.get("dev") else None,
+                "doc_to_text": doc_to_text,
+                "doc_to_target": doc_to_target,
+                "process_results": bleu_score.process_results,
+                "output_type": "generate_until",
+                "generation_kwargs": {"do_sample": False, "until": "<|endoftext|>"},
+                "metric_list": [
+                    {
+                        "metric": self.metric, 
+                        "aggregation": bleu_score.custem_bleu_aggregation,
+                        "higher_is_better": True,
+                    }
+                ],
+                "dataset_kwargs": {"data_files": data_files},
+            }
+
+            with open(f"{self.directory}/{self.file_name}.yaml", "w", encoding="utf8") as fp:
+                fp.write(yaml.dump(yaml_data))
+
+            with open(f"{self.directory}/bleu_score.py", "w", encoding="utf8") as f:
+                # Copy the contents of the utils.py file
+                with open(f"{Path(__file__).parent.absolute()}/bleu_score.py", "r", encoding="utf8") as u:
+                    f.write(u.read())
+
+            logger.info("Exported task to %s.yaml", self.name)        
         else:
             with open(
                 f"{self.directory}/{self.file_name}.yaml", "w", encoding="utf8"
