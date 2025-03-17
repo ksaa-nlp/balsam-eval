@@ -181,6 +181,7 @@ class LMHDataset:
             "doc_to_text": doc_to_text,
             "doc_to_target": doc_to_target,
             "output_type": "generate_until",
+            "generation_kwargs":{"do_sample": False, "until":"<|endoftext|>"},
             "dataset_kwargs": {
                 "data_files": data_files,
             },
@@ -199,6 +200,7 @@ class LMHDataset:
                 "doc_to_target": doc_to_target,
                 "process_results": utils.process_results,
                 "output_type": "generate_until",
+                "generation_kwargs":{"do_sample": False, "until":"<|endoftext|>"},
                 "metric_list": [
                     {
                         "metric": self.metric["metric"],
