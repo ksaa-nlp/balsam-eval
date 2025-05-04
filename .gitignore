@@ -35,3 +35,4 @@ tasks
 _temp
 .temp
 scripts/datasets
+.history
