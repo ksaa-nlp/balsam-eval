@@ -181,7 +181,7 @@ class LMHDataset:
             "doc_to_text": doc_to_text,
             "doc_to_target": doc_to_target,
             "output_type": "generate_until",
-            "generation_kwargs":{"do_sample": False, "until":"<|endoftext|>"},
+            "generation_kwargs": {"do_sample": False, "until": "<|endoftext|>"},
             "dataset_kwargs": {
                 "data_files": data_files,
             },
@@ -200,7 +200,7 @@ class LMHDataset:
                 "doc_to_target": doc_to_target,
                 "process_results": utils.process_results,
                 "output_type": "generate_until",
-                "generation_kwargs":{"do_sample": False, "until":"<|endoftext|>"},
+                "generation_kwargs": {"do_sample": False, "until": "<|endoftext|>"},
                 "metric_list": [
                     {
                         "metric": self.metric["metric"],
@@ -222,8 +222,8 @@ class LMHDataset:
                 ) as u:
                     f.write(u.read())
             logger.info("Exported task to %s.yaml", self.name)
-            
-        elif "bleu" in self.metric.lower():
+
+        elif "bleu" in self.metric["metric"].lower():
             yaml_data = {
                 "task": self.name,
                 "dataset_path": "json",
@@ -237,7 +237,7 @@ class LMHDataset:
                 "generation_kwargs": {"do_sample": False, "until": "<|endoftext|>"},
                 "metric_list": [
                     {
-                        "metric": self.metric, 
+                        "metric": self.metric["metric"],
                         "aggregation": bleu_score.custem_bleu_aggregation,
                         "higher_is_better": True,
                     }
@@ -253,7 +253,7 @@ class LMHDataset:
                 with open(f"{Path(__file__).parent.absolute()}/bleu_score.py", "r", encoding="utf8") as u:
                     f.write(u.read())
 
-            logger.info("Exported task to %s.yaml", self.name)        
+            logger.info("Exported task to %s.yaml", self.name)
         else:
             with open(
                 f"{self.directory}/{self.file_name}.yaml", "w", encoding="utf8"
