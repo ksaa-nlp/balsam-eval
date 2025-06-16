@@ -9,7 +9,6 @@ WORKDIR /app
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY pyproject.toml ./pyproject.toml
-COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir ./
 # TODO unfortunately, the following does not work since hard dependencies on
 # torch -> nvidia in lm_eval imports
