@@ -8,17 +8,10 @@ from lm_eval.api.registry import register_aggregation, register_metric
 
 from . import rouge_scorer
 
-import nltk
 import evaluate
 import pyarabic.araby as araby
 import unicodedata
-import numpy as np
 import sys
-from scipy.optimize import linear_sum_assignment
-from lm_eval.api.registry import register_aggregation, register_metric
-
-# Download necessary resources
-nltk.download("punkt_tab")
 
 # Load Rouge evaluator from `evaluate` library
 rouge = evaluate.load("rouge")
@@ -71,16 +64,18 @@ def rouge_aggregation(items):
     Aggregate the Rouge scores across the dataset for all types of ROUGE.
     """
     # print("self.name",self.name)
-    tokenizer = lambda x: x.split()
+    def tokenizer(x): return x.split()
     refs = list(zip(*items))[0]
     preds = list(zip(*items))[1]
     # Preprocess the texts
     refs = [
-        prepare_texts(ref, change_curly_braces=False, remove_diactrics=True).strip()
+        prepare_texts(ref, change_curly_braces=False,
+                      remove_diactrics=True).strip()
         for ref in refs
     ]
     preds = [
-        prepare_texts(pred, change_curly_braces=True, remove_diactrics=True).strip()
+        prepare_texts(pred, change_curly_braces=True,
+                      remove_diactrics=True).strip()
         for pred in preds
     ]
 
@@ -214,7 +209,8 @@ def _align_bags(predicted, gold):
     for gold_index, gold_item in enumerate(gold):
         for pred_index, pred_item in enumerate(predicted):
             if _match_answers_if_present(gold_item, pred_item):
-                scores[gold_index, pred_index] = _compute_f1(pred_item, gold_item)
+                scores[gold_index, pred_index] = _compute_f1(
+                    pred_item, gold_item)
     row_ind, col_ind = linear_sum_assignment(-scores)
 
     max_scores = np.zeros([max(len(gold), len(predicted))])

@@ -1,15 +1,7 @@
 import re
-import nltk
 import evaluate
-import pyarabic.araby as araby
 import unicodedata
-import numpy as np
 import sys
-from scipy.optimize import linear_sum_assignment
-from lm_eval.api.registry import register_aggregation, register_metric
-
-# Download necessary resources
-nltk.download("punkt_tab")
 
 # Load Rouge evaluator from `evaluate` library
 rouge = evaluate.load("rouge")
@@ -41,12 +33,14 @@ def rouge1_scores(predictions, references):  # This is a passthrough function
 
 
 def custom_rouge_agg(items):
-    tokenizer = lambda x: x.split()
+    def tokenizer(x): return x.split()
     refs = list(zip(*items))[0]
     preds = list(zip(*items))[1]
     # Preprocess the texts
-    refs = [prepare_texts(ref, change_curly_braces=False).strip() for ref in refs]
-    preds = [prepare_texts(pred, change_curly_braces=True).strip() for pred in preds]
+    refs = [prepare_texts(ref, change_curly_braces=False).strip()
+            for ref in refs]
+    preds = [prepare_texts(pred, change_curly_braces=True).strip()
+             for pred in preds]
     # Initialize sums for each ROUGE score
     rouge1 = 0.0
     rouge2 = 0.0

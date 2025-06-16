@@ -1,64 +1,37 @@
 """This module contains the code for running an evaluation job."""
+# from . import gemini_adapter
 
 import json
 import logging
 import os
 from enum import Enum
 import traceback
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
+import lm_eval
+import requests
 
-import lm_eval  # type: ignore
-import requests  # type: ignore
+# flake8: noqa
+from src.gemini_adapter import GeminiLM
 
 # This import is necessary for the aixplain adapter to work.
 from . import aixplain
 
 # This import is necessary for the rouge metric to work.
 from . import metric
-
 from dotenv import load_dotenv
 
 load_dotenv()
 
 API_HOST = os.getenv("API_HOST")
-BASE_URL = os.getenv("BASE_URL", "none")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN", "none")
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# disable ssl warning
-# requests.packages.urllib3.disable_warnings()
+# More robust request handling with explicit timeout
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
-    method="POST", url=url, timeout=timeout, verify=False, **kwargs
+    method="POST", url=url, timeout=timeout, **kwargs
 )
-
-
-class Adapter(str, Enum):
-    """The adapter to use for the evaluation job."""
-
-    AIXPLAIN = "aixplain"
-    # OPENAI = "openai-completions"
-    OPENAI_CHAT = "openai-chat-completions"
-    # LOCAL_COMPLETIONS = "local-completions"
-    LOCAL_CHAT_COMPLETIONS = "local-chat-completions"
-    GGUF = "gguf"
-
-    @staticmethod
-    def from_str(model: str) -> "Adapter":
-        if model == "aixplain":
-            return Adapter.AIXPLAIN
-        elif model == "openai-chat-completions":
-            return Adapter.OPENAI_CHAT
-        # elif model == "openai-completions":
-        #     return Adapter.OPENAI
-        # elif model == "local-completions":
-        #     return Adapter.LOCAL_COMPLETIONS
-        elif model == "local-chat-completions":
-            return Adapter.LOCAL_CHAT_COMPLETIONS
-        elif model == "gguf":
-            return Adapter.GGUF
-        raise ValueError(f"Model {model} is not supported")
 
 
 class JobStatus(Enum):
@@ -75,58 +48,49 @@ class EvaluatationJob:
     as an environment variable before running it.
 
     Args:
-        base_url (`str`): The base URL of the model.
         tasks (`List[str]`): The tasks to evaluate, these names correspond
         to YAML files that should exist in the current working directory.
-        api_key (`str`): The API key to use for calling the model endpoint.
     """
 
     def __init__(
         self,
         tasks: List[str],
         task_id: str,
-        adapter: Adapter,
-        model: str,
-        api_key: str,
-        base_url: Optional[str] = None,
+        model_args: dict[str, Any],
+        adapter: Literal[
+            "local-completions",
+            "local-chat-completions",
+            "openai-completions",
+            "openai-chat-completions",
+            "anthropic-chat",
+            "anthropic-chat-completions",
+            "anthropic-completions",
+            "dummy",
+            "gguf",
+            "ggml",
+            "hf-audiolm-qwen",
+            "hf-multimodal",
+            "hf-auto",
+            "steered",
+            "hf",
+            "huggingface",
+            "watsonx_llm",
+            "mamba_ssm",
+            "nemo_lm",
+            "sparseml",
+            "deepsparse",
+            "neuronx",
+            "ipex",
+            "openvino",
+            "sglang",
+            "textsynth",
+            "vllm",
+            "vllm-vlm"
+        ] = "local-chat-completions",
         output_path: Optional[str] = None,
     ):
-        self.model_args = {}
-
-        if adapter == Adapter.AIXPLAIN:
-            self.model_args = {"model": model}
-            os.environ["TEAM_API_KEY"] = api_key
-
-        elif adapter in (
-            Adapter.OPENAI_CHAT,
-            Adapter.LOCAL_CHAT_COMPLETIONS,
-        ):
-            if base_url is None or model is None:
-                raise ValueError(
-                    "The base URL must be provided for the OpenAI adapter."
-                )
-            # Check if the base URL ends with a slash
-            if base_url[-1] == "/":
-                base_url = base_url[:-1]
-
-            elif adapter in (Adapter.OPENAI_CHAT, Adapter.LOCAL_CHAT_COMPLETIONS):
-                self.model_args = {
-                    "base_url": base_url,
-                    "model": model,
-                }
-
-            os.environ["OPENAI_API_KEY"] = api_key
-
-        elif adapter == Adapter.GGUF:
-            if base_url is None or model is None:
-                raise ValueError("The base URL must be provided for the GGUF adapter.")
-            self.model_args = {
-                "base_url": base_url,
-                "model": model,
-            }
-            os.environ["OPENAI_API_KEY"] = api_key
-
-        self.tasks = tasks
+        self.model_args = model_args or {}
+        self.tasks: List[str] = tasks
         self.task_id = task_id
         self.adapter = adapter
         self.job_id = os.getenv("JOB_ID")
@@ -140,19 +104,12 @@ class EvaluatationJob:
                 model=self.adapter,
                 model_args=self.model_args,
                 tasks=self.tasks,
-                verbosity="ERROR",
-                apply_chat_template=(
-                    True
-                    if self.adapter
-                    in (Adapter.OPENAI_CHAT, Adapter.LOCAL_CHAT_COMPLETIONS)
-                    else False
-                ),
-                # apply_chat_template=True,
-                # We set the include path to the current directory,
-                # so that the script can find the data files.
+                apply_chat_template=True,
+                # apply_chat_template=False,
                 task_manager=lm_eval.tasks.TaskManager(include_path=".temp"),
             )
             logger.info("Exporting results to %s.json", self.output_path)
+
             # Export the results to a file, and add them to the database
             self._export_results(results)
 
@@ -228,7 +185,8 @@ class EvaluatationJob:
             return {key: 0.0 for key in total_scores}
 
         # Calculate averages for all scores
-        average_scores = {key: total_scores[key] / total_tasks for key in total_scores}
+        average_scores = {
+            key: total_scores[key] / total_tasks for key in total_scores}
 
         logger.info("Average Scores: %s", average_scores)
         return average_scores
@@ -244,7 +202,8 @@ class EvaluatationJob:
             json.dump(results_with_averages, fp, ensure_ascii=False)
 
         logger.info(
-            "Results exported to %s", os.path.abspath(f"{self.output_path}.json")
+            "Results exported to %s", os.path.abspath(
+                f"{self.output_path}.json")
         )
 
         # Add results to the database
@@ -255,7 +214,8 @@ class EvaluatationJob:
         logger.info("Adding the results to the database")
 
         # Calculate average scores
-        average_scores = self._calculate_average_scores(results)  # Returns a dictionary
+        average_scores = self._calculate_average_scores(
+            results)  # Returns a dictionary
         logger.info(
             "Average scores for job with ID %s: %s", self.job_id, average_scores
         )

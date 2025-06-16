@@ -212,43 +212,18 @@ class LMHDataset:
         self._copy_dependency("bleu_score.py")
 
     def _export_accuracy(self, yaml_data: dict[str, Any]) -> None:
-
-        # Add instruction to just output the letter of the answer
-        if not yaml_data.get("fewshot_config"):
-            yaml_data["fewshot_config"] = {}
-
-        # Add instructions to the doc_to_text field to ensure model outputs just the letter
-        original_doc_to_text = yaml_data.get(
-            "doc_to_text", "{{instruction}}\n{{input}}")
-
-        yaml_data["doc_to_text"] = (
-            f"{original_doc_to_text}\n\n"
-            # Arabic instructions
-            "يرجى اتباع الإرشادات التالية عند الإجابة:\n"
-            "- إذا كان السؤال من نوع اختيار من متعدد، فأجب فقط بالحرف المقابل للإجابة الصحيحة (A أو B أو C أو D) بدون أي شرح أو تفسير.\n"
-            "- إذا كان السؤال من نوع صح أو خطأ (نعم أو لا)، فأجب فقط بكلمة 'صح' أو 'خطأ' بدون أي شرح إضافي.\n"
-            "- لا تُضِف أي تعليقات أو تفسيرات خارج المطلوب.\n\n"
-            # English instructions (optional)
-            "Please follow these instructions when answering:\n"
-            "- If the question is multiple choice, respond **only** with the letter of the correct answer (A, B, C, or D) — no explanation.\n"
-            "- If the question is true/false (yes or no), respond **only** with 'True' or 'False' (or 'Yes' / 'No') — no explanation.\n"
-            "- Do not include any extra comments, reasoning, or justifications in your response."
-        )
-
-        # Keep using generate_until output type for accuracy
+        choices = self._determine_choices()
         yaml_data.update({
-            # Removed doc_to_choice as we are using generate_until instead of multiple_choice
-            "output_type": "generate_until",  # Keep using generate_until
+            "doc_to_choice": choices,
+            "output_type": "multiple_choice",
             "process_results": accuracy_score.process_results,
             "metric_list": [{
                 "metric": self.metric['metric'] if isinstance(self.metric, dict) else self.metric,
                 "aggregation": accuracy_score.custom_accuracy_aggregation,
                 "higher_is_better": True,
             }],
-            # Keep the generation_kwargs that would be removed in the original implementation
-            "generation_kwargs": {"do_sample": False, "until": "<|endoftext|>", "max_new_tokens": 10},
         })
-
+        yaml_data.pop("generation_kwargs", None)
         self._write_yaml(yaml_data, suffix="Accuracy")
         self._copy_dependency("accuracy_score.py")
 
@@ -262,3 +237,18 @@ class LMHDataset:
         src = Path(__file__).parent / filename
         dst = Path(self.directory) / filename
         dst.write_text(src.read_text(encoding="utf8"), encoding="utf8")
+
+    def _determine_choices(self) -> list[str]:
+        first_example = next(
+            (self.data[split][0]
+             for split in ["test", "dev"] if self.data.get(split)), None
+        )
+        if not first_example:
+            return ["A", "B", "C", "D"]
+        output = first_example.get("output")
+        if isinstance(output, list):
+            if output[0] in {"نعم", "لا"}:
+                return ["نعم", "لا"]
+            if output[0] in {"True", "False", "Yes", "No"}:
+                return ["Yes", "No"]
+        return ["A", "B", "C", "D"]

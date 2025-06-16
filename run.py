@@ -5,7 +5,7 @@ import os
 
 import requests
 
-from src.evaluation import Adapter, EvaluatationJob
+from src.evaluation import EvaluatationJob
 from src.task import LMHDataset, download_dataset_from_gcs
 
 
@@ -87,7 +87,7 @@ if __name__ == "__main__":
                 base_url=os.environ["BASE_URL"],
                 tasks=[dataset.name for dataset in _datasets],
                 api_key=os.getenv("API_KEY", "openai-api-key"),
-                adapter=Adapter.from_str(os.environ["ADAPTER"]),
+                adapter=os.environ["ADAPTER"],
                 model=os.environ["MODEL"],
                 task_id=task,
                 output_path=f"{task}",

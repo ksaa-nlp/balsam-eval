@@ -4,7 +4,7 @@ import os
 import json
 from dotenv import load_dotenv
 
-from src.evaluation import Adapter, EvaluatationJob
+from src.evaluation import EvaluatationJob
 from src.task import LMHDataset
 
 
@@ -51,14 +51,33 @@ if __name__ == "__main__":
         print(f"Running evaluation for category: {category}")
         print(f"Total tasks: {len(t)}")
         try:
+            model_args = {}
+
+            base_rul = os.getenv("BASE_URL")
+            if base_rul:
+                model_args["base_url"] = base_rul
+            api_key = os.getenv("API_KEY")
+            if api_key:
+                model_args["api_key"] = api_key
+                os.environ["OPENAI_API_KEY"] = api_key
+            max_tokens = os.getenv("MAX_TOKENS")
+            if max_tokens:
+                model_args["max_tokens"] = int(max_tokens)
+            temperature = os.getenv("TEMPERATURE")
+            if temperature:
+                model_args["temperature"] = float(temperature)
+            model_name = os.getenv("MODEL")
+            if model_name:
+                model_args["model"] = model_name
+            else:
+                raise ValueError("Model name is required")
+
             job = EvaluatationJob(
-                base_url=os.environ["BASE_URL"],
                 tasks=t,
-                api_key=os.getenv("API_KEY", "123"),
-                adapter=Adapter.from_str(os.environ["ADAPTER"]),
-                model=os.environ["MODEL"],
+                adapter=os.getenv("ADAPTER", "local-chat-completions"),
                 task_id=category,
                 output_path=category,
+                model_args=model_args,
             )
             job.run()
         except Exception as e:

@@ -1,16 +1,18 @@
 [project]
 name = "balsam-lm-evaluation"
 version = "0.1.0"
+requires-python = ">=3.9,<4"
 dependencies = [
-  "lm-eval@git+https://github.com/EleutherAI/lm-evaluation-harness@v0.4.5",
-  "lm-eval[openai]@git+https://github.com/EleutherAI/lm-evaluation-harness@v0.4.5",
-  "lm-eval[api]@git+https://github.com/EleutherAI/lm-evaluation-harness@v0.4.5",
-  "aixplain==0.2.12",
-  "pyyaml==6.0.1",
-  "google-cloud-storage==2.16.0",
-  "six==1.16.0",
+  "lm-eval@git+https://github.com/EleutherAI/lm-evaluation-harness@v0.4.8",
+  "lm-eval[openai]@git+https://github.com/EleutherAI/lm-evaluation-harness@v0.4.8",
+  "lm-eval[api]@git+https://github.com/EleutherAI/lm-evaluation-harness@v0.4.8",
+  "aixplain==0.2.29",
+  "pyyaml==6.0.2",
+  "google-cloud-storage==3.1.0",
+  "six==1.17.0",
   "nltk==3.9.1",
   "pyarabic==0.6.15",
+  "google-generativeai (>=0.8.5,<0.9.0)",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +22,10 @@ dev = [
   "yapf",
   "mypy",
   "pylint",
+  "mypy",
+  "pytest-cov",
+  "pylint",
+  "setuptools"
 ]
 
 [tool.pytest.ini_options]
