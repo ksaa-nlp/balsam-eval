@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from enum import Enum
+import re
 import traceback
 from typing import Any, List, Literal, Optional
 import lm_eval
@@ -94,7 +95,10 @@ class EvaluatationJob:
         self.task_id = task_id
         self.adapter = adapter
         self.job_id = os.getenv("JOB_ID")
-        self.output_path = output_path or "results"
+        
+        sanitized_path = re.sub(
+            r"\s", "_", (output_path or "results").lower()).replace(".", "_")
+        self.output_path = sanitized_path
 
     def run(self):
         """Run a simple evaluation job."""
