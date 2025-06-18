@@ -121,9 +121,9 @@ class EvaluatationJob:
             # Configure your LLM judge
             model_configs = [
                 ModelConfig(
-                    name="gemini-2.5-flash-preview-04-17",
+                    name=os.getenv("JUDGE_MODEL", "gemini"),
                     provider="gemini",
-                    api_key="AIzaSyBBbsgoaZu3muj0Y8iTIN7odDAIXfdVI_g"
+                    api_key=os.getenv("JUDGE_API_KEY")
                 )
             ]
 
