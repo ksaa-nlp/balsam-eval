@@ -246,7 +246,7 @@ class LMHDataset:
                 "higher_is_better": True,
             }],
             # Keep the generation_kwargs that would be removed in the original implementation
-            "generation_kwargs": {"do_sample": False, "until": "<|endoftext|>", "max_new_tokens": 10},
+            "generation_kwargs": {"do_sample": False, "until": "<|endoftext|>"},
         })
 
         self._write_yaml(yaml_data, suffix="Accuracy")

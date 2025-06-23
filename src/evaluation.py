@@ -152,71 +152,42 @@ class EvaluatationJob:
     def _calculate_average_scores(self, results: dict[str, Any]) -> dict[str, float]:
         """Calculate the average scores of the model for ROUGE or other metrics."""
         total_scores = {}
-        total_tasks = 0
+        task_counts = {}  # Track how many tasks contribute to each metric
 
-        for task in results.get("configs", {}):
-            # Extract metrics for the current task
-            metrics = [
-                metric["metric"]
-                for metric in results["configs"][task].get("metric_list", [])
-            ]
-            logger.info("Metrics found for task %s: %s", task, metrics)
+        for task in results.get("results", {}):
+            task_results = results["results"][task]
 
-            for m in metrics:
-                logger.info("Inspecting metric: %s", m)
-                if m == "rouge":
-                    # Initialize ROUGE metrics if not already initialized
-                    if not total_scores:
-                        total_scores = {
-                            "rouge1": 0.0,
-                            "rouge2": 0.0,
-                            "rougeL": 0.0,
-                            "rougeLsum": 0.0,
-                        }
-                    try:
-                        # Aggregate ROUGE scores
-                        logger.info("for the total score intialization")
-                        logger.info(
-                            "Available keys for task '%s': %s",
-                            task,
-                            list(results["results"][task].keys()),
-                        )
-                        total_scores["rouge1"] += results["results"][task][
-                            "rouge,none"
-                        ]["rouge1"]
-                        total_scores["rouge2"] += results["results"][task][
-                            "rouge,none"
-                        ]["rouge2"]
-                        total_scores["rougeL"] += results["results"][task][
-                            "rouge,none"
-                        ]["rougeL"]
-                        total_scores["rougeLsum"] += results["results"][task][
-                            "rouge,none"
-                        ]["rougeLsum"]
-                    except KeyError as e:
-                        logger.warning(
-                            "ROUGE score '%s' not found in task '%s': %s", m, task, e
-                        )
-                else:
-                    # Handle other metrics
-                    if m not in total_scores:
-                        total_scores[m] = 0.0
-                    try:
-                        total_scores[m] += results["results"][task][f"{m},none"]
-                    except KeyError as e:
-                        logger.warning(
-                            "Metric '%s' not found in task '%s': %s", m, task, e
-                        )
+            # Handle different metric types
+            for key, value in task_results.items():
+                if key.endswith(",none") and not key.endswith("_stderr,none"):
+                    metric_name = key.replace(",none", "")
 
-                total_tasks += 1
+                    if isinstance(value, dict):
+                        # Handle nested metrics like ROUGE
+                        for sub_metric, sub_value in value.items():
+                            if isinstance(sub_value, (int, float)):
+                                full_metric_name = f"{metric_name}_{sub_metric}"
+                                if full_metric_name not in total_scores:
+                                    total_scores[full_metric_name] = 0.0
+                                    task_counts[full_metric_name] = 0
+                                total_scores[full_metric_name] += sub_value
+                                task_counts[full_metric_name] += 1
+                    elif isinstance(value, (int, float)):
+                        # Handle simple metrics like accuracy
+                        if metric_name not in total_scores:
+                            total_scores[metric_name] = 0.0
+                            task_counts[metric_name] = 0
+                        total_scores[metric_name] += value
+                        task_counts[metric_name] += 1
 
-        if total_tasks == 0:
-            logger.error("No tasks found to calculate scores")
-            return {key: 0.0 for key in total_scores}
-
-        # Calculate averages for all scores
-        average_scores = {
-            key: total_scores[key] / total_tasks for key in total_scores}
+        # Calculate averages for all metrics
+        average_scores = {}
+        for metric_name, total_score in total_scores.items():
+            count = task_counts[metric_name]
+            if count > 0:
+                average_scores[metric_name] = total_score / count
+            else:
+                average_scores[metric_name] = 0.0
 
         logger.info("Average Scores: %s", average_scores)
         return average_scores

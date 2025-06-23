@@ -37,3 +37,4 @@ _temp
 scripts/datasets
 .history
 .tasks_temp
+.deepeval
