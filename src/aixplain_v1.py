@@ -95,8 +95,6 @@ please install aixplain via `pip install aixplain`",
 
 @register_model("aixplain")
 class AixplainLM(LM):
-    REQ_CHUNK_SIZE = 20  # TODO: not used
-
     def __init__(
         self,
         batch_size: int = 1,

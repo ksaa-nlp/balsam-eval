@@ -118,18 +118,15 @@ class EvaluatationJob:
             )
             logger.info("Exporting results to %s.json", self.output_path)
 
-            # Configure your LLM judge
-            model_configs = [
-                ModelConfig(
-                    name=os.getenv("JUDGE_MODEL", "gemini"),
-                    provider="gemini",
-                    api_key=os.getenv("JUDGE_API_KEY")
-                )
-            ]
-
             # Initialize LLMJudge
             llm_judge = LLMJudge(
-                model_configs=model_configs,
+                model_configs=[
+                    ModelConfig(
+                        name=os.getenv("JUDGE_MODEL", "gemini"),
+                        provider="gemini",
+                        api_key=os.getenv("JUDGE_API_KEY")
+                    )
+                ],
                 aggregation_method="mean",
                 threshold=0.5
             )

@@ -77,6 +77,26 @@ if __name__ == "__main__":
     print(f"Total categories: {len(categories)}")
     print(categories)
 
+    model_args = {}
+    base_url = os.getenv("BASE_URL")
+    if base_url:
+        model_args["base_url"] = base_url
+    api_key = os.getenv("API_KEY")
+    if api_key:
+        model_args["api_key"] = api_key
+        os.environ["OPENAI_API_KEY"] = api_key
+    max_tokens = os.getenv("MAX_TOKENS")
+    if max_tokens:
+        model_args["max_tokens"] = int(max_tokens)
+    temperature = os.getenv("TEMPERATURE")
+    if temperature:
+        model_args["temperature"] = float(temperature)
+    model_name = os.getenv("MODEL")
+    if model_name:
+        model_args["model"] = model_name
+    else:
+        raise ValueError("Model name is required")
+
     # We're sending all tasks in a category at once to LM Harness
     for category, tasks in categories.items():
         print(f"Running evaluation for category: {category}")
@@ -84,12 +104,10 @@ if __name__ == "__main__":
 
         for task, _datasets in tasks.items():
             job = EvaluatationJob(
-                base_url=os.environ["BASE_URL"],
                 tasks=[dataset.name for dataset in _datasets],
-                api_key=os.getenv("API_KEY", "openai-api-key"),
                 adapter=os.environ["ADAPTER"],
-                model=os.environ["MODEL"],
+                model_args=model_args,
                 task_id=task,
-                output_path=f"{task}",
+                output_path=str(task),
             )
             job.run()
