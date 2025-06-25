@@ -93,12 +93,13 @@ class EvaluatationJob:
             "vllm-vlm"
         ] = "local-chat-completions",
         output_path: Optional[str] = None,
+        job_id: Optional[str] = None
     ):
         self.model_args = model_args or {}
         self.tasks: List[str] = tasks
         self.task_id = task_id
         self.adapter = adapter
-        self.job_id = os.getenv("JOB_ID")
+        self.job_id = job_id or os.getenv("JOB_ID")
 
         sanitized_path = re.sub(
             r"\s", "_", (output_path or "results").lower()).replace(".", "_")
