@@ -1,34 +1,20 @@
 """This module contains the code for running an evaluation job."""
-# from . import gemini_adapter
-
 from statistics import mean
-from tqdm import tqdm
-from typing import Dict, Any, List
 import json
 import logging
-import os
-from enum import Enum
 import re
 import traceback
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal, Optional, Dict
 import lm_eval
 import requests
 
-# flake8: noqa
-from src.gemini_adapter import GeminiLM
+from src.db_operations import JobStatus, add_results_to_db, update_status
 from src.llm_as_a_judge import LLMJudge, ModelConfig
 
-# This import is necessary for the aixplain adapter to work.
-from . import aixplain
 
-# This import is necessary for the rouge metric to work.
-from . import metric
-from dotenv import load_dotenv
-
-load_dotenv()
-
-API_HOST = os.getenv("API_HOST")
-SERVER_TOKEN = os.getenv("SERVER_TOKEN", "none")
+# This import is necessary for the rouge metric to work and for gemini adapter to be available
+from . import metric  # noqa: F401
+from src.gemini_adapter import GeminiLM  # noqa: F401
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -37,13 +23,6 @@ logger.setLevel(logging.INFO)
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
     method="POST", url=url, timeout=timeout, **kwargs
 )
-
-
-class JobStatus(Enum):
-    STARTING = "starting"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
 
 
 class EvaluatationJob:
@@ -63,43 +42,29 @@ class EvaluatationJob:
         task_id: str,
         model_args: dict[str, Any],
         adapter: Literal[
-            "local-completions",
             "local-chat-completions",
-            "openai-completions",
             "openai-chat-completions",
-            "anthropic-chat",
             "anthropic-chat-completions",
-            "anthropic-completions",
-            "dummy",
-            "gguf",
-            "ggml",
-            "hf-audiolm-qwen",
-            "hf-multimodal",
-            "hf-auto",
-            "steered",
-            "hf",
-            "huggingface",
-            "watsonx_llm",
-            "mamba_ssm",
-            "nemo_lm",
-            "sparseml",
-            "deepsparse",
-            "neuronx",
-            "ipex",
-            "openvino",
-            "sglang",
-            "textsynth",
-            "vllm",
-            "vllm-vlm"
+            "gimini"
         ] = "local-chat-completions",
         output_path: Optional[str] = None,
-        job_id: Optional[str] = None
+        job_id: Optional[str] = None,
+        api_host: Optional[str] = None,
+        server_token: Optional[str] = None,
+        llm_judge_model: Optional[str] = None,
+        llm_judge_provider: Optional[str] = None,
+        llm_judge_api_key: Optional[str] = None,
     ):
         self.model_args = model_args or {}
         self.tasks: List[str] = tasks
         self.task_id = task_id
         self.adapter = adapter
-        self.job_id = job_id or os.getenv("JOB_ID")
+        self.job_id = job_id
+        self.api_host = api_host
+        self.server_token = server_token
+        self.llm_judge_model = llm_judge_model
+        self.llm_judge_provider = llm_judge_provider
+        self.llm_judge_api_key = llm_judge_api_key
 
         sanitized_path = re.sub(
             r"\s", "_", (output_path or "results").lower()).replace(".", "_")
@@ -107,36 +72,50 @@ class EvaluatationJob:
 
     def run(self):
         """Run a simple evaluation job."""
-        self._update_status(JobStatus.RUNNING)
+        if self.api_host and self.job_id and self.server_token:
+            update_status(api_host=self.api_host, job_id=self.job_id,
+                          server_token=self.server_token, status=JobStatus.RUNNING)
         try:
             results = lm_eval.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
                 tasks=self.tasks,
                 apply_chat_template=True,
-                # apply_chat_template=False,
                 task_manager=lm_eval.tasks.TaskManager(include_path=".temp"),
             )
             logger.info("Exporting results to %s.json", self.output_path)
 
-            # Initialize LLMJudge
-            llm_judge = LLMJudge(
-                model_configs=[
-                    ModelConfig(
-                        name=os.getenv("JUDGE_MODEL", "gemini"),
-                        provider="gemini",
-                        api_key=os.getenv("JUDGE_API_KEY")
-                    )
-                ],
-                aggregation_method="mean",
-                threshold=0.5
-            )
+            llm_judge = None
+            if self.llm_judge_api_key and self.llm_judge_model and self.llm_judge_provider:
+                # Initialize LLMJudge
+                llm_judge = LLMJudge(
+                    model_configs=[
+                        ModelConfig(
+                            name=self.llm_judge_model,
+                            provider=self.llm_judge_provider,
+                            api_key=self.llm_judge_api_key
+                        )
+                    ],
+                    aggregation_method="mean",
+                    threshold=0.5
+                )
 
-            updated_results = self.process_results_with_llm_judge(
-                results_data=results,
-                llm_judge=llm_judge,
-                show_progress=True
-            )
+            if not results:
+                logger.warning("No results found for the evaluation job.")
+                if self.api_host and self.job_id and self.server_token:
+                    update_status(api_host=self.api_host, job_id=self.job_id,
+                                  server_token=self.server_token, status=JobStatus.FAILED,
+                                  error_message="No results found for the evaluation job.")
+                return
+
+            if llm_judge and isinstance(llm_judge, LLMJudge):
+                logger.info("Processing results with LLM judge...")
+                updated_results = self.process_results_with_llm_judge(
+                    results_data=results,
+                    llm_judge=llm_judge)
+            else:
+                logger.info("Skipping LLM judge processing.")
+                updated_results = results
 
             # Export the results to a file, and add them to the database
             self._export_results(updated_results)
@@ -144,7 +123,9 @@ class EvaluatationJob:
         except Exception as e:
             logger.error(traceback.format_exc())
             logger.error("An error occurred while running the job: %s", e)
-            self._update_status(JobStatus.FAILED, str(e))
+            if self.api_host and self.job_id and self.server_token:
+                update_status(api_host=self.api_host, job_id=self.job_id,
+                              server_token=self.server_token, status=JobStatus.FAILED, error_message=str(e))
             raise e
 
     def _calculate_average_scores(self, results: dict[str, Any]) -> dict[str, float]:
@@ -164,12 +145,11 @@ class EvaluatationJob:
                         # Handle nested metrics like ROUGE
                         for sub_metric, sub_value in value.items():
                             if isinstance(sub_value, (int, float)):
-                                full_metric_name = f"{metric_name}_{sub_metric}"
-                                if full_metric_name not in total_scores:
-                                    total_scores[full_metric_name] = 0.0
-                                    task_counts[full_metric_name] = 0
-                                total_scores[full_metric_name] += sub_value
-                                task_counts[full_metric_name] += 1
+                                if sub_metric not in total_scores:
+                                    total_scores[sub_metric] = 0.0
+                                    task_counts[sub_metric] = 0
+                                total_scores[sub_metric] += sub_value
+                                task_counts[sub_metric] += 1
                     elif isinstance(value, (int, float)):
                         # Handle simple metrics like accuracy
                         if metric_name not in total_scores:
@@ -202,83 +182,25 @@ class EvaluatationJob:
         with open(f"{self.output_path}.json", "w", encoding="UTF-8") as fp:
             json.dump(results_with_averages, fp, ensure_ascii=False)
 
-        logger.info(
-            "Results exported to %s", os.path.abspath(
-                f"{self.output_path}.json")
-        )
+        logger.info(f"Results exported to {self.output_path}.json")
 
         # Add results to the database
-        self._add_results_to_db(results)
-
-    def _add_results_to_db(self, results: dict[str, Any]):
-        """Calls a webhook to add the results to the database."""
-        logger.info("Adding the results to the database")
-
-        # Calculate average scores
-        average_scores = self._calculate_average_scores(
-            results)  # Returns a dictionary
-        logger.info(
-            "Average scores for job with ID %s: %s", self.job_id, average_scores
-        )
-
-        if not API_HOST:
-            logger.warning("API_HOST is not set, skipping status update")
-            return
-
-        # Prepare payload
-        payload = {
-            "id": self.job_id,
-            "taskId": self.task_id,
-            "results": json.dumps(results, ensure_ascii=False),
-            "status": JobStatus.COMPLETED.value,
-            "average": average_scores,  # Pass the dictionary
-        }
-
-        # Send request
-        webhook_url = f"https://{API_HOST}/api/webhook/job"
-        logger.info("Sending request to %s", webhook_url)
-        response = requests.post(
-            webhook_url,
-            json=payload,
-            headers={
-                "Content-Type": "application/json",
-                "x-server-token": SERVER_TOKEN,
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        logger.info("Results added to the database successfully")
-
-    def _update_status(self, status: JobStatus, error_message: Optional[str] = None):
-        """Update the status of the job."""
-        if not API_HOST:
-            logger.warning("API_HOST is not set, skipping status update")
-            return
-
-        logger.info("Updating the status of the job to %s", status.value)
-        webhook_url = f"https://{API_HOST}/api/webhook/job"
-        logger.info("Sending request to %s", webhook_url)
-        response = requests.post(
-            webhook_url,
-            json={
-                "id": self.job_id,
-                "status": status.value,
-                "error": error_message or "",
-            },
-            headers={
-                "Content-Type": "application/json",
-                "x-server-token": SERVER_TOKEN,
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        logger.info("Job status updated successfully")
+        if self.api_host and self.job_id and self.server_token:
+            if "results" in results_with_averages:
+                for key, value in results_with_averages["results"].items():
+                    add_results_to_db(
+                        api_host=self.api_host,
+                        job_id=self.job_id,
+                        task_id=self.task_id,
+                        server_token=self.server_token,
+                        result=value)
+            else:
+                logger.error("No results found in the evaluation job.")
 
     def process_results_with_llm_judge(
         self,
         results_data: Dict[str, Any],
         llm_judge: 'LLMJudge',
-        show_progress: bool = True
     ) -> Dict[str, Any]:
         """
         Process results dictionary using LLMJudge to evaluate and score responses.
@@ -286,7 +208,6 @@ class EvaluatationJob:
         Args:
             results_data: Dictionary containing samples and results in the same format as the JSON files
             llm_judge: Initialized LLMJudge instance
-            show_progress: Whether to show progress bar during evaluation
 
         Returns:
             Modified results_data dictionary with LLM judge scores added
@@ -310,11 +231,7 @@ class EvaluatationJob:
         taskwise_scores = {}
         taskwise_scores_raw = {}
 
-        # Setup progress bar
-        iterator = tqdm(all_samples, desc="Evaluating with LLMJudge",
-                        unit="question") if show_progress else all_samples
-
-        for sample_key, sample in iterator:
+        for sample_key, sample in all_samples:
             if not isinstance(sample, dict):
                 continue
 

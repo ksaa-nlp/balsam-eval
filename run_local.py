@@ -1,119 +1,53 @@
 """Entry point for the evaluation job."""
 
-from typing import List, Dict, Any
-import requests
 import os
 import json
 from dotenv import load_dotenv
 
+from src.db_operations import submit_model_evaluation
 from src.evaluation import EvaluatationJob
 from src.task import LMHDataset
 
-
+# Load environment variables
 load_dotenv()
 
+# Constants from .env
+BASE_URL = os.getenv("BASE_URL")
+API_KEY = os.getenv("API_KEY")
+MAX_TOKENS = os.getenv("MAX_TOKENS")
+TEMPERATURE = os.getenv("TEMPERATURE")
+MODEL_NAME = os.getenv("MODEL")
+ADAPTER = os.getenv("ADAPTER")
+SERVER_TOKEN = os.getenv("SERVER_TOKEN")
+API_HOST = os.getenv("API_HOST")
+USER_ID = os.getenv("USER_ID")
+LLM_JUDGE = os.getenv("JUDGE_MODEL")
+LLM_JUDGE_PROVIDER = os.getenv("JUDGE_PROVIDER")
+LLM_JUDGE_API_KEY = os.getenv("JUDGE_API_KEY")
+
+
+# Validation
+if not MODEL_NAME:
+    raise ValueError("Model name is required")
+if not ADAPTER:
+    raise ValueError("Adapter is required")
+
+# Derived constants
+if API_KEY:
+    os.environ["OPENAI_API_KEY"] = API_KEY
+
+# Directories
 TEMP_DIR = ".temp"
 TASKS_DIR = ".tasks"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-
-def submit_model_evaluation(
-    model_name: str,
-    model_url: str,
-    adapter: str,
-    api_key: str,
-    category: str,
-    tasks: List[str],
-) -> Dict[str, Any]:
-    """
-    Submit model for evaluation
-
-    Args:
-        model_name: Name of the model
-        model_url: URL endpoint for the model
-        adapter: Type of adapter to use
-        api_key: API key for the model
-        category: Evaluation category
-        tasks: List of tasks for evaluation
-
-    Returns:
-        Dictionary containing response data and status
-    """
-
-    server_token = os.environ.get("SERVER_TOKEN")
-    if not server_token:
-        raise ValueError("SERVER_TOKEN environment variable is not set")
-
-    api_host = os.environ.get("API_HOST")
-    if not api_host:
-        raise ValueError("API_HOST environment variable is not set")
-
-    user_id = os.environ.get("USER_ID")
-    if not user_id:
-        raise ValueError("USER_ID environment variable is not set")
-
-    # Headers
-    headers = {
-        "Content-Type": "application/json",
-        "x-server-token": server_token,
-    }
-
-    # Request payload
-    data = {
-        "modelName": model_name,
-        "modelUnique": model_name,
-        "modelUrl": model_url,
-        "adapter": adapter,
-        "apiKey": api_key,
-        "category": category,
-        "tasks": tasks,
-        "userId": user_id,
-    }
-
-    try:
-        response = requests.post(
-            f"https://{api_host}/api/local/evulation/submit",
-            headers=headers,
-            json=data
-        )
-
-        result = {
-            "status_code": response.status_code,
-            "success": response.status_code == 200,
-            "raw_response": response.text
-        }
-
-        # Try to parse JSON response
-        try:
-            json_data = response.json()
-            result["data"] = json_data
-
-            # Extract specific fields from successful response
-            if result["success"] and json_data.get("code") == "OK":
-                result["model_id"] = json_data.get("data", {}).get("modelId")
-                result["evaluation_id"] = json_data.get(
-                    "data", {}).get("evaluationId")
-                result["job_id"] = json_data.get("data", {}).get("jobId")
-                result["message"] = json_data.get("data", {}).get("message")
-
-        except json.JSONDecodeError:
-            result["data"] = None
-
-        return result
-
-    except requests.exceptions.RequestException as e:
-        return {
-            "status_code": None,
-            "success": False,
-            "error": str(e),
-            "raw_response": None,
-            "data": None
-        }
+# Control flag
+NEED_CREATE_EVALUATION_JOB = False
 
 
 if __name__ == "__main__":
-    # Read the tasks from directory "tasks"
-    tasks_temp: dict[str, list[str]] = dict()
+    # Read the tasks from directory
+    tasks_temp: dict = dict()
     print(f"Reading tasks from directory '{TASKS_DIR}'")
 
     for file in os.listdir(f"./{TASKS_DIR}"):
@@ -130,10 +64,10 @@ if __name__ == "__main__":
 
             with open(
                 f"./{TEMP_DIR}/{file.split('.')[0]}.json", "w", encoding="utf-8"
-            ) as f:
+            ) as f_out:
                 d["json"]["category"] = d["category"]
                 d["json"]["task"] = d["task"]
-                json.dump(d["json"], f, ensure_ascii=False)
+                json.dump(d["json"], f_out, ensure_ascii=False)
 
             # Initialize LMHDataset
             dataset = LMHDataset(str(file.split(".")[0]), TEMP_DIR)
@@ -145,56 +79,48 @@ if __name__ == "__main__":
                 tasks_temp[d["category"]][d["task"]] = []
             tasks_temp[d["category"]][d["task"]].append(dataset.name)
 
-    # Get model arguments from environment variables
-    model_args = {}
-    base_url = os.getenv("BASE_URL")
-    if base_url:
-        model_args["base_url"] = base_url
-    api_key = os.getenv("API_KEY")
-    if api_key:
-        model_args["api_key"] = api_key
-        os.environ["OPENAI_API_KEY"] = api_key
-    max_tokens = os.getenv("MAX_TOKENS")
-    if max_tokens:
-        model_args["max_tokens"] = int(max_tokens)
-    temperature = os.getenv("TEMPERATURE")
-    if temperature:
-        model_args["temperature"] = float(temperature)
-    model_name = os.getenv("MODEL")
-    if model_name:
-        model_args["model"] = model_name
-    else:
-        raise ValueError("Model name is required")
+    # Model arguments
+    model_args = {"model": MODEL_NAME}
+    if BASE_URL:
+        model_args["base_url"] = BASE_URL
+    if API_KEY:
+        model_args["api_key"] = API_KEY
 
-    adapter = os.environ["ADAPTER"]
-
-    # Initialize the evaluation job
+    # Initialize evaluation job
     for category, tasks in tasks_temp.items():
         print("Running evaluation for category:", category)
         print("Total tasks:", len(tasks))
 
+        if NEED_CREATE_EVALUATION_JOB and BASE_URL and API_KEY and ADAPTER and SERVER_TOKEN and API_HOST and USER_ID:
+            submit_results = submit_model_evaluation(
+                model_name=MODEL_NAME,
+                model_url=BASE_URL,
+                adapter=ADAPTER,
+                api_key=API_KEY,
+                category=category,
+                server_token=SERVER_TOKEN,
+                api_host=API_HOST,
+                user_id=USER_ID,
+            )
+            if not submit_results["success"]:
+                print(
+                    f"Failed to submit evaluation: {submit_results['error']}")
+                continue
+        else:
+            submit_results = {"job_id": None}
+
         for task, _datasets in tasks.items():
             try:
-                submit_results = submit_model_evaluation(
-                    model_name=model_name,
-                    model_url=base_url,
-                    adapter=adapter,
-                    api_key=api_key,
-                    category=category,
-                    tasks=[task],
-                )
-                if not submit_results["success"]:
-                    print(
-                        f"Failed to submit evaluation job for task {task}: {submit_results['error']}")
-                    continue
-
                 job = EvaluatationJob(
                     tasks=_datasets,
-                    adapter=adapter,
+                    adapter=ADAPTER,
                     task_id=task,
                     output_path=str(task),
                     model_args=model_args,
                     job_id=submit_results["job_id"],
+                    llm_judge_api_key=LLM_JUDGE_API_KEY,
+                    llm_judge_model=LLM_JUDGE,
+                    llm_judge_provider=LLM_JUDGE_PROVIDER,
                 )
                 job.run()
             except Exception as e:

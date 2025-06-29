@@ -3,101 +3,77 @@
 import logging
 import os
 
-import requests
-
+from dotenv import load_dotenv
+from src.db_operations import get_tasks_from_category
 from src.evaluation import EvaluatationJob
 from src.task import LMHDataset, download_dataset_from_gcs
 
+# Load environment variables
+load_dotenv()
 
-CATEGORY = os.getenv("CATEGORY", "")
-API_HOST = os.getenv("API_HOST", "")
-SERVER_TOKEN = os.getenv("SERVER_TOKEN", "")
-
+# Setup logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Constants from environment
+API_HOST = os.getenv("API_HOST")
+SERVER_TOKEN = os.getenv("SERVER_TOKEN")
+CATEGORY = os.getenv("CATEGORY")
+ADAPTER = os.getenv("ADAPTER")
+BASE_URL = os.getenv("BASE_URL")
+API_KEY = os.getenv("API_KEY")
+MAX_TOKENS = os.getenv("MAX_TOKENS")
+TEMPERATURE = os.getenv("TEMPERATURE")
+MODEL_NAME = os.getenv("MODEL")
+JOB_ID = os.getenv("JOB_ID")
 
-def get_tasks_from_category() -> list[str]:
-    if not CATEGORY:
-        raise ValueError("Category is required, terminating the process.")
+# Validation
+if not all([API_HOST, SERVER_TOKEN, CATEGORY, ADAPTER]):
+    raise ValueError(
+        "API_HOST, SERVER_TOKEN, CATEGORY, and ADAPTER environment variables are required")
+if not MODEL_NAME:
+    raise ValueError("MODEL name is required")
 
-    logger.info("Getting tasks for category %s", CATEGORY)
+if API_KEY:
+    os.environ["OPENAI_API_KEY"] = API_KEY
 
-    webhook_url = f"https://{API_HOST}/api/tasks/{CATEGORY}"
-    logger.info("Sending request to %s", webhook_url)
-    response = requests.get(
-        webhook_url,
-        headers={
-            "Content-Type": "application/json",
-            "x-server-token": SERVER_TOKEN,
-        },
-        timeout=20,
-    )
-    response.raise_for_status()
-
-    if response.status_code != 200:
-        logger.error("Failed to retrieve tasks for category %s", CATEGORY)
-        raise ValueError("Failed to retrieve tasks for category")
-
-    # Make sure we have the datasets
-    if "datasets" not in response.json():
-        logger.error("No datasets found for category %s", CATEGORY)
-        raise ValueError("No datasets found for category")
-
-    return response.json()["datasets"]
-
-
+# Collect datasets
 if __name__ == "__main__":
-
-    # Get the tasks for the category
-    datasets_ids = get_tasks_from_category()
+    if not CATEGORY or not API_HOST or not SERVER_TOKEN:
+        raise ValueError("CATEGORY, API_HOST, and SERVER_TOKEN must be set.")
+    datasets_ids = get_tasks_from_category(
+        category=CATEGORY, api_host=API_HOST, server_token=SERVER_TOKEN
+    )
 
     datasets: list[LMHDataset] = []
     for dataset_id in datasets_ids:
-        # Write the dataset files to disk
-        # TODO download a list of datasets instead of a looping through
+        # Download and export each dataset
         download_dataset_from_gcs(dataset_id=dataset_id, directory=".temp")
-        # Initialize the LM Hanress task files and export it
-        # to a temporary directory
         dataset = LMHDataset(dataset_id, directory=".temp")
         dataset.export()
-
         datasets.append(dataset)
 
-    # Map categories to datasets
+    # Organize datasets by category and task
     categories: dict[str, dict[str, list[LMHDataset]]] = {}
     for dataset in datasets:
         if dataset.category_id:
-            if categories.get(dataset.category_id) is None:
-                categories[dataset.category_id] = {}
-            if categories[dataset.category_id].get(str(dataset.task_id)) is None:
-                categories[dataset.category_id][str(dataset.task_id)] = []
-            categories[dataset.category_id][dataset.task_id].append(dataset)
+            categories.setdefault(dataset.category_id, {})
+            categories[dataset.category_id].setdefault(
+                str(dataset.task_id), [])
+            categories[dataset.category_id][str(
+                dataset.task_id)].append(dataset)
 
     print(f"Total categories: {len(categories)}")
     print(categories)
 
-    model_args = {}
-    base_url = os.getenv("BASE_URL")
-    if base_url:
-        model_args["base_url"] = base_url
-    api_key = os.getenv("API_KEY")
-    if api_key:
-        model_args["api_key"] = api_key
-        os.environ["OPENAI_API_KEY"] = api_key
-    max_tokens = os.getenv("MAX_TOKENS")
-    if max_tokens:
-        model_args["max_tokens"] = int(max_tokens)
-    temperature = os.getenv("TEMPERATURE")
-    if temperature:
-        model_args["temperature"] = float(temperature)
-    model_name = os.getenv("MODEL")
-    if model_name:
-        model_args["model"] = model_name
-    else:
-        raise ValueError("Model name is required")
+    # Build model args
+    model_args = {"model": MODEL_NAME}
+    if BASE_URL:
+        model_args["base_url"] = BASE_URL
+    if API_KEY:
+        model_args["api_key"] = API_KEY
 
-    # We're sending all tasks in a category at once to LM Harness
+    # Run evaluation job per task
     for category, tasks in categories.items():
         print(f"Running evaluation for category: {category}")
         print(f"Total tasks: {len(datasets)}")
@@ -105,9 +81,12 @@ if __name__ == "__main__":
         for task, _datasets in tasks.items():
             job = EvaluatationJob(
                 tasks=[dataset.name for dataset in _datasets],
-                adapter=os.environ["ADAPTER"],
+                adapter=ADAPTER,
                 model_args=model_args,
                 task_id=task,
                 output_path=str(task),
+                job_id=JOB_ID,
+                api_host=API_HOST,
+                server_token=SERVER_TOKEN,
             )
             job.run()
