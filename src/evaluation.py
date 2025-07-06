@@ -1,20 +1,22 @@
 """This module contains the code for running an evaluation job."""
-from statistics import mean
-import json
-import logging
-import re
-import traceback
-from typing import Any, List, Literal, Optional, Dict
-import lm_eval
-import requests
-
-from src.db_operations import JobStatus, add_results_to_db, update_status
 from src.llm_as_a_judge import LLMJudge, ModelConfig
-
+from src.db_operations import JobStatus, add_results_to_db, update_status
+import requests
+import lm_eval
+from typing import Any, List, Literal, Optional, Dict
+import traceback
+import re
+import logging
+import json
+from statistics import mean
 
 # This import is necessary for the rouge metric to work and for gemini adapter to be available
 from . import metric  # noqa: F401
 from src.gemini_adapter import GeminiLM  # noqa: F401
+
+# Download necessary resources
+import nltk
+nltk.download('punkt_tab')
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -85,6 +87,9 @@ class EvaluatationJob:
             )
             logger.info("Exporting results to %s.json", self.output_path)
 
+            results = self._add_task_to_results(
+                results=results, task=self.task_id)
+
             llm_judge = None
             if self.llm_judge_api_key and self.llm_judge_model and self.llm_judge_provider:
                 # Initialize LLMJudge
@@ -127,6 +132,21 @@ class EvaluatationJob:
                 update_status(api_host=self.api_host, job_id=self.job_id,
                               server_token=self.server_token, status=JobStatus.FAILED, error_message=str(e))
             raise e
+
+    def _add_task_to_results(self, results: dict[str, Any], task_id: str):
+        """Add task_id to each result in the results dictionary."""
+        if "results" not in results:
+            logger.warning("No 'results' key found in results dictionary")
+            return results
+
+        for task_name in results["results"]:
+            if isinstance(results["results"][task_name], dict):
+                results["results"][task_name]["task_id"] = task_id
+            else:
+                logger.warning(
+                    f"Task result for '{task_name}' is not a dictionary, skipping task_id addition")
+
+        return results
 
     def _calculate_average_scores(self, results: dict[str, Any]) -> dict[str, float]:
         """Calculate the average scores of the model for ROUGE or other metrics."""

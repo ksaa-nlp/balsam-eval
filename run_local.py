@@ -14,8 +14,6 @@ load_dotenv()
 # Constants from .env
 BASE_URL = os.getenv("BASE_URL")
 API_KEY = os.getenv("API_KEY")
-MAX_TOKENS = os.getenv("MAX_TOKENS")
-TEMPERATURE = os.getenv("TEMPERATURE")
 MODEL_NAME = os.getenv("MODEL")
 ADAPTER = os.getenv("ADAPTER")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN")

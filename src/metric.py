@@ -3,7 +3,7 @@
 import re
 
 import numpy as np
-from scipy.optimize import linear_sum_assignment  # type: ignore
+from scipy.optimize import linear_sum_assignment
 from lm_eval.api.registry import register_aggregation, register_metric
 
 from . import rouge_scorer

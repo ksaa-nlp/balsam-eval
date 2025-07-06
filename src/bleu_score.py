@@ -5,9 +5,6 @@ import pyarabic.araby as araby
 import unicodedata
 import sys
 
-# Download necessary resources
-# nltk.download('punkt_tab')
-
 # Load Rouge evaluator from `evaluate` library
 bleu = evaluate.load("bleu")
 PUNCT_TABLE = dict.fromkeys(i for i in range(sys.maxunicode)

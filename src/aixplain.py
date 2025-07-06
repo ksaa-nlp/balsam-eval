@@ -2,10 +2,8 @@ from typing import Any, List, Tuple
 
 from tqdm import tqdm
 
-from lm_eval import utils
 from lm_eval.api.model import LM
 from lm_eval.api.registry import register_model
-from lm_eval.models.utils import retry_on_specific_exceptions
 
 models_dict = {
     "GPT-4 Vision": "659edcd36eb56343d119dda1",
