@@ -88,7 +88,7 @@ class EvaluatationJob:
             logger.info("Exporting results to %s.json", self.output_path)
 
             results = self._add_task_to_results(
-                results=results, task=self.task_id)
+                results=results, task_id=self.task_id)
 
             llm_judge = None
             if self.llm_judge_api_key and self.llm_judge_model and self.llm_judge_provider:
@@ -141,7 +141,7 @@ class EvaluatationJob:
 
         for task_name in results["results"]:
             if isinstance(results["results"][task_name], dict):
-                results["results"][task_name]["task_id"] = task_id
+                results["results"][task_name]["task"] = task_id
             else:
                 logger.warning(
                     f"Task result for '{task_name}' is not a dictionary, skipping task_id addition")
