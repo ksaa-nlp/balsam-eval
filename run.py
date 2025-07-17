@@ -18,7 +18,7 @@ logger.setLevel(logging.INFO)
 # Constants from environment
 API_HOST = os.getenv("API_HOST")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN")
-CATEGORY = os.getenv("CATEGORY")
+CATEGORY_ID = os.getenv("CATEGORY")
 BENCHMARK_ID = os.getenv("BENCHMARK_ID")
 ADAPTER = os.getenv("ADAPTER")
 BASE_URL = os.getenv("BASE_URL")
@@ -33,7 +33,7 @@ LLM_JUDGE_API_KEY = os.getenv("JUDGE_API_KEY")
 
 
 # Validation
-if not all([API_HOST, SERVER_TOKEN, CATEGORY, ADAPTER, BENCHMARK_ID]):
+if not all([API_HOST, SERVER_TOKEN, CATEGORY_ID, ADAPTER, BENCHMARK_ID]):
     raise ValueError(
         "API_HOST, SERVER_TOKEN, CATEGORY, BENCHMARK_ID, and ADAPTER environment variables are required")
 if not MODEL_NAME:
@@ -44,10 +44,10 @@ if API_KEY:
 
 # Collect datasets
 if __name__ == "__main__":
-    if not CATEGORY or not API_HOST or not SERVER_TOKEN:
+    if not CATEGORY_ID or not API_HOST or not SERVER_TOKEN:
         raise ValueError("CATEGORY, API_HOST, and SERVER_TOKEN must be set.")
     datasets_ids = get_tasks_from_category(
-        category=CATEGORY, api_host=API_HOST, server_token=SERVER_TOKEN
+        category=CATEGORY_ID, api_host=API_HOST, server_token=SERVER_TOKEN
     )
 
     datasets: list[LMHDataset] = []
@@ -93,7 +93,7 @@ if __name__ == "__main__":
                 job_id=JOB_ID,
                 api_host=API_HOST,
                 server_token=SERVER_TOKEN,
-                category_name=CATEGORY,
+                category_name=category,
                 benchmark_id=BENCHMARK_ID,
                 llm_judge_api_key=LLM_JUDGE_API_KEY,
                 llm_judge_model=LLM_JUDGE,
