@@ -78,3 +78,17 @@ def process_results(doc, results):
     # rouge_scores = evaluate_rouge_metric(preds, golds)
     # print(f"ROUGE Scores: {rouge_scores}")
     return {"rouge": [golds, preds]}
+
+
+# A function to normalize strings to id like format (normalized and sanitized to be used as a file name too)
+def normalize_string(text: str) -> str:
+    return (
+        unicodedata.normalize("NFKC", text)
+        .lower()
+        .replace("\x00", "")
+        .strip()
+        [:255]
+        .replace(" ", "_")
+        .replace(".", "_")
+        .replace("/", "_")
+    )
