@@ -27,6 +27,10 @@ MAX_TOKENS = os.getenv("MAX_TOKENS")
 TEMPERATURE = os.getenv("TEMPERATURE")
 MODEL_NAME = os.getenv("MODEL")
 JOB_ID = os.getenv("JOB_ID")
+LLM_JUDGE = os.getenv("JUDGE_MODEL")
+LLM_JUDGE_PROVIDER = os.getenv("JUDGE_PROVIDER")
+LLM_JUDGE_API_KEY = os.getenv("JUDGE_API_KEY")
+
 
 # Validation
 if not all([API_HOST, SERVER_TOKEN, CATEGORY, ADAPTER, BENCHMARK_ID]):
@@ -90,6 +94,9 @@ if __name__ == "__main__":
                 api_host=API_HOST,
                 server_token=SERVER_TOKEN,
                 category_name=CATEGORY,
-                benchmark_id=BENCHMARK_ID
+                benchmark_id=BENCHMARK_ID,
+                llm_judge_api_key=LLM_JUDGE_API_KEY,
+                llm_judge_model=LLM_JUDGE,
+                llm_judge_provider=LLM_JUDGE_PROVIDER,
             )
             job.run()
