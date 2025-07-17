@@ -1,11 +1,12 @@
 """This module contains the code for running an evaluation job."""
+import os
 from src.llm_as_a_judge import LLMJudge, ModelConfig
 from src.db_operations import JobStatus, add_results_to_db, update_status
+from src.utils import normalize_string
 import requests
 import lm_eval
 from typing import Any, List, Literal, Optional, Dict
 import traceback
-import re
 import logging
 import json
 from statistics import mean
@@ -20,6 +21,13 @@ nltk.download('punkt_tab')
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+if os.environ.get("ENV", "PROD") == "local":
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 # More robust request handling with explicit timeout
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
@@ -43,6 +51,8 @@ class EvaluatationJob:
         tasks: List[str],
         task_id: str,
         model_args: dict[str, Any],
+        category_name: str,
+        benchmark_id: str,
         adapter: Literal[
             "local-chat-completions",
             "openai-chat-completions",
@@ -50,6 +60,7 @@ class EvaluatationJob:
             "gimini"
         ] = "local-chat-completions",
         output_path: Optional[str] = None,
+        output_dir: Optional[str] = None,
         job_id: Optional[str] = None,
         api_host: Optional[str] = None,
         server_token: Optional[str] = None,
@@ -62,15 +73,20 @@ class EvaluatationJob:
         self.task_id = task_id
         self.adapter = adapter
         self.job_id = job_id
+        self.category_name = category_name
+        self.benchmark_id = benchmark_id
+        self.job_id = job_id
         self.api_host = api_host
         self.server_token = server_token
         self.llm_judge_model = llm_judge_model
         self.llm_judge_provider = llm_judge_provider
         self.llm_judge_api_key = llm_judge_api_key
 
-        sanitized_path = re.sub(
-            r"\s", "_", (output_path or "results").lower()).replace(".", "_")
-        self.output_path = sanitized_path
+        if output_dir:
+            self.output_path = os.path.join(
+                output_dir, normalize_string(output_path or "results"))
+        else:
+            self.output_path = normalize_string(output_path or "results")
 
     def run(self):
         """Run a simple evaluation job."""
@@ -195,9 +211,6 @@ class EvaluatationJob:
         # Add average scores to results for export
         average_scores = self._calculate_average_scores(results)
         results_with_averages = {**results, "average_scores": average_scores}
-        self.output_path = self.output_path.replace("/", "-")
-        if is_temp:
-            self.output_path = f"sss/{self.output_path}"
         # Save results to a JSON file
         with open(f"{self.output_path}.json", "w", encoding="UTF-8") as fp:
             json.dump(results_with_averages, fp, ensure_ascii=False)
@@ -213,7 +226,9 @@ class EvaluatationJob:
                         job_id=self.job_id,
                         task_id=self.task_id,
                         server_token=self.server_token,
-                        result=value)
+                        result=value,
+                        category_name=self.category_name,
+                        benchmark_id=self.benchmark_id)
             else:
                 logger.error("No results found in the evaluation job.")
 
