@@ -1,6 +1,6 @@
 from enum import Enum
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import requests
 
 
@@ -30,10 +30,11 @@ def submit_model_evaluation(
     model_url: str,
     adapter: str,
     api_key: str,
-    category: str,
+    categories: List[str],
     server_token: str,
     api_host: str,
-    user_id: str
+    user_id: str,
+    benchmark_id: str
 ) -> Dict[str, Any]:
     headers = {
         "Content-Type": "application/json",
@@ -46,8 +47,9 @@ def submit_model_evaluation(
         "modelUrl": model_url,
         "adapter": adapter,
         "apiKey": api_key,
-        "category": category,
+        "categories": categories,
         "userId": user_id,
+        "benchmarkId": benchmark_id
     }
 
     try:
@@ -71,7 +73,7 @@ def submit_model_evaluation(
                 result["model_id"] = json_data.get("data", {}).get("modelId")
                 result["evaluation_id"] = json_data.get(
                     "data", {}).get("evaluationId")
-                result["job_id"] = json_data.get("data", {}).get("jobId")
+                result["jobs_ids"] = json_data.get("data", {}).get("jobsIds")
                 result["message"] = json_data.get("data", {}).get("message")
 
         except json.JSONDecodeError:
@@ -113,7 +115,9 @@ def add_results_to_db(
     job_id: str,
     task_id: str,
     server_token: str,
-    result: dict[str, Any]
+    result: dict[str, Any],
+    category_name: str,
+    benchmark_id: str,
 ) -> None:
     if not api_host:
         return
@@ -126,6 +130,8 @@ def add_results_to_db(
         "results": json.dumps(result, ensure_ascii=False),
         "status": JobStatus.COMPLETED.value,
         "scores": json.dumps(final_scores, ensure_ascii=False),
+        "categoryName": category_name,
+        "benchmarkId": benchmark_id
     }
 
     webhook_url = f"{api_host}/api/webhook/job"
