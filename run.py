@@ -19,6 +19,7 @@ logger.setLevel(logging.INFO)
 API_HOST = os.getenv("API_HOST")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN")
 CATEGORY = os.getenv("CATEGORY")
+BENCHMARK_ID = os.getenv("BENCHMARK_ID")
 ADAPTER = os.getenv("ADAPTER")
 BASE_URL = os.getenv("BASE_URL")
 API_KEY = os.getenv("API_KEY")
@@ -28,9 +29,9 @@ MODEL_NAME = os.getenv("MODEL")
 JOB_ID = os.getenv("JOB_ID")
 
 # Validation
-if not all([API_HOST, SERVER_TOKEN, CATEGORY, ADAPTER]):
+if not all([API_HOST, SERVER_TOKEN, CATEGORY, ADAPTER, BENCHMARK_ID]):
     raise ValueError(
-        "API_HOST, SERVER_TOKEN, CATEGORY, and ADAPTER environment variables are required")
+        "API_HOST, SERVER_TOKEN, CATEGORY, BENCHMARK_ID, and ADAPTER environment variables are required")
 if not MODEL_NAME:
     raise ValueError("MODEL name is required")
 
@@ -88,5 +89,7 @@ if __name__ == "__main__":
                 job_id=JOB_ID,
                 api_host=API_HOST,
                 server_token=SERVER_TOKEN,
+                category_name=CATEGORY,
+                benchmark_id=BENCHMARK_ID
             )
             job.run()

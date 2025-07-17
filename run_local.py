@@ -19,6 +19,7 @@ ADAPTER = os.getenv("ADAPTER")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN")
 API_HOST = os.getenv("API_HOST")
 USER_ID = os.getenv("USER_ID")
+BENCHMARK_ID = os.getenv("BENCHMARK_ID")
 LLM_JUDGE = os.getenv("JUDGE_MODEL")
 LLM_JUDGE_PROVIDER = os.getenv("JUDGE_PROVIDER")
 LLM_JUDGE_API_KEY = os.getenv("JUDGE_API_KEY")
@@ -37,13 +38,21 @@ if API_KEY:
 # Directories
 TEMP_DIR = ".temp"
 TASKS_DIR = ".tasks"
+RESULTS_DIR = ".results"
 os.makedirs(TEMP_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # Control flag
-NEED_CREATE_EVALUATION_JOB = False
+NEED_CREATE_EVALUATION_JOB = True
 
 
 if __name__ == "__main__":
+    if not BENCHMARK_ID:
+        raise Exception(
+            "[ERROR] Benchmark ID is required to run the evaluation, please set it in env")
+
+    os.environ["ENV"] = "local"  # setup local env for logging to stdout
+
     # Read the tasks from directory
     tasks_temp: dict = dict()
     print(f"Reading tasks from directory '{TASKS_DIR}'")
@@ -84,28 +93,28 @@ if __name__ == "__main__":
     if API_KEY:
         model_args["api_key"] = API_KEY
 
-    # Initialize evaluation job
+    # Initialize a model evaluation
+    if NEED_CREATE_EVALUATION_JOB and BASE_URL and API_KEY and ADAPTER and SERVER_TOKEN and API_HOST and USER_ID:
+        submit_results = submit_model_evaluation(
+            model_name=MODEL_NAME,
+            model_url=BASE_URL,
+            adapter=ADAPTER,
+            api_key=API_KEY,
+            categories=list(tasks_temp.keys()),
+            server_token=SERVER_TOKEN,
+            api_host=API_HOST,
+            user_id=USER_ID,
+            benchmark_id=BENCHMARK_ID
+        )
+        if not submit_results["success"]:
+            raise Exception(
+                f"[ERROR] Failed to submit evaluation: {submit_results['error']}")
+    else:
+        submit_results = {"jobs_ids": {}}
+
     for category, tasks in tasks_temp.items():
         print("Running evaluation for category:", category)
         print("Total tasks:", len(tasks))
-
-        if NEED_CREATE_EVALUATION_JOB and BASE_URL and API_KEY and ADAPTER and SERVER_TOKEN and API_HOST and USER_ID:
-            submit_results = submit_model_evaluation(
-                model_name=MODEL_NAME,
-                model_url=BASE_URL,
-                adapter=ADAPTER,
-                api_key=API_KEY,
-                category=category,
-                server_token=SERVER_TOKEN,
-                api_host=API_HOST,
-                user_id=USER_ID,
-            )
-            if not submit_results["success"]:
-                print(
-                    f"Failed to submit evaluation: {submit_results['error']}")
-                continue
-        else:
-            submit_results = {"job_id": None}
 
         for task, _datasets in tasks.items():
             try:
@@ -114,11 +123,16 @@ if __name__ == "__main__":
                     adapter=ADAPTER,
                     task_id=task,
                     output_path=str(task),
+                    output_dir=RESULTS_DIR,
                     model_args=model_args,
-                    job_id=submit_results["job_id"],
+                    job_id=submit_results["jobs_ids"].get(category, None),
                     llm_judge_api_key=LLM_JUDGE_API_KEY,
                     llm_judge_model=LLM_JUDGE,
                     llm_judge_provider=LLM_JUDGE_PROVIDER,
+                    server_token=SERVER_TOKEN,
+                    api_host=API_HOST,
+                    benchmark_id=BENCHMARK_ID,
+                    category_name=category
                 )
                 job.run()
             except Exception as e:
