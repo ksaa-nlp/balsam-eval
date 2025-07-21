@@ -57,7 +57,7 @@ class EvaluatationJob:
             "local-chat-completions",
             "openai-chat-completions",
             "anthropic-chat-completions",
-            "gimini"
+            "gemini"
         ] = "local-chat-completions",
         output_path: Optional[str] = None,
         output_dir: Optional[str] = None,
