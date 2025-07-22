@@ -94,6 +94,8 @@ class EvaluatationJob:
             update_status(api_host=self.api_host, job_id=self.job_id,
                           server_token=self.server_token, status=JobStatus.RUNNING)
         try:
+            logger.info(
+                f"Evaluating model on the following: Category: {self.category_name} | Task: {self.task_id}")
             results = lm_eval.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
@@ -145,8 +147,11 @@ class EvaluatationJob:
             logger.error(traceback.format_exc())
             logger.error("An error occurred while running the job: %s", e)
             if self.api_host and self.job_id and self.server_token:
+                error_message = str(e)
+                if isinstance(e, KeyError):
+                    error_message = "An error occurred while extracting the model's response. This may be due to exceeding the maximum token limit or an internal model failure."
                 update_status(api_host=self.api_host, job_id=self.job_id,
-                              server_token=self.server_token, status=JobStatus.FAILED, error_message=str(e))
+                              server_token=self.server_token, status=JobStatus.FAILED, error_message=error_message)
             raise e
 
     def _add_task_to_results(self, results: dict[str, Any], task_id: str):
