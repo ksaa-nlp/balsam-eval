@@ -39,9 +39,6 @@ if not all([API_HOST, SERVER_TOKEN, CATEGORY_ID, ADAPTER, BENCHMARK_ID]):
 if not MODEL_NAME:
     raise ValueError("MODEL name is required")
 
-if API_KEY:
-    os.environ["OPENAI_API_KEY"] = API_KEY
-
 # Collect datasets
 if __name__ == "__main__":
     if not CATEGORY_ID or not API_HOST or not SERVER_TOKEN:

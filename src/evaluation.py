@@ -33,6 +33,17 @@ if os.environ.get("ENV", "PROD") == "local":
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
     method="POST", url=url, timeout=timeout, **kwargs
 )
+ADAPTER = os.getenv("ADAPTER")
+API_KEY = os.getenv("API_KEY")
+
+if API_KEY and ADAPTER == "openai-chat-completions":
+    os.environ["OPENAI_API_KEY"] = API_KEY
+
+if API_KEY and ADAPTER == "anthropic-chat-completions":
+    os.environ["ANTHROPIC_API_KEY"] = API_KEY
+
+if API_KEY and ADAPTER == "gemini":
+    os.environ["GOOGLE_API_KEY"] = API_KEY
 
 
 class EvaluatationJob:

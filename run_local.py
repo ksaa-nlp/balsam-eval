@@ -31,10 +31,6 @@ if not MODEL_NAME:
 if not ADAPTER:
     raise ValueError("Adapter is required")
 
-# Derived constants
-if API_KEY:
-    os.environ["OPENAI_API_KEY"] = API_KEY
-
 # Directories
 TEMP_DIR = ".temp"
 TASKS_DIR = ".tasks"
