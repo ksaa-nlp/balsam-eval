@@ -36,7 +36,7 @@ requests.post = lambda url, timeout=5000, **kwargs: requests.request(
 ADAPTER = os.getenv("ADAPTER")
 API_KEY = os.getenv("API_KEY")
 
-if API_KEY and ADAPTER == "openai-chat-completions":
+if API_KEY and (ADAPTER == "openai-chat-completions" or ADAPTER == "local-chat-completions"):
     os.environ["OPENAI_API_KEY"] = API_KEY
 
 if API_KEY and ADAPTER == "anthropic-chat-completions":
