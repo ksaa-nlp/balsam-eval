@@ -33,17 +33,6 @@ if os.environ.get("ENV", "PROD") == "local":
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
     method="POST", url=url, timeout=timeout, **kwargs
 )
-ADAPTER = os.getenv("ADAPTER")
-API_KEY = os.getenv("API_KEY")
-
-if API_KEY and (ADAPTER == "openai-chat-completions" or ADAPTER == "local-chat-completions"):
-    os.environ["OPENAI_API_KEY"] = API_KEY
-
-if API_KEY and ADAPTER == "anthropic-chat-completions":
-    os.environ["ANTHROPIC_API_KEY"] = API_KEY
-
-if API_KEY and ADAPTER == "gemini":
-    os.environ["GOOGLE_API_KEY"] = API_KEY
 
 
 class EvaluatationJob:
@@ -92,6 +81,16 @@ class EvaluatationJob:
         self.llm_judge_model = llm_judge_model
         self.llm_judge_provider = llm_judge_provider
         self.llm_judge_api_key = llm_judge_api_key
+
+        API_KEY = os.getenv("API_KEY")
+        if API_KEY and (self.adapter == "openai-chat-completions" or self.adapter == "local-chat-completions"):
+            os.environ["OPENAI_API_KEY"] = API_KEY
+
+        if API_KEY and self.adapter == "anthropic-chat-completions":
+            os.environ["ANTHROPIC_API_KEY"] = API_KEY
+
+        if API_KEY and self.adapter == "gemini":
+            os.environ["GOOGLE_API_KEY"] = API_KEY
 
         if output_dir:
             self.output_path = os.path.join(
