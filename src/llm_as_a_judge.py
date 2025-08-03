@@ -1,19 +1,85 @@
-from typing import Dict, Any, Optional, Literal, List, Union
-from dataclasses import dataclass
-from deepeval.metrics import GEval
-from deepeval.test_case import LLMTestCase
-from deepeval.models import GPTModel,  OllamaModel, AnthropicModel, GeminiModel
-from deepeval.test_case import LLMTestCaseParams
-from statistics import mean, median
 import json
+import os
+import time
+from typing import List, Dict, Any, Optional, Literal
+from dataclasses import dataclass
+from statistics import mean, median
 from tqdm import tqdm
+import requests
 
-from src.local_model import LocalModelEdited
+
+# --- Embedded Gemini API Call Function ---
+def call_gemini_api(prompt,
+                    max_output_tokens=5000, temperature=0, top_p=1.0, top_k=32,
+                    max_retries=10):
+    model_name = os.getenv("JUDGE_MODEL")
+    api_key = os.getenv("JUDGE_API_KEY")
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": prompt}]
+            }
+        ],
+        "generationConfig": {
+            "temperature": temperature,
+            "topP": top_p,
+            "topK": top_k,
+            "maxOutputTokens": max_output_tokens
+        }
+    }
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                url, headers=headers, data=json.dumps(payload))
+            if response.status_code == 200:
+                result = response.json()
+
+                try:
+                    raw_text = result["candidates"][0]["content"]["parts"][0]["text"]
+                    raw_text = raw_text.strip().replace("```json", "").replace("```", "").strip()
+                    parsed = json.loads(raw_text)
+
+                    if "score" in parsed and "explanation" in parsed:
+                        return {
+                            "score": parsed["score"],
+                            "explanation": parsed["explanation"]
+                        }
+
+                    print(
+                        f"⚠️ Missing keys in parsed output (attempt {attempt+1}): {parsed}")
+                except Exception as e:
+                    print(
+                        f"⚠️ JSON parsing or structure error (attempt {attempt+1}): {e}")
+
+            else:
+                print(
+                    f"⚠️ API error (attempt {attempt+1}): {response.status_code}")
+                try:
+                    print("🔍", response.json())
+                except:
+                    print("🧾", response.text)
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Network error (attempt {attempt+1}): {e}")
+
+        wait_time = min(2 ** attempt, 30)
+        print(f"⏳ Retrying after {wait_time} seconds...")
+        time.sleep(wait_time)
+
+    return {
+        "score": None,
+        "explanation": "Error: Unable to parse a valid response after retries"
+    }
 
 
+# --- Data Classes ---
 @dataclass
 class EvaluationResult:
-    """Class to hold evaluation results."""
     score: float
     raw_score: float
     explanation: str
@@ -22,10 +88,8 @@ class EvaluationResult:
 
 @dataclass
 class ModelConfig:
-    """Configuration for a model to use with the LLMJudge."""
     name: str
-    provider: Literal["openai", "anthropic",
-                      "gemini", "ollama", "local_openai"] = "openai"
+    provider: Literal["gemini"] = "gemini"
     api_key: Optional[str] = None
     endpoint_url: Optional[str] = None
     other: Optional[Dict[str, Any]] = None
@@ -33,7 +97,6 @@ class ModelConfig:
 
 @dataclass
 class TestCaseDict:
-    """Dictionary representation of a test case."""
     question: str
     reference_answer: str
     given_answer: str
@@ -42,406 +105,168 @@ class TestCaseDict:
     metadata: Optional[Dict[str, Any]] = None
 
 
-def create_model_adapter(config: ModelConfig) -> Any:
-    """Create a model adapter based on the configuration."""
-    base_params = {}
-
-    # Add any additional parameters from the 'other' field
-    if config.other:
-        base_params.update(config.other)
-
-    if config.provider == "openai":
-        return GPTModel(
-            model=config.name,
-            _openai_api_key=config.api_key,
-            base_url=config.endpoint_url,
-            **base_params
-        )
-
-    elif config.provider == "anthropic":
-        return AnthropicModel(
-            model=config.name,
-            _anthropic_api_key=config.api_key,
-            **base_params
-        )
-
-    elif config.provider == "gemini":
-        return GeminiModel(
-            model_name=config.name,
-            api_key=config.api_key,
-            **base_params
-        )
-
-    elif config.provider == "ollama":
-        return OllamaModel(
-            model=config.name,
-            base_url=config.endpoint_url,
-            **base_params
-        )
-
-    elif config.provider == "local_openai":
-        return LocalModelEdited(
-            model_name=config.name,
-            local_model_api_key=config.api_key,
-            base_url=config.endpoint_url,
-            **base_params
-        )
-
-    else:
-        raise ValueError(f"Unsupported provider: {config.provider}")
-
-
+# --- LLMJudge Class Using Gemini ---
 class LLMJudge:
-    """LLM Judge system that evaluates answers based on a single prompt-based scoring."""
-
-    def __init__(
-        self,
-        model_configs: List[ModelConfig],
-        aggregation_method: str = "mean",
-        custom_prompt: Optional[str] = None,
-        threshold: float = 0.7
-    ):
-        """
-        Initialize the LLM Judge system with multiple models.
-
-        Args:
-            model_configs: List of configurations for the models to use
-            model_adapters: List of model adapters corresponding to each config
-            aggregation_method: Method to aggregate scores across models ('mean' or 'median')
-            custom_prompt: Optional custom evaluation prompt
-            threshold: Threshold for passing evaluation (default 0.7)
-        """
-
+    def __init__(self, model_configs: List[ModelConfig], aggregation_method: str = "mean", threshold: float = 0.7):
         self.model_configs = model_configs
-        self.model_adapters = [
-            create_model_adapter(config) for config in model_configs
-        ]
         self.aggregation_method = aggregation_method
         self.threshold = threshold
 
-        # Use custom prompt if provided, otherwise use default
-        self.evaluation_prompt = custom_prompt if custom_prompt is not None else self._get_default_prompt()
+        assert all(config.provider ==
+                   "gemini" for config in model_configs), "Only Gemini provider supported"
 
-        # Initialize metrics for each model
-        self.metrics_by_model = []
+        self.evaluation_prompt = self._get_prompt()
 
-        for i, adapter in enumerate(self.model_adapters):
-            metric = GEval(
-                name="llm_judge_evaluation",
-                criteria="Evaluate the quality of the generated output compared to the ground truth",
-                evaluation_params=[LLMTestCaseParams.INPUT,
-                                   LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.EXPECTED_OUTPUT],
-                evaluation_steps=[
-                    "Compare the generated output with the ground truth",
-                    "Evaluate based on accuracy, completeness, and relevance",
-                    "Provide a score between 0 and 3 where 3 is perfect"
-                ],
-                threshold=self.threshold,
-                model=adapter,
-            )
-            self.metrics_by_model.append(metric)
-
-    def _get_default_prompt(self) -> str:
-        """Get the default evaluation prompt."""
+    def _get_prompt(self) -> str:
         return '''You are an impartial and expert judge evaluating the quality of text generated by another AI model.
-
+ 
 Your task is to score the generated output based on the original prompt and a provided ground truth answer, following a specific scoring rubric.
-
+ 
 You will be provided with three pieces of information:
 1. The original prompt given to the generative model.
 2. The ground truth answer, representing the ideal or expected output.
 3. The actual output generated by the generative model.
-
+ 
 Evaluate the generated output by comparing it to the ground truth, considering how well it addresses the original prompt.
-
+ 
 **Scoring Rubric:**
-
 * **Score 0:** The automatically generated output is completely wrong, irrelevant, or unrelated to the prompt and ground truth.
 * **Score 1:** Poor answer. The output attempts to address the prompt but contains significant errors, is largely incomplete, or is difficult to understand. It shows little resemblance to the ground truth.
 * **Score 2:** Acceptable but different. The output is somewhat correct or addresses parts of the prompt reasonably well, but it differs significantly from the ground truth. It might be missing details present in the ground truth, include extra information not in the ground truth, or present the information in a substantially different structure or style, but is still a valid (though not ideal) response to the prompt.
 * **Score 3:** Perfect or almost perfect. The output is accurate, complete, and closely matches the ground truth in content and style, effectively answering the original prompt. Minor differences in wording or formatting that do not affect the meaning or quality are acceptable for a score of 3.
-
+ 
 **Output Format:**
-
 Your output must be *only* a JSON object containing two keys:
 1. `score`: An integer between 0 and 3 based on the rubric above.
 2. `explanation`: A brief, concise string explaining *why* you assigned that score, referencing the differences or similarities between the generated output and the ground truth in the context of the prompt.
-
+ 
 **Example Output JSON:**
-
 ```json
 {
   "score": 3,
   "explanation": "The generated output is accurate and complete, closely matching the ground truth."
-}
-```'''
+}```'''
 
-    def evaluate_answer(
-        self,
-        question: str,
-        reference_answer: str,
-        given_answer: str,
-        context: Optional[str] = None,
-        test_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Evaluate a single answer using multiple models based on prompt-based scoring.
+    def _evaluate_single_model(self, question, reference_answer, given_answer, context, config) -> Dict[str, Any]:
+        prompt = self.evaluation_prompt
+        prompt += f'\n\n[PROMPT]\n{question}\n[/PROMPT]\n'
+        prompt += f'[GROUND TRUTH]\n{reference_answer}\n[/GROUND TRUTH]\n'
+        prompt += f'[GENERATED OUTPUT]\n{given_answer}\n[/GENERATED OUTPUT]'
 
-        Args:
-            question: The question being answered
-            reference_answer: The expected or reference answer
-            given_answer: The answer to evaluate
-            context: Additional context for evaluation
-            test_id: Optional ID for the test case
-            metadata: Optional metadata for the test case
+        result = call_gemini_api(prompt)
 
-        Returns:
-            Dictionary containing evaluation results from all models and aggregated scores
-        """
-        # Create test case
-        test_case = LLMTestCase(
-            input=question,
-            actual_output=given_answer,
-            expected_output=reference_answer,
-            context=context or None
-        )
+        raw_score = result["score"]
+        explanation = result["explanation"]
+        norm_score = round(raw_score / 3, 4) if raw_score is not None else 0
+        passed = norm_score >= self.threshold
 
-        return self._evaluate_test_case(test_case, test_id, metadata)
+        return {
+            "model": config.name,
+            "provider": config.provider,
+            "score": norm_score,
+            "raw_score": raw_score,
+            "passed": passed,
+            "explanation": explanation
+        }
 
-    def _evaluate_test_case(
-        self,
-        test_case: LLMTestCase,
-        test_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Internal method to evaluate a single test case.
-
-        Args:
-            test_case: LLMTestCase object to evaluate
-            test_id: Optional ID for the test case
-            metadata: Optional metadata for the test case
-
-        Returns:
-            Dictionary containing evaluation results
-        """
-        # Results by model
+    def evaluate_answer(self, question: str, reference_answer: str, given_answer: str, context: Optional[str] = None, test_id: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None):
         model_results = []
 
-        # Evaluate using each model
-        for i, (model_config, model_adapter) in enumerate(zip(self.model_configs, self.model_adapters)):
-            metric = self.metrics_by_model[i]
-
+        for config in self.model_configs:
             try:
-                # Create the full prompt
-                full_prompt = self.evaluation_prompt
-                full_prompt += f'\n\n[PROMPT]\n{test_case.input}\n[/PROMPT]\n'
-                full_prompt += f'[GROUND TRUTH]\n{test_case.expected_output}\n[/GROUND TRUTH]\n'
-                full_prompt += f'[GENERATED OUTPUT]\n{test_case.actual_output}\n[/GENERATED OUTPUT]'
-
-                # Use the metric to evaluate with custom prompt
-                metric.criteria = full_prompt
-                metric.measure(test_case)
-
-                raw_score = metric.score if hasattr(metric, 'score') else 0
-                # Normalize score from 0-3 to 0-1 scale
-                normalized_score = round(
-                    raw_score / 3, 4) if raw_score is not None else 0
-                passed = normalized_score >= self.threshold
-                explanation = metric.reason if hasattr(
-                    metric, 'reason') else "No explanation provided"
-
+                result = self._evaluate_single_model(
+                    question, reference_answer, given_answer, context, config)
             except Exception as e:
-                raw_score = 0
-                normalized_score = 0
-                passed = False
-                explanation = f"Error during evaluation: {str(e)}"
+                result = {
+                    "model": config.name,
+                    "provider": config.provider,
+                    "score": 0,
+                    "raw_score": 0,
+                    "passed": False,
+                    "explanation": f"Error: {str(e)}"
+                }
 
-            # Create result
-            result = EvaluationResult(
-                score=normalized_score,
-                raw_score=raw_score,
-                explanation=explanation,
-                passed=passed
-            )
+            model_results.append(result)
 
-            # Format model-specific results
-            model_formatted_results = {
-                "model": model_config.name,
-                "provider": model_config.provider,
-                "score": result.score,
-                "raw_score": result.raw_score,
-                "passed": result.passed,
-                "explanation": result.explanation
-            }
+        # Aggregation
+        agg = self._aggregate_model_results(model_results)
 
-            model_results.append(model_formatted_results)
-
-        # Aggregate results across models
-        aggregated_results = self._aggregate_model_results(model_results)
-
-        # Combine final results
-        final_results = {
-            "overall_score": aggregated_results["overall_score"],
-            "overall_raw_score": aggregated_results["overall_raw_score"],
-            "overall_passed": aggregated_results["overall_score"] >= self.threshold,
+        return {
+            "overall_score": agg["overall_score"],
+            "overall_raw_score": agg["overall_raw_score"],
+            "overall_passed": agg["overall_score"] >= self.threshold,
             "aggregation_method": self.aggregation_method,
             "model_results": model_results,
-            "aggregated_explanation": aggregated_results["aggregated_explanation"],
+            "aggregated_explanation": agg["aggregated_explanation"],
             "metadata": {
-                "num_models": len(self.model_configs),
-                "models": [f"{config.provider}:{config.name}" for config in self.model_configs],
-                "question": test_case.input,
-                "reference_answer": test_case.expected_output,
-                "evaluated_answer": test_case.actual_output,
-                "context": test_case.context,
+                "question": question,
+                "reference_answer": reference_answer,
+                "evaluated_answer": given_answer,
+                "context": context,
                 "test_id": test_id,
                 **(metadata or {})
             }
         }
 
-        return final_results
+    def _aggregate_model_results(self, model_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        scores = [res["score"]
+                  for res in model_results if res["score"] is not None]
+        raw_scores = [res["raw_score"]
+                      for res in model_results if res["raw_score"] is not None]
 
-    def evaluate_batch(
-        self,
-        test_cases: Union[List[LLMTestCase], List[Dict[str, Any]], List[TestCaseDict]],
-        show_progress: bool = True
-    ) -> Dict[str, Any]:
-        """
-        Evaluate a batch of test cases.
+        if not scores:
+            return {"overall_score": 0, "overall_raw_score": 0, "aggregated_explanation": "No valid scores"}
 
-        Args:
-            test_cases: List of test cases to evaluate (LLMTestCase objects or dictionaries)
-            show_progress: Whether to show a progress bar during evaluation
+        agg_score = median(
+            scores) if self.aggregation_method == "median" else mean(scores)
+        agg_raw = median(
+            raw_scores) if self.aggregation_method == "median" else mean(raw_scores)
 
-        Returns:
-            Dictionary containing evaluation results for all test cases
-        """
-        all_results = []
+        explanation = f"Aggregated ({self.aggregation_method}) score: {agg_score:.4f}. " + "; ".join(
+            f"{res['model']}: {res['explanation']}" for res in model_results
+        )
 
-        # Setup progress bar if requested
-        iterator = tqdm(
-            test_cases, desc="Evaluating test cases") if show_progress else test_cases
+        return {
+            "overall_score": agg_score,
+            "overall_raw_score": agg_raw,
+            "aggregated_explanation": explanation
+        }
+
+    def evaluate_batch(self, test_cases: List[TestCaseDict], show_progress=True):
+        results = []
+        iterator = tqdm(test_cases, desc="Evaluating",
+                        unit="case") if show_progress else test_cases
 
         for tc in iterator:
-            # Process the test case based on its type
-            if isinstance(tc, LLMTestCase):
-                # Already an LLMTestCase object
-                test_case = tc
-                test_id = getattr(tc, "id", None)
-                metadata = getattr(tc, "metadata", None)
-            elif isinstance(tc, dict):
-                # Convert dictionary to LLMTestCase
-                test_case = LLMTestCase(
-                    input=tc.get("question", ""),
-                    actual_output=tc.get("given_answer", ""),
-                    expected_output=tc.get("reference_answer", ""),
-                    context=tc.get("context", None)
-                )
-                test_id = tc.get("id")
-                metadata = tc.get("metadata")
-            elif isinstance(tc, TestCaseDict):
-                # Convert TestCaseDict to LLMTestCase
-                test_case = LLMTestCase(
-                    input=tc.question,
-                    actual_output=tc.given_answer,
-                    expected_output=tc.reference_answer,
-                    context=tc.context or None
-                )
-                test_id = tc.id
-                metadata = tc.metadata
-            else:
-                raise TypeError(f"Unsupported test case type: {type(tc)}")
-
-            # Evaluate the test case
-            result = self._evaluate_test_case(test_case, test_id, metadata)
-            all_results.append(result)
-
-        # Calculate overall statistics
-        overall_stats = self._calculate_batch_statistics(all_results)
+            result = self.evaluate_answer(
+                question=tc.question,
+                reference_answer=tc.reference_answer,
+                given_answer=tc.given_answer,
+                context=tc.context,
+                test_id=tc.id,
+                metadata=tc.metadata
+            )
+            results.append(result)
 
         return {
-            "individual_results": all_results,
-            "batch_statistics": overall_stats
+            "individual_results": results,
+            "batch_statistics": self._calculate_batch_statistics(results)
         }
 
-    def _aggregate_model_results(self, model_results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Aggregate results across multiple models.
-
-        Args:
-            model_results: List of results from each model
-
-        Returns:
-            Dictionary containing aggregated results
-        """
-        # Extract scores
-        scores = [result["score"] for result in model_results]
-        raw_scores = [result["raw_score"] for result in model_results]
-
-        # Aggregate using specified method
-        if self.aggregation_method == "median":
-            overall_score = median(scores)
-            overall_raw_score = median(raw_scores)
-        else:  # default to mean
-            overall_score = mean(scores)
-            overall_raw_score = mean(raw_scores)
-
-        # Aggregate explanations
-        explanations = [
-            f"{result['model']}: {result['explanation']}" for result in model_results]
-        aggregated_explanation = f"Aggregated score ({self.aggregation_method}): {overall_score:.4f}. " + "; ".join(
-            explanations)
-
-        return {
-            "overall_score": overall_score,
-            "overall_raw_score": overall_raw_score,
-            "aggregated_explanation": aggregated_explanation
-        }
-
-    def _calculate_batch_statistics(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Calculate statistics for a batch of evaluation results.
-
-        Args:
-            results: List of evaluation results
-
-        Returns:
-            Dictionary containing batch statistics
-        """
-        # Extract overall scores
-        scores = [result["overall_score"] for result in results]
-        raw_scores = [result["overall_raw_score"] for result in results]
-
-        # Calculate statistics
-        avg_score = mean(scores)
-        median_score = median(scores)
-        avg_raw_score = mean(raw_scores)
-        median_raw_score = median(raw_scores)
-        passed_count = sum(1 for score in scores if score >= self.threshold)
-        pass_rate = passed_count / len(scores) if scores else 0
+    def _calculate_batch_statistics(self, results: List[Dict[str, Any]]):
+        scores = [r["overall_score"] for r in results]
+        raw_scores = [r["overall_raw_score"] for r in results]
 
         return {
             "total_test_cases": len(results),
-            "average_score": avg_score,
-            "median_score": median_score,
-            "average_raw_score": avg_raw_score,
-            "median_raw_score": median_raw_score,
-            "pass_rate": pass_rate,
-            "passed_count": passed_count,
-            "failed_count": len(results) - passed_count,
-            "threshold": self.threshold
+            "average_score": mean(scores),
+            "median_score": median(scores),
+            "average_raw_score": mean(raw_scores),
+            "median_raw_score": median(raw_scores),
+            "pass_rate": sum(1 for s in scores if s >= self.threshold) / len(scores)
         }
 
     def save_results(self, results: Dict[str, Any], filename: str) -> None:
-        """
-        Save evaluation results to a JSON file.
-
-        Args:
-            results: Evaluation results to save
-            filename: Name of the file to save to
-        """
-        with open(filename, "w") as f:
-            json.dump(results, f, indent=4)
-        print(f"Evaluation results saved to {filename}")
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        print(f"✅ Results saved to {filename}")
