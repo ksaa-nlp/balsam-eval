@@ -174,6 +174,7 @@ class EvaluatationJob:
                 tasks=self.tasks,
                 apply_chat_template=True,
                 task_manager=lm_eval.tasks.TaskManager(include_path=".temp"),
+                batch_size="auto",
             )
             logger.info("Exporting results to %s.json", self.output_path)
 
