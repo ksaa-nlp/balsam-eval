@@ -15,10 +15,6 @@ from statistics import mean
 from . import metric  # noqa: F401
 from src.gemini_adapter import GeminiLM  # noqa: F401
 
-# Download necessary resources
-import nltk
-nltk.download('punkt_tab')
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -97,6 +93,72 @@ class EvaluatationJob:
                 output_dir, normalize_string(output_path or "results"))
         else:
             self.output_path = normalize_string(output_path or "results")
+            
+    def _extract_api_error_message(self, exception: Exception):
+        """Extract the full API error object from various exception types."""
+        try:
+            # Check if it's an HTTPError from requests
+            if hasattr(exception, 'response') and exception.response is not None:
+                try:
+                    # Try to parse JSON error response
+                    error_data = exception.response.json()
+                    if 'error' in error_data:
+                        return error_data  # Return the full error object
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            
+            # Check if the error message contains API error details in the string representation
+            error_str = str(exception)
+            
+            # Look for OpenAI API error pattern in the traceback or error message
+            if "API request failed with error message:" in error_str:
+                # Extract JSON from the error string - look for complete error object
+                import re
+                # Look for the complete JSON object including nested structures
+                json_match = re.search(r'\{(?:[^{}]|{[^{}]*})*\}', error_str)
+                if json_match:
+                    try:
+                        error_json = json.loads(json_match.group())
+                        if 'error' in error_json:
+                            return error_json  # Return the full error object
+                    except json.JSONDecodeError:
+                        pass
+            
+            # Check the exception's args for nested error information
+            if hasattr(exception, 'args') and exception.args:
+                for arg in exception.args:
+                    if isinstance(arg, dict) and 'error' in arg:
+                        return arg  # Return the full error object
+                    elif isinstance(arg, str):
+                        # Try to parse the string as JSON
+                        try:
+                            parsed = json.loads(arg)
+                            if 'error' in parsed:
+                                return parsed
+                        except json.JSONDecodeError:
+                            pass
+            
+            # Last resort: create a simple error object with the exception message
+            return {
+                "error": {
+                    "message": str(exception),
+                    "type": "unknown_error",
+                    "param": None,
+                    "code": "unknown"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error while extracting API error message: {e}")
+            return {
+                "error": {
+                    "message": str(exception),
+                    "type": "extraction_error", 
+                    "param": None,
+                    "code": "unknown"
+                }
+            }
+
 
     def run(self):
         """Run a simple evaluation job."""
@@ -149,20 +211,31 @@ class EvaluatationJob:
             else:
                 logger.info("Skipping LLM judge processing.")
                 updated_results = results
+            
+            if "config" in updated_results and "model_args" in updated_results["config"] and "api_key" in updated_results["config"]["model_args"]:
+                del updated_results["config"]["model_args"]["api_key"]
 
             # Export the results to a file, and add them to the database
             self._export_results(updated_results)
 
         except Exception as e:
-            logger.error(traceback.format_exc())
-            logger.error("An error occurred while running the job: %s", e)
+            #!TODO: now can return error to frontend or store it in databaase
+            # Extract the full API error object
+            api_error_data = self._extract_api_error_message(e)
+            
+            logger.error("Full traceback: %s", traceback.format_exc())
+            logger.error("Extracted API error data: %s", api_error_data)
+            
             if self.api_host and self.job_id and self.server_token:
-                error_message = str(e)
-                if isinstance(e, KeyError):
-                    error_message = "An error occurred while extracting the model's response. This may be due to exceeding the maximum token limit or an internal model failure."
+                # Convert error object to string for database storage
+                error_message = json.dumps(api_error_data) if isinstance(api_error_data, dict) else str(api_error_data)
                 update_status(api_host=self.api_host, job_id=self.job_id,
-                              server_token=self.server_token, status=JobStatus.FAILED, error_message=error_message)
-            raise e
+                              server_token=self.server_token, status=JobStatus.FAILED, 
+                              error_message=error_message)
+            
+            # Re-raise with the full error object as message
+            error_message = json.dumps(api_error_data) if isinstance(api_error_data, dict) else str(api_error_data)
+            raise Exception(error_message) from e
 
     def _add_task_to_results(self, results: dict[str, Any], task_id: str):
         """Add task_id to each result in the results dictionary."""

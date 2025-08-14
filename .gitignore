@@ -38,3 +38,5 @@ scripts/datasets
 .history
 .tasks_temp
 .deepeval
+ignores
+.results_old

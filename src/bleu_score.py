@@ -33,7 +33,6 @@ def prepare_texts(text, change_curly_braces, remove_diactrics):
 
 
 def custem_bleu_aggregation(items):
-
     def tokenizer(x): return x.split()
     refs = list(zip(*items))[0]
     preds = list(zip(*items))[1]
@@ -48,18 +47,52 @@ def custem_bleu_aggregation(items):
     preds = [prepare_texts(pred, change_curly_braces=True,
                            remove_diactrics=True).strip() for pred in preds]
 
+    # Debug: Check for empty predictions after processing
+    empty_preds = [(i, pred) for i, pred in enumerate(preds) if len(pred) == 0]
+    if empty_preds:
+        print(f"WARNING: Found {len(empty_preds)} empty predictions after processing:")
+        for idx, pred in empty_preds[:5]:  # Show first 5 empty predictions
+            print(f"  Index {idx}: '{pred}' (original ref: '{refs[idx]}')")
+
     # Initialize sums for each BLEU score
     bleu_score = 0.0
+    valid_count = 0
 
     for i in range(len(refs)):
-        score = bleu.compute(references=[refs[i]], predictions=[
-                             preds[i]], tokenizer=tokenizer)
+        # Check if prediction is empty after processing
+        if len(preds[i]) == 0:
+            print(f"Skipping empty prediction at index {i}")
+            # Option 1: Skip empty predictions (recommended)
+            continue
+            
+            # Option 2: Assign score of 0.0 for empty predictions
+            # bleu_score += 0.0
+            # valid_count += 1
+            # continue
 
-        bleu_score += score["bleu"]
+        # Check if reference is empty (shouldn't happen but good to check)
+        if len(refs[i]) == 0:
+            print(f"Skipping empty reference at index {i}")
+            continue
 
-    count = len(refs)
+        try:
+            score = bleu.compute(references=[refs[i]], predictions=[
+                                 preds[i]], tokenizer=tokenizer)
+            bleu_score += score["bleu"]
+            valid_count += 1
+        except ZeroDivisionError as e:
+            print(f"BLEU computation failed at index {i}: {e}")
+            print(f"  Prediction: '{preds[i]}'")
+            print(f"  Reference: '{refs[i]}'")
+            # Skip this sample or assign 0.0
+            continue
+
+    # Use valid_count instead of total count
+    count = valid_count if valid_count > 0 else 1  # Avoid division by zero
     avg_bleu = bleu_score / count
-
+    
+    print(f"Computed BLEU on {valid_count}/{len(refs)} valid samples")
+    
     return avg_bleu
 
 
