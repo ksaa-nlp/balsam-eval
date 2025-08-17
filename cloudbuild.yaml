@@ -4,6 +4,7 @@ steps:
     args:
       - '--destination=gcr.io/${PROJECT_ID}/benchmark:latest'
       - '--cache=true'
+      - '--snapshot-mode=time'
       - '--ignore-path=/tmp/'
       - '--ignore-path=/var/tmp/'
       - '--ignore-path=/var/cache/apt/'
