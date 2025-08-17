@@ -1,0 +1,103 @@
+# .dockerignore - Optimized for minimal build context
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Development tools
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.env
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Documentation
+docs/
+*.md
+*.rst
+*.txt
+LICENSE
+CHANGELOG*
+
+# Temporary files
+.temp/
+_temp/
+.tmp/
+*.tmp
+*.temp
+.tasks_temp
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# Project specific
+.deepeval
+ignores/
+scripts/datasets/
+.results_old
+tasks
+.history
+
+# CI/CD (unless needed in container)
+.travis.yml
+.gitlab-ci.yml
+circle.yml
+cloudbuild.yaml
+.gcloudignore
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Editor backup files
+*.bak
+*.backup
+*~
