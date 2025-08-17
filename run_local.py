@@ -87,7 +87,7 @@ if __name__ == "__main__":
         model_args["api_key"] = API_KEY
 
     # Initialize a model evaluation
-    if ADAPTER and SERVER_TOKEN and API_HOST and USER_ID:
+    if ADAPTER and SERVER_TOKEN and API_HOST and USER_ID and tasks_temp:
         submit_results = submit_model_evaluation(
             model_name=MODEL_NAME,
             model_url=BASE_URL,
