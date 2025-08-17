@@ -1,3 +1,132 @@
+# .gcloudignore - Comprehensive ignore patterns for Cloud Build
+
+# Build artifacts and outputs
+build/
 build/**
-venv/**
+dist/
+*.egg-info/
 *.egg-info/**
+
+# Python environments and cache
+.venv/
+.venv/**
+venv/
+venv/**
+env/
+ENV/
+env.bak/
+venv.bak/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+~/.cache/pip/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.deepeval
+
+# Development tools and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.history
+
+# Git and version control
+.git/
+.gitignore
+.gitattributes
+*.orig
+
+# Documentation
+docs/
+docs/**
+README.md
+*.md
+LICENSE
+
+# Temporary files
+.temp/
+.temp/**
+_temp/
+_temp/**
+.tmp/
+tmp/
+*.tmp
+*.temp
+.tasks_temp
+/tmp/
+/var/tmp/
+/var/cache/apt/
+/var/lib/apt/lists/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+secrets/
+credentials/
+
+# Node.js (if applicable)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+*.log
+logs/
+log/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+ignores/
+ignores/**
+scripts/datasets/
+scripts/datasets/**
+.results_old
+tasks
+
+# CI/CD files (unless needed)
+.github/
+.github/**
+.gitlab-ci.yml
+.travis.yml
+circle.yml
+
+# Archive files
+*.zip
+*.tar.gz
+*.rar
+
+# Backup files
+*.bak
+*.backup

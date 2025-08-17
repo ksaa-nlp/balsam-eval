@@ -40,3 +40,4 @@ scripts/datasets
 .deepeval
 ignores
 .results_old
+.vscode/

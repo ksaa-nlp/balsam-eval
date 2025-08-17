@@ -38,9 +38,6 @@ RESULTS_DIR = ".results"
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# Control flag
-NEED_CREATE_EVALUATION_JOB = True
-
 
 if __name__ == "__main__":
     if not BENCHMARK_ID:
@@ -90,7 +87,7 @@ if __name__ == "__main__":
         model_args["api_key"] = API_KEY
 
     # Initialize a model evaluation
-    if NEED_CREATE_EVALUATION_JOB and BASE_URL and API_KEY and ADAPTER and SERVER_TOKEN and API_HOST and USER_ID:
+    if ADAPTER and SERVER_TOKEN and API_HOST and USER_ID:
         submit_results = submit_model_evaluation(
             model_name=MODEL_NAME,
             model_url=BASE_URL,
