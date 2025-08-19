@@ -212,41 +212,47 @@ class LMHDataset:
         self._copy_dependency("bleu_score.py")
 
     def _export_accuracy(self, yaml_data: dict[str, Any]) -> None:
-
         # Add instruction to just output the letter of the answer
         if not yaml_data.get("fewshot_config"):
             yaml_data["fewshot_config"] = {}
 
         # Add instructions to the doc_to_text field to ensure model outputs just the letter
-        original_doc_to_text = yaml_data.get(
-            "doc_to_text", "{{instruction}}\n{{input}}")
+        original_doc_to_text = yaml_data.get("doc_to_text", "{{instruction}}\n{{input}}")
 
         yaml_data["doc_to_text"] = (
             f"{original_doc_to_text}\n\n"
-            # Arabic instructions
-            "يرجى اتباع الإرشادات التالية عند الإجابة:\n"
-            "- إذا كان السؤال من نوع اختيار من متعدد، فأجب فقط بالحرف المقابل للإجابة الصحيحة (A أو B أو C أو D) بدون أي شرح أو تفسير.\n"
-            "- إذا كان السؤال من نوع صح أو خطأ (نعم أو لا)، فأجب فقط بكلمة 'صح' أو 'خطأ' بدون أي شرح إضافي.\n"
-            "- لا تُضِف أي تعليقات أو تفسيرات خارج المطلوب.\n\n"
-            # English instructions (optional)
-            "Please follow these instructions when answering:\n"
-            "- If the question is multiple choice, respond **only** with the letter of the correct answer (A, B, C, or D) — no explanation.\n"
-            "- If the question is true/false (yes or no), respond **only** with 'True' or 'False' (or 'Yes' / 'No') — no explanation.\n"
-            "- Do not include any extra comments, reasoning, or justifications in your response."
+            # More emphatic Arabic instructions
+            "تعليمات مهمة جداً:\n"
+            "- إذا كان السؤال من نوع اختيار من متعدد، أجب فقط بالحرف (أ، ب، ج، أو د) ولا تكتب أي شيء آخر.\n"
+            "- إذا كان السؤال صح أو خطأ، أجب فقط بكلمة 'صح' أو 'خطأ' ولا تكتب أي شيء آخر.\n"
+            "- إذا كان السؤال نعم أو لا، أجب فقط بكلمة 'نعم' أو 'لا' ولا تكتب أي شيء آخر.\n"
+            "- لا تكتب أي تفسير أو تبرير أو شرح إضافي على الإطلاق.\n"
+            "- الإجابة يجب أن تكون كلمة واحدة أو حرف واحد فقط.\n\n"
+            # More emphatic English instructions
+            "CRITICAL INSTRUCTIONS:\n"
+            "- For multiple choice: Answer ONLY with the letter (A, B, C, or D). Write nothing else.\n"
+            "- For true/false: Answer ONLY with 'True' or 'False'. Write nothing else.\n"
+            "- For yes/no: Answer ONLY with 'Yes' or 'No'. Write nothing else.\n"
+            "- Do NOT provide any explanation, reasoning, or additional text.\n"
+            "- Your response must be exactly one word or one letter.\n\n"
+            "الإجابة:"  # "Answer:" in Arabic to prompt for the answer
         )
 
-        # Keep using generate_until output type for accuracy
+        # Make the generation stop more aggressively
         yaml_data.update({
-            # Removed doc_to_choice as we are using generate_until instead of multiple_choice
-            "output_type": "generate_until",  # Keep using generate_until
+            "output_type": "generate_until",
             "process_results": accuracy_score.process_results,
             "metric_list": [{
                 "metric": self.metric['metric'] if isinstance(self.metric, dict) else self.metric,
                 "aggregation": accuracy_score.custom_accuracy_aggregation,
                 "higher_is_better": True,
             }],
-            # Keep the generation_kwargs that would be removed in the original implementation
-            "generation_kwargs": {"do_sample": False, "until": "<|endoftext|>"},
+            # More aggressive generation kwargs to stop early
+            "generation_kwargs": {
+                "do_sample": False, 
+                "until": ["<|endoftext|>", "\n", ".", "،", "؟", "!", "؟", " "],  # Stop at various punctuation
+                "max_gen_toks": 5,  # Limit to very few tokens
+            },
         })
 
         self._write_yaml(yaml_data, suffix="Accuracy")

@@ -36,7 +36,7 @@ CHOICE_MAPPINGS = {
 
 def normalize_choice(text):
     """
-    Enhanced choice normalization that handles:
+    Enhanced choice normalization that aggressively extracts just the answer:
     - Boolean values
     - Yes/No questions in Arabic and English
     - True/False questions in Arabic and English
@@ -50,31 +50,54 @@ def normalize_choice(text):
     if not isinstance(text, str):
         text = str(text)
 
+    # First, look for answers at the very beginning of the text (most common case)
+    # Split by newlines and periods to get the first statement
+    first_sentence = text.split('\n')[0].split('.')[0].strip()
+    
+    # Check if the first sentence is just an answer
+    clean_first = first_sentence.lower().strip()
+    clean_first = ''.join(ch for ch in clean_first if ch not in ALL_PUNCTUATIONS)
+    
+    # Direct match for simple answers at the beginning
+    for standard_form, variations in CHOICE_MAPPINGS.items():
+        if clean_first in variations:
+            return standard_form
+    
+    # Check if first word/character is an answer
+    first_word = clean_first.split()[0] if clean_first.split() else ""
+    if first_word in CHOICE_MAPPINGS:
+        return first_word
+    
+    # Check first character for multiple choice
+    if len(clean_first) > 0:
+        first_char = clean_first[0]
+        if first_char in ['a', 'b', 'c', 'd', 'أ', 'ب', 'ج', 'د']:
+            return first_char
+
     # Look for explicit answer patterns in the text in both Arabic and English
     choice_patterns = [
-        # Arabic patterns
+        # Arabic patterns - prioritize patterns at the beginning
+        r'^([a-dأ-د])\b',  # Answer letter at the very start
+        r'^(صح|صحيح|خطأ|غير صحيح)\b',  # True/false at start
+        r'^(نعم|لا)\b',  # Yes/no at start
+        
+        # Then look for structured patterns
         r'\bالإجابة\s+(?:هي\s+)?[:\s]?\s*([a-dأ-د])\b',  # "الإجابة هي: أ"
         r'\bالخيار\s+(?:هو\s+)?[:\s]?\s*([a-dأ-د])\b',   # "الخيار هو: ب"
         r'\bالجواب\s+(?:هو\s+)?[:\s]?\s*([a-dأ-د])\b',   # "الجواب هو: ج"
-        # "الإجابة هي: صح"
         r'\bالإجابة\s+(?:هي\s+)?[:\s]?\s*(صح|صحيح|خطأ|غير صحيح)\b',
-        # "الجواب هو: خطأ"
         r'\bالجواب\s+(?:هو\s+)?[:\s]?\s*(صح|صحيح|خطأ|غير صحيح)\b',
-        r'\bالإجابة\s+(?:هي\s+)?[:\s]?\s*(نعم|لا)\b',    # "الإجابة هي: نعم"
-        r'\bالجواب\s+(?:هو\s+)?[:\s]?\s*(نعم|لا)\b',     # "الجواب هو: لا"
+        r'\bالإجابة\s+(?:هي\s+)?[:\s]?\s*(نعم|لا)\b',
+        r'\bالجواب\s+(?:هو\s+)?[:\s]?\s*(نعم|لا)\b',
 
         # English patterns
-        r'\banswer\s+(?:is\s+)?[:\s]?\s*([a-dأ-د])\b',   # "answer is: d"
-        r'\boption\s+(?:is\s+)?[:\s]?\s*([a-dأ-د])\b',   # "option is: a"
-        r'\bchoice\s+(?:is\s+)?[:\s]?\s*([a-dأ-د])\b',   # "choice is: b"
-        # "answer is: true"
+        r'^([a-d])\b',  # Answer letter at start
+        r'^(true|false|yes|no)\b',  # Boolean at start
+        r'\banswer\s+(?:is\s+)?[:\s]?\s*([a-dأ-د])\b',
+        r'\boption\s+(?:is\s+)?[:\s]?\s*([a-dأ-د])\b',
+        r'\bchoice\s+(?:is\s+)?[:\s]?\s*([a-dأ-د])\b',
         r'\banswer\s+(?:is\s+)?[:\s]?\s*(true|false|yes|no)\b',
-        # "answer is: correct"
         r'\banswer\s+(?:is\s+)?[:\s]?\s*(correct|incorrect)\b',
-
-        # Option patterns
-        # "option a" or "الخيار أ"
-        r'\b(?:الخيار|option)\s+([a-dأ-د])[^a-zA-Zأ-ي]',
     ]
 
     # Try to extract choice from patterns
@@ -95,41 +118,39 @@ def normalize_choice(text):
                 return extracted
 
     # Clean text for further processing
-    text = text.lower().strip()
-    text = re.sub(r'\s+', ' ', text)
-    text = ''.join(ch for ch in text if ch not in ALL_PUNCTUATIONS)
+    cleaned_text = text.lower().strip()
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
+    cleaned_text = ''.join(ch for ch in cleaned_text if ch not in ALL_PUNCTUATIONS)
 
-    # First check for exact matches in the mapping
+    # Check for exact matches in the mapping
     for standard_form, variations in CHOICE_MAPPINGS.items():
-        if text in variations:
+        if cleaned_text in variations:
             return standard_form
 
     # Check for contained variations (words that might be part of a longer response)
     for standard_form, variations in CHOICE_MAPPINGS.items():
         for variation in variations:
-            # Check if the variation is a standalone word in the text
-            if re.search(r'\b' + re.escape(variation) + r'\b', text):
+            # Check if the variation is a standalone word at the beginning of text
+            if re.search(r'\b' + re.escape(variation) + r'\b', cleaned_text):
                 return standard_form
 
-    # Extract first character for multiple choice
-    if len(text) > 0:
-        first_char = text[0].lower()
-        if first_char in ['a', 'b', 'c', 'd', 'أ', 'ب', 'ج', 'د']:
-            return first_char
-
     # Look for first occurrence of a, b, c, d in the text
-    match = re.search(r'\b([a-dأ-د])\b', text)
+    match = re.search(r'\b([a-dأ-د])\b', cleaned_text)
     if match:
         return match.group(1).lower()
 
     # Special handling for Arabic yes/no/true/false patterns
-    # These patterns check for specific Arabic phrases in the text
-    if any(word in text for word in ["نعم", "أجل", "صحيح", "صح", "إيجابي", "موافق"]):
+    if any(word in cleaned_text for word in ["نعم", "أجل", "صحيح", "صح", "إيجابي", "موافق"]):
         return "نعم"
-    if any(word in text for word in ["لا", "كلا", "غير صحيح", "خطأ", "سلبي", "غير موافق"]):
+    if any(word in cleaned_text for word in ["لا", "كلا", "غير صحيح", "خطأ", "سلبي", "غير موافق"]):
         return "لا"
 
-    return text
+    # If all else fails, return the first word if it's short (likely an answer)
+    first_word = cleaned_text.split()[0] if cleaned_text.split() else cleaned_text
+    if len(first_word) <= 3:  # Short answers are more likely to be the actual answer
+        return first_word
+
+    return cleaned_text
 
 
 def prepare_texts(text, change_curly_braces=True, remove_diactrics=True):
