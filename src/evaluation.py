@@ -45,31 +45,30 @@ class EvaluatationJob:
     def __init__(
         self,
         tasks: List[str],
-        task_id: str,
         model_args: dict[str, Any],
         category_name: str,
-        benchmark_id: str,
+        tasks_mapper: dict,
         adapter: Literal[
             "local-chat-completions",
             "openai-chat-completions",
             "anthropic-chat-completions",
             "gemini"
         ] = "local-chat-completions",
-        output_path: Optional[str] = None,
-        output_dir: Optional[str] = None,
         job_id: Optional[str] = None,
         api_host: Optional[str] = None,
         server_token: Optional[str] = None,
+        benchmark_id: Optional[str] = None,
         llm_judge_model: Optional[str] = None,
         llm_judge_provider: Optional[str] = None,
         llm_judge_api_key: Optional[str] = None,
+        
     ):
         self.model_args = model_args or {}
         self.tasks: List[str] = tasks
-        self.task_id = task_id
         self.adapter = adapter
         self.job_id = job_id
         self.category_name = category_name
+        self.tasks_mapper = tasks_mapper
         self.benchmark_id = benchmark_id
         self.job_id = job_id
         self.api_host = api_host
@@ -87,12 +86,6 @@ class EvaluatationJob:
 
         if API_KEY and self.adapter == "gemini":
             os.environ["GOOGLE_API_KEY"] = API_KEY
-
-        if output_dir:
-            self.output_path = os.path.join(
-                output_dir, normalize_string(output_path or "results"))
-        else:
-            self.output_path = normalize_string(output_path or "results")
             
     def _extract_api_error_message(self, exception: Exception):
         """Extract the full API error object from various exception types."""
@@ -159,15 +152,12 @@ class EvaluatationJob:
                 }
             }
 
-
-    def run(self):
+    def __call__(self):
         """Run a simple evaluation job."""
         if self.api_host and self.job_id and self.server_token:
             update_status(api_host=self.api_host, job_id=self.job_id,
                           server_token=self.server_token, status=JobStatus.RUNNING)
         try:
-            logger.info(
-                f"Evaluating model on the following: Category: {self.category_name} | Task: {self.task_id}")
             results = lm_eval.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
@@ -176,10 +166,10 @@ class EvaluatationJob:
                 task_manager=lm_eval.tasks.TaskManager(include_path=".temp"),
                 batch_size="auto",
             )
-            logger.info("Exporting results to %s.json", self.output_path)
+            logger.info("Exporting results to %s.json", self.category_name)
 
             results = self._add_task_to_results(
-                results=results, task_id=self.task_id)
+                results=results)
             
             is_accuracy = next(
                 (item.get("metric") for item in next(iter(results.get("configs", {}).values()), {}).get("metric_list", [])[:1]),
@@ -243,18 +233,24 @@ class EvaluatationJob:
             error_message = json.dumps(api_error_data) if isinstance(api_error_data, dict) else str(api_error_data)
             raise Exception(error_message) from e
 
-    def _add_task_to_results(self, results: dict[str, Any], task_id: str):
+
+    def _add_task_to_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Add task_id to each result in the results dictionary."""
         if "results" not in results:
             logger.warning("No 'results' key found in results dictionary")
             return results
 
-        for task_name in results["results"]:
-            if isinstance(results["results"][task_name], dict):
-                results["results"][task_name]["task"] = task_id
+        for task_name, task_result in results["results"].items():
+            if isinstance(task_result, dict):
+                if "task" not in task_result:
+                    task_id = self.tasks_mapper.get(task_name)
+                    if task_id is None:
+                        logger.warning(f"No mapping found for task '{task_name}'")
+                    task_result["task"] = task_id
             else:
                 logger.warning(
-                    f"Task result for '{task_name}' is not a dictionary, skipping task_id addition")
+                    f"Task result for '{task_name}' is not a dictionary, skipping task_id addition"
+                )
 
         return results
 
@@ -306,19 +302,20 @@ class EvaluatationJob:
         average_scores = self._calculate_average_scores(results)
         results_with_averages = {**results, "average_scores": average_scores}
         # Save results to a JSON file
-        with open(f"{self.output_path}.json", "w", encoding="UTF-8") as fp:
+        with open(os.path.join(
+                ".results", f"{self.category_name}.json"), "w", encoding="UTF-8") as fp:
             json.dump(results_with_averages, fp, ensure_ascii=False)
 
-        logger.info(f"Results exported to {self.output_path}.json")
+        logger.info(f"Results exported to {self.category_name}.json")
 
         # Add results to the database
-        if self.api_host and self.job_id and self.server_token:
+        if self.api_host and self.job_id and self.server_token and self.benchmark_id:
             if "results" in results_with_averages:
                 for key, value in results_with_averages["results"].items():
                     add_results_to_db(
                         api_host=self.api_host,
                         job_id=self.job_id,
-                        task_id=self.task_id,
+                        task_id=value["task"],
                         server_token=self.server_token,
                         result=value,
                         category_name=self.category_name,

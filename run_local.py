@@ -40,14 +40,11 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
 if __name__ == "__main__":
-    if not BENCHMARK_ID:
-        raise Exception(
-            "[ERROR] Benchmark ID is required to run the evaluation, please set it in env")
-
     os.environ["ENV"] = "local"  # setup local env for logging to stdout
 
     # Read the tasks from directory
     tasks_temp: dict = dict()
+    task_mapper: dict = dict()
     print(f"Reading tasks from directory '{TASKS_DIR}'")
 
     for file in os.listdir(f"./{TASKS_DIR}"):
@@ -68,17 +65,17 @@ if __name__ == "__main__":
                 d["json"]["category"] = d["category"]
                 d["json"]["task"] = d["task"]
                 json.dump(d["json"], f_out, ensure_ascii=False)
+                
+            task_mapper[d["name"]] = d["task"]
 
             # Initialize LMHDataset
             dataset = LMHDataset(str(file.split(".")[0]), TEMP_DIR)
             dataset.export()
 
             if tasks_temp.get(d["category"]) is None:
-                tasks_temp[d["category"]] = {}
-            if tasks_temp[d["category"]].get(d["task"]) is None:
-                tasks_temp[d["category"]][d["task"]] = []
-            tasks_temp[d["category"]][d["task"]].append(dataset.name)
-
+                tasks_temp[d["category"]] = []
+            tasks_temp[d["category"]].append(dataset.name)
+    
     # Model arguments
     model_args = {"model": MODEL_NAME}
     if BASE_URL:
@@ -87,7 +84,7 @@ if __name__ == "__main__":
         model_args["api_key"] = API_KEY
 
     # Initialize a model evaluation
-    if ADAPTER and SERVER_TOKEN and API_HOST and USER_ID and tasks_temp:
+    if ADAPTER and SERVER_TOKEN and API_HOST and USER_ID and BENCHMARK_ID and tasks_temp:
         submit_results = submit_model_evaluation(
             model_name=MODEL_NAME,
             model_url=BASE_URL,
@@ -102,33 +99,30 @@ if __name__ == "__main__":
         if not submit_results["success"]:
             raise Exception(
                 f"[ERROR] Failed to submit evaluation: {submit_results['error']}")
+            
+        print(submit_results)
     else:
         submit_results = {"jobs_ids": {}}
-
-    for category, tasks in tasks_temp.items():
+    for category, datasets in tasks_temp.items():
         print("Running evaluation for category:", category)
-        print("Total tasks:", len(tasks))
 
-        for task, _datasets in tasks.items():
-            try:
-                job = EvaluatationJob(
-                    tasks=_datasets,
-                    adapter=ADAPTER,
-                    task_id=task,
-                    output_path=str(task),
-                    output_dir=RESULTS_DIR,
-                    model_args=model_args,
-                    job_id=submit_results["jobs_ids"].get(category, None),
-                    llm_judge_api_key=LLM_JUDGE_API_KEY,
-                    llm_judge_model=LLM_JUDGE,
-                    llm_judge_provider=LLM_JUDGE_PROVIDER,
-                    server_token=SERVER_TOKEN,
-                    api_host=API_HOST,
-                    benchmark_id=BENCHMARK_ID,
-                    category_name=category
+        try:
+            job = EvaluatationJob(
+                tasks=datasets,
+                adapter=ADAPTER,
+                model_args=model_args,
+                tasks_mapper=task_mapper,
+                category_name=category,
+                job_id=submit_results["jobs_ids"].get(category, None),
+                llm_judge_api_key=LLM_JUDGE_API_KEY,
+                llm_judge_model=LLM_JUDGE,
+                llm_judge_provider=LLM_JUDGE_PROVIDER,
+                server_token=SERVER_TOKEN,
+                api_host=API_HOST,
+                benchmark_id=BENCHMARK_ID,
                 )
-                job.run()
-            except Exception as e:
-                print(
-                    f"An error occurred while running the job for task {task}: {e}")
-                continue
+            job()
+        except Exception as e:
+            print(
+                f"An error occurred while running the job for task {category}: {e}")
+            continue

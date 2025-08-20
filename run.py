@@ -54,16 +54,19 @@ if __name__ == "__main__":
         dataset = LMHDataset(dataset_id, directory=".temp")
         dataset.export()
         datasets.append(dataset)
-
+    
+    task_mapper = {}
+    
     # Organize datasets by category and task
     categories: dict[str, dict[str, list[LMHDataset]]] = {}
     for dataset in datasets:
+        task_mapper[dataset.name] = dataset.task_id
         if dataset.category_id:
-            categories.setdefault(dataset.category_id, {})
-            categories[dataset.category_id].setdefault(
-                str(dataset.task_id), [])
-            categories[dataset.category_id][str(
-                dataset.task_id)].append(dataset)
+            if categories.get(dataset.category_id) is None:
+                categories[dataset.category_id] = {}
+            if categories[dataset.category_id].get(str(dataset.task_id)) is None:
+                categories[dataset.category_id][str(dataset.task_id)] = []
+            categories[dataset.category_id][dataset.task_id].append(dataset)
 
     print(f"Total categories: {len(categories)}")
     print(categories)
@@ -85,8 +88,7 @@ if __name__ == "__main__":
                 tasks=[dataset.name for dataset in _datasets],
                 adapter=ADAPTER,
                 model_args=model_args,
-                task_id=task,
-                output_path=str(task),
+                tasks_mapper=task_mapper,
                 job_id=JOB_ID,
                 api_host=API_HOST,
                 server_token=SERVER_TOKEN,
@@ -96,4 +98,4 @@ if __name__ == "__main__":
                 llm_judge_model=LLM_JUDGE,
                 llm_judge_provider=LLM_JUDGE_PROVIDER,
             )
-            job.run()
+            job()
