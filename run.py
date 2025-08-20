@@ -55,12 +55,10 @@ if __name__ == "__main__":
         dataset.export()
         datasets.append(dataset)
     
-    task_mapper = {}
     
     # Organize datasets by category and task
     categories: dict[str, dict[str, list[LMHDataset]]] = {}
     for dataset in datasets:
-        task_mapper[dataset.name] = dataset.task_id
         if dataset.category_id:
             if categories.get(dataset.category_id) is None:
                 categories[dataset.category_id] = {}
@@ -88,7 +86,7 @@ if __name__ == "__main__":
                 tasks=[dataset.name for dataset in _datasets],
                 adapter=ADAPTER,
                 model_args=model_args,
-                tasks_mapper=task_mapper,
+                task_id=task,
                 job_id=JOB_ID,
                 api_host=API_HOST,
                 server_token=SERVER_TOKEN,

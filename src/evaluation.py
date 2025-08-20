@@ -47,7 +47,7 @@ class EvaluatationJob:
         tasks: List[str],
         model_args: dict[str, Any],
         category_name: str,
-        tasks_mapper: dict,
+        tasks_mapper: Optional[dict] = None,
         adapter: Literal[
             "local-chat-completions",
             "openai-chat-completions",
@@ -61,7 +61,7 @@ class EvaluatationJob:
         llm_judge_model: Optional[str] = None,
         llm_judge_provider: Optional[str] = None,
         llm_judge_api_key: Optional[str] = None,
-        
+        task_id: Optional[str] = None
     ):
         self.model_args = model_args or {}
         self.tasks: List[str] = tasks
@@ -76,6 +76,7 @@ class EvaluatationJob:
         self.llm_judge_model = llm_judge_model
         self.llm_judge_provider = llm_judge_provider
         self.llm_judge_api_key = llm_judge_api_key
+        self.task_id = task_id
 
         API_KEY = os.getenv("API_KEY")
         if API_KEY and (self.adapter == "openai-chat-completions" or self.adapter == "local-chat-completions"):
@@ -212,7 +213,10 @@ class EvaluatationJob:
                 del updated_results["config"]["model_args"]["api_key"]
 
             # Export the results to a file, and add them to the database
-            self._export_results(updated_results)
+            if self.tasks_mapper:
+                self._export_results(updated_results)
+            if self.task_id:
+                self._export_results_tasks(updated_results)
 
         except Exception as e:
             #!TODO: now can return error to frontend or store it in databaase
@@ -243,7 +247,7 @@ class EvaluatationJob:
         for task_name, task_result in results["results"].items():
             if isinstance(task_result, dict):
                 if "task" not in task_result:
-                    task_id = self.tasks_mapper.get(task_name)
+                    task_id = self.task_id if self.task_id else self.tasks_mapper.get(task_name) if self.tasks_mapper else None
                     if task_id is None:
                         logger.warning(f"No mapping found for task '{task_name}'")
                     task_result["task"] = task_id
@@ -296,7 +300,7 @@ class EvaluatationJob:
         logger.info("Average Scores: %s", average_scores)
         return average_scores
 
-    def _export_results(self, results: dict[str, Any], is_temp: bool = False):
+    def _export_results(self, results: dict[str, Any]):
         """Export the results to a JSON file in the current working directory."""
         # Add average scores to results for export
         average_scores = self._calculate_average_scores(results)
@@ -322,6 +326,36 @@ class EvaluatationJob:
                         benchmark_id=self.benchmark_id)
             else:
                 logger.error("No results found in the evaluation job.")
+
+    def _export_results_tasks(self, results: dict[str, Any]):
+        """Export the results to a JSON file in the current working directory."""
+        # Add average scores to results for export
+        average_scores = self._calculate_average_scores(results)
+        results_with_averages = {**results, "average_scores": average_scores}
+        # Save results to a JSON file
+        with open(f"{self.task_id}.json", "w", encoding="UTF-8") as fp:
+            json.dump(results_with_averages, fp, ensure_ascii=False)
+
+        logger.info(f"Results exported to {self.task_id}.json")
+
+        # Add results to the database
+        if self.api_host and self.job_id and self.server_token and self.benchmark_id:
+            if "results" in results_with_averages:
+                for key, value in results_with_averages["results"].items():
+                    if self.task_id is None:
+                        logger.warning(f"No mapping found for task '{key}'")
+                        raise ValueError("No task_id or tasks_mapper provided.")
+                    add_results_to_db(
+                        api_host=self.api_host,
+                        job_id=self.job_id,
+                        task_id=normalize_string(self.task_id),
+                        server_token=self.server_token,
+                        result=value,
+                        category_name=self.category_name,
+                        benchmark_id=self.benchmark_id)
+            else:
+                logger.error("No results found in the evaluation job.")
+        
 
     def process_results_with_llm_judge(
         self,
