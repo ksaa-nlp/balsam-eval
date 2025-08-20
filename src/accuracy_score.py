@@ -4,7 +4,6 @@ import unicodedata
 import sys
 from lm_eval.api.registry import register_aggregation, register_metric
 
-
 # Punctuation table setup
 PUNCT_TABLE = dict.fromkeys(i for i in range(sys.maxunicode)
                             if unicodedata.category(chr(i)).startswith('P'))
@@ -12,283 +11,262 @@ ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
 others = '''`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ'''
 ALL_PUNCTUATIONS += ''.join([o for o in others if o not in ALL_PUNCTUATIONS])
 
-# Define expanded choice normalization mappings with more Arabic variations
-CHOICE_MAPPINGS = {
-    # Arabic yes/no with expanded options
-    "نعم": ["نعم", "أجل", "صحيح", "صح", "yes", "true", "أي نعم", "نعما", "بلى", "إيجابي", "موافق", "بالتأكيد", "حقا", "فعلا", "تماما"],
-    "لا": ["لا", "كلا", "غير صحيح", "خطأ", "no", "false", "ليس", "لن", "سلبي", "غير موافق", "أبدا", "إطلاقا"],
-
-    # Arabic true/false specific mapping
-    "صح": ["صح", "صحيح", "true", "نعم", "correct", "حق", "حقيقي", "صادق"],
-    "خطأ": ["خطأ", "غير صحيح", "false", "لا", "incorrect", "باطل", "كاذب", "غلط"],
-
-    # English yes/no
-    "yes": ["yes", "y", "true", "correct", "نعم", "أجل", "صح", "صحيح"],
-    "no": ["no", "n", "false", "incorrect", "لا", "كلا", "خطأ", "غير صحيح"],
-
-    # Multiple choice (expanded)
-    "a": ["a", "أ", "ا", "option a", "الخيار أ", "اختيار أ", "a)", "(a)", "الإجابة أ", "الجواب أ"],
-    "b": ["b", "ب", "option b", "الخيار ب", "اختيار ب", "b)", "(b)", "الإجابة ب", "الجواب ب"],
-    "c": ["c", "ج", "option c", "الخيار ج", "اختيار ج", "c)", "(c)", "الإجابة ج", "الجواب ج"],
-    "d": ["d", "د", "option d", "الخيار د", "اختيار د", "d)", "(d)", "الإجابة د", "الجواب د"]
-}
-
-
-def normalize_choice(text):
+def extract_first_word_or_line(text):
     """
-    Enhanced choice normalization that aggressively extracts just the answer:
-    - Boolean values
-    - Yes/No questions in Arabic and English
-    - True/False questions in Arabic and English
-    - Multiple choice questions (A/B/C/D)
-    - Arabic and English variations
-    - Extracts answer choices from explanatory text
+    Simple extraction of the first meaningful content from text.
+    This is our fallback to get just the answer.
+    """
+    if not isinstance(text, str):
+        text = str(text)
+    
+    text = text.strip()
+    if not text:
+        return ""
+    
+    # Try to get the first line
+    first_line = text.split('\n')[0].strip()
+    
+    # Remove common punctuation from the end
+    first_line = re.sub(r'[.،؟!]+$', '', first_line)
+    
+    # If the first line is short (likely just an answer), return it
+    if len(first_line.split()) <= 3:
+        return first_line
+    
+    # Otherwise, try to get the first word
+    first_word = first_line.split()[0] if first_line.split() else first_line
+    
+    # Clean the first word
+    first_word = re.sub(r'^["\'""]|["\'""]$', '', first_word)  # Remove quotes
+    first_word = re.sub(r'[.،؟!]+$', '', first_word)  # Remove ending punctuation
+    
+    return first_word
+
+def extract_options_from_question(question_text):
+    """
+    Extract possible answer options from the question text.
+    """
+    if not question_text:
+        return []
+    
+    options = set()
+    text_lower = question_text.lower()
+    
+    # Look for explicit yes/no instructions in quotes
+    if 'يجب أن يكون الجواب بـ"نعم" أو "لا"' in question_text or 'يجب أن يكون الجواب بـ"نعم" أو "لا"' in question_text:
+        return ['نعم', 'لا']
+    
+    # Pattern 1: "أم" or "or" patterns
+    # Looking for "X أم Y" or "X or Y"
+    or_patterns = [
+        r'(\w+)\s+(?:أم|أو)\s+(\w+)',
+        r'(\w+)\s+or\s+(\w+)',
+        r'"([^"]+)"\s+(?:أو|أم|or)\s+"([^"]+)"',  # Quoted options
+    ]
+    
+    for pattern in or_patterns:
+        matches = re.findall(pattern, question_text)  # Use original text for quotes
+        for match in matches:
+            options.update([word.strip().strip('"') for word in match if word.strip()])
+    
+    # Pattern 2: Quoted options
+    quoted_matches = re.findall(r'["\'""]([^"\'""]+)["\'""]', question_text)
+    options.update([opt.strip() for opt in quoted_matches if opt.strip()])
+    
+    # Pattern 3: After "إذا كانت" or similar
+    condition_patterns = [
+        r'إذا كان[ت]?\s+([^.؟!]+)',
+        r'whether (?:it )?(?:is |was )?([^.?!]+)',
+    ]
+    
+    for pattern in condition_patterns:
+        matches = re.findall(pattern, text_lower)
+        for match in matches:
+            # Split by "أم" or "or"
+            parts = re.split(r'\s+(?:أم|أو|or)\s+', match)
+            options.update([part.strip() for part in parts if part.strip()])
+    
+    # Common binary pairs - if we detect the context, add both options
+    binary_pairs = [
+        ['نعم', 'لا'], ['yes', 'no'],
+        ['صح', 'خطأ'], ['true', 'false'],
+        ['عادية', 'مزعجة'], ['normal', 'annoying'],
+        ['جيد', 'سيء'], ['good', 'bad'],
+        ['إيجابي', 'سلبي'], ['positive', 'negative'],
+    ]
+    
+    for pair in binary_pairs:
+        if any(word in text_lower for word in pair):
+            options.update(pair)
+            break
+    
+    # Convert to list and clean
+    clean_options = []
+    for opt in options:
+        cleaned = opt.strip().strip('"\'"".،,')
+        if cleaned and len(cleaned) > 0:
+            clean_options.append(cleaned)
+    
+    return clean_options
+
+def simple_normalize(text, reference_options=None):
+    """
+    Simple normalization that tries to extract the core answer.
     """
     if isinstance(text, bool):
         return "نعم" if text else "لا"
-
+    
     if not isinstance(text, str):
         text = str(text)
-
-    # First, look for answers at the very beginning of the text (most common case)
-    # Split by newlines and periods to get the first statement
-    first_sentence = text.split('\n')[0].split('.')[0].strip()
     
-    # Check if the first sentence is just an answer
-    clean_first = first_sentence.lower().strip()
-    clean_first = ''.join(ch for ch in clean_first if ch not in ALL_PUNCTUATIONS)
+    # Get the first meaningful part
+    extracted = extract_first_word_or_line(text)
     
-    # Direct match for simple answers at the beginning
-    for standard_form, variations in CHOICE_MAPPINGS.items():
-        if clean_first in variations:
-            return standard_form
-    
-    # Check if first word/character is an answer
-    first_word = clean_first.split()[0] if clean_first.split() else ""
-    if first_word in CHOICE_MAPPINGS:
-        return first_word
-    
-    # Check first character for multiple choice
-    if len(clean_first) > 0:
-        first_char = clean_first[0]
-        if first_char in ['a', 'b', 'c', 'd', 'أ', 'ب', 'ج', 'د']:
-            return first_char
-
-    # Look for explicit answer patterns in the text in both Arabic and English
-    choice_patterns = [
-        # Arabic patterns - prioritize patterns at the beginning
-        r'^([a-dأ-د])\b',  # Answer letter at the very start
-        r'^(صح|صحيح|خطأ|غير صحيح)\b',  # True/false at start
-        r'^(نعم|لا)\b',  # Yes/no at start
+    # If we have reference options, try to match
+    if reference_options:
+        extracted_lower = extracted.lower().strip()
         
-        # Then look for structured patterns
-        r'\bالإجابة\s+(?:هي\s+)?[:\s]?\s*([a-dأ-د])\b',  # "الإجابة هي: أ"
-        r'\bالخيار\s+(?:هو\s+)?[:\s]?\s*([a-dأ-د])\b',   # "الخيار هو: ب"
-        r'\bالجواب\s+(?:هو\s+)?[:\s]?\s*([a-dأ-د])\b',   # "الجواب هو: ج"
-        r'\bالإجابة\s+(?:هي\s+)?[:\s]?\s*(صح|صحيح|خطأ|غير صحيح)\b',
-        r'\bالجواب\s+(?:هو\s+)?[:\s]?\s*(صح|صحيح|خطأ|غير صحيح)\b',
-        r'\bالإجابة\s+(?:هي\s+)?[:\s]?\s*(نعم|لا)\b',
-        r'\bالجواب\s+(?:هو\s+)?[:\s]?\s*(نعم|لا)\b',
-
-        # English patterns
-        r'^([a-d])\b',  # Answer letter at start
-        r'^(true|false|yes|no)\b',  # Boolean at start
-        r'\banswer\s+(?:is\s+)?[:\s]?\s*([a-dأ-د])\b',
-        r'\boption\s+(?:is\s+)?[:\s]?\s*([a-dأ-د])\b',
-        r'\bchoice\s+(?:is\s+)?[:\s]?\s*([a-dأ-د])\b',
-        r'\banswer\s+(?:is\s+)?[:\s]?\s*(true|false|yes|no)\b',
-        r'\banswer\s+(?:is\s+)?[:\s]?\s*(correct|incorrect)\b',
-    ]
-
-    # Try to extract choice from patterns
-    for pattern in choice_patterns:
-        match = re.search(pattern, text.lower())
-        if match:
-            extracted = match.group(1).lower()
-            # Map variations to standardized forms
-            if extracted in ["صح", "صحيح", "true", "correct"]:
-                return "صح"
-            elif extracted in ["خطأ", "غير صحيح", "false", "incorrect"]:
-                return "خطأ"
-            elif extracted in ["نعم", "yes"]:
-                return "نعم"
-            elif extracted in ["لا", "no"]:
-                return "لا"
-            else:
-                return extracted
-
-    # Clean text for further processing
-    cleaned_text = text.lower().strip()
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
-    cleaned_text = ''.join(ch for ch in cleaned_text if ch not in ALL_PUNCTUATIONS)
-
-    # Check for exact matches in the mapping
-    for standard_form, variations in CHOICE_MAPPINGS.items():
-        if cleaned_text in variations:
-            return standard_form
-
-    # Check for contained variations (words that might be part of a longer response)
-    for standard_form, variations in CHOICE_MAPPINGS.items():
-        for variation in variations:
-            # Check if the variation is a standalone word at the beginning of text
-            if re.search(r'\b' + re.escape(variation) + r'\b', cleaned_text):
-                return standard_form
-
-    # Look for first occurrence of a, b, c, d in the text
-    match = re.search(r'\b([a-dأ-د])\b', cleaned_text)
-    if match:
-        return match.group(1).lower()
-
-    # Special handling for Arabic yes/no/true/false patterns
-    if any(word in cleaned_text for word in ["نعم", "أجل", "صحيح", "صح", "إيجابي", "موافق"]):
-        return "نعم"
-    if any(word in cleaned_text for word in ["لا", "كلا", "غير صحيح", "خطأ", "سلبي", "غير موافق"]):
-        return "لا"
-
-    # If all else fails, return the first word if it's short (likely an answer)
-    first_word = cleaned_text.split()[0] if cleaned_text.split() else cleaned_text
-    if len(first_word) <= 3:  # Short answers are more likely to be the actual answer
-        return first_word
-
-    return cleaned_text
-
-
-def prepare_texts(text, change_curly_braces=True, remove_diactrics=True):
-    """
-    Preprocess the text by handling punctuation, curly braces, and diacritics.
-    """
-    if not isinstance(text, str):
-        text = str(text)
-
-    text = re.sub('([' + re.escape(ALL_PUNCTUATIONS) + '])', r' \1 ', text)
-
-    if change_curly_braces:
-        text = text.replace('{', '[').replace('}', ']')
-
-    if remove_diactrics:
-        text = araby.strip_diacritics(text)
-
-    text = re.sub(r'\s+', ' ', text).strip()
-
-    return text
-
+        # Direct match
+        for option in reference_options:
+            if extracted_lower == option.lower().strip():
+                return option
+        
+        # Partial match
+        for option in reference_options:
+            option_lower = option.lower().strip()
+            if (option_lower in extracted_lower or 
+                extracted_lower in option_lower):
+                return option
+    
+    return extracted
 
 @register_aggregation("custom_accuracy")
 def custom_accuracy_aggregation(items):
     """
     Calculate the accuracy score between predictions and references.
     """
-    print(f"Items: {items}")
+    print(f"\n=== ACCURACY AGGREGATION DEBUG ===")
+    print(f"Total items received: {len(items)}")
+    
     if not items:
         return 0.0
 
     correct = 0
     total = len(items)
 
-    for item in items:
+    for i, item in enumerate(items):
+        print(f"\n--- Item {i+1} ---")
+        print(f"Raw item: {item}")
+        print(f"Item type: {type(item)}")
+        
+        # Handle different item formats
         if isinstance(item, dict):
             ref = item.get("ref", "")
             pred = item.get("pred", "")
-        elif isinstance(item, list) and len(item) == 1:
-            ref, pred = item[0]
-        elif isinstance(item, tuple) and len(item) == 2:
-            ref, pred = item
+            context = item.get("context", "")
+        elif isinstance(item, (list, tuple)):
+            if len(item) == 1 and isinstance(item[0], (list, tuple)) and len(item[0]) >= 2:
+                # Handle nested structure like [('ref', 'pred', 'context')]
+                inner_item = item[0]
+                ref = inner_item[0]
+                pred = inner_item[1]
+                context = inner_item[2] if len(inner_item) > 2 else ""
+            elif len(item) >= 2:
+                # Handle direct structure like ('ref', 'pred', 'context')
+                ref = item[0]
+                pred = item[1]
+                context = item[2] if len(item) > 2 else ""
+            else:
+                print(f"✗ SKIPPED - List/tuple too short: {len(item)} items")
+                continue
         else:
-            print(f"✗ Malformed item: {item}")
+            print(f"✗ SKIPPED - Malformed item format: {type(item)}")
             continue
 
-        norm_ref = normalize_choice(ref)
-        norm_pred = normalize_choice(pred)
-
-        # Special handling for Arabic true/false and yes/no equivalence
-        # Consider "صح" equivalent to "نعم" and "خطأ" equivalent to "لا" for scoring
-        if (norm_ref in ["صح", "نعم"] and norm_pred in ["صح", "نعم"]) or \
-           (norm_ref in ["خطأ", "لا"] and norm_pred in ["خطأ", "لا"]):
-            is_correct = True
-        else:
-            is_correct = norm_ref == norm_pred
-
+        print(f"Reference: '{ref}'")
+        print(f"Prediction: '{pred}'")
+        print(f"Context: '{context[:100]}...' " if len(str(context)) > 100 else f"Context: '{context}'")
+        
+        # Extract options from context
+        context_options = extract_options_from_question(str(context))
+        print(f"Extracted options: {context_options}")
+        
+        # Normalize
+        norm_ref = simple_normalize(ref, context_options)
+        norm_pred = simple_normalize(pred, context_options)
+        
+        print(f"Normalized Reference: '{norm_ref}'")
+        print(f"Normalized Prediction: '{norm_pred}'")
+        
+        # Check match (case insensitive)
+        is_correct = norm_ref.lower().strip() == norm_pred.lower().strip()
+        
         if is_correct:
             correct += 1
-            print(
-                f"✓ CORRECT | REF: {ref} ({norm_ref}) | PRED: {pred} ({norm_pred})")
+            print(f"✓ CORRECT")
         else:
-            print(
-                f"✗ WRONG   | REF: {ref} ({norm_ref}) | PRED: {pred} ({norm_pred})")
+            print(f"✗ WRONG")
 
     accuracy = (correct / total) if total > 0 else 0.0
+    print(f"\n=== FINAL RESULT ===")
     print(f"Accuracy: {accuracy:.2f}% ({correct}/{total})")
-
+    
     return accuracy
-
 
 @register_metric(
     metric="accuracy",
     higher_is_better=True,
-    output_type="generate_until",  # Changed from "multiple_choice" to "generate_until"
+    output_type="generate_until",
     aggregation="custom_accuracy",
 )
 def accuracy_fn(items):
     """Return items as is for the aggregation function."""
+    print(f"accuracy_fn called with {len(items)} items")
     return items
-
 
 def process_results(doc, results):
     """
     Process results to extract predictions and references.
-    Enhanced to handle Arabic yes/no, true/false and multiple choice responses.
     """
+    print(f"\n=== PROCESS_RESULTS DEBUG ===")
+    print(f"Document keys: {list(doc.keys()) if isinstance(doc, dict) else 'Not a dict'}")
     print(f"Document: {doc}")
+    print(f"Results type: {type(results)}")
     print(f"Results: {results}")
 
-    # Initialize default prediction
-    pred = ""
-
-    # Check if this is a multiple choice question, yes/no question, or true/false question
+    # Get the full context
     instruction = doc.get("instruction", "")
     input_text = doc.get("input", "")
-    full_context = f"{instruction} {input_text}"
+    full_context = f"{instruction} {input_text}".strip()
+    
+    print(f"Full context: '{full_context}'")
 
-    is_multiple_choice = any(opt in full_context.lower()
-                             for opt in ["خيار", "option", "a)", "b)", "c)", "d)",
-                                         "(a)", "(b)", "(c)", "(d)", "أ)", "ب)", "ج)", "د)",
-                                         "(أ)", "(ب)", "(ج)", "(د)"])
-
-    is_yes_no = any(opt in full_context.lower()
-                    for opt in ["نعم", "لا", "yes", "no", "yes/no", "نعم أو لا", "نعم او لا"])
-
-    is_true_false = any(opt in full_context.lower()
-                        for opt in ["صح", "خطأ", "صحيح", "غير صحيح", "true", "false", "true/false", "صح أو خطأ", "صح او خطأ"])
-
-    # For generate_until mode, results will be a string instead of logprobs/choices
+    # Extract prediction from results
+    pred = ""
     if isinstance(results, str):
-        # Use the generated text as prediction
         pred = results.strip()
+    elif isinstance(results, list) and results:
+        pred = str(results[0]).strip()
+    elif isinstance(results, dict):
+        # Handle different result dictionary formats
+        pred = str(results.get('text', results.get('generated_text', results.get('prediction', '')))).strip()
     else:
-        # Fallback for other result formats (maintaining compatibility)
-        if isinstance(results, list):
-            if results:
-                pred = str(results[0])
-        elif isinstance(results, tuple) and len(results) == 2:
-            pred = str(results[1])
-        else:
-            pred = str(results)
+        pred = str(results).strip()
 
     # Get reference answer
     ref = doc.get("output", "")
-    if isinstance(ref, list):
-        ref = ref[0]
+    if isinstance(ref, list) and ref:
+        ref = str(ref[0])
+    else:
+        ref = str(ref)
 
-    # Normalize both reference and prediction
-    norm_ref = normalize_choice(ref)
-    norm_pred = normalize_choice(pred)
-
-    # Determine question type for logging
-    question_type = "Multiple Choice" if is_multiple_choice else \
-        "Yes/No" if is_yes_no else \
-        "True/False" if is_true_false else "Other"
-
-    print(f"Processed - REF: {ref} ({norm_ref}) | PRED: {pred} ({norm_pred})")
-    print(f"Question type: {question_type}")
-
-    return {"accuracy": [(norm_ref, norm_pred)]}
+    print(f"Extracted prediction: '{pred}'")
+    print(f"Reference answer: '{ref}'")
+    
+    # Return the data for aggregation
+    result_data = {
+        "accuracy": [(ref, pred, full_context)]
+    }
+    
+    print(f"Returning: {result_data}")
+    return result_data

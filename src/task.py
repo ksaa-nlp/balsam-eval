@@ -212,29 +212,29 @@ class LMHDataset:
         self._copy_dependency("bleu_score.py")
 
     def _export_accuracy(self, yaml_data: dict[str, Any]) -> None:
-        # Add instruction to just output the letter of the answer
+        # Add instruction to just output the answer
         if not yaml_data.get("fewshot_config"):
             yaml_data["fewshot_config"] = {}
 
-        # Add instructions to the doc_to_text field to ensure model outputs just the letter
+        # Add instructions to the doc_to_text field to ensure model outputs just the answer
         original_doc_to_text = yaml_data.get("doc_to_text", "{{instruction}}\n{{input}}")
 
         yaml_data["doc_to_text"] = (
             f"{original_doc_to_text}\n\n"
-            # More emphatic Arabic instructions
-            "تعليمات مهمة جداً:\n"
-            "- إذا كان السؤال من نوع اختيار من متعدد، أجب فقط بالحرف (أ، ب، ج، أو د) ولا تكتب أي شيء آخر.\n"
-            "- إذا كان السؤال صح أو خطأ، أجب فقط بكلمة 'صح' أو 'خطأ' ولا تكتب أي شيء آخر.\n"
-            "- إذا كان السؤال نعم أو لا، أجب فقط بكلمة 'نعم' أو 'لا' ولا تكتب أي شيء آخر.\n"
-            "- لا تكتب أي تفسير أو تبرير أو شرح إضافي على الإطلاق.\n"
-            "- الإجابة يجب أن تكون كلمة واحدة أو حرف واحد فقط.\n\n"
-            # More emphatic English instructions
-            "CRITICAL INSTRUCTIONS:\n"
-            "- For multiple choice: Answer ONLY with the letter (A, B, C, or D). Write nothing else.\n"
-            "- For true/false: Answer ONLY with 'True' or 'False'. Write nothing else.\n"
-            "- For yes/no: Answer ONLY with 'Yes' or 'No'. Write nothing else.\n"
-            "- Do NOT provide any explanation, reasoning, or additional text.\n"
-            "- Your response must be exactly one word or one letter.\n\n"
+            # Generic Arabic instructions that work for any question type
+            "تعليمات مهمة:\n"
+            "- اقرأ السؤال بعناية وحدد الخيارات المتاحة.\n"
+            "- أجب بكلمة واحدة فقط من الخيارات المذكورة في السؤال.\n"
+            "- لا تكتب أي تفسير أو شرح إضافي.\n"
+            "- إذا كان السؤال يحتوي على خيارات محددة، اختر واحداً منها فقط.\n"
+            "- الإجابة يجب أن تكون مطابقة تماماً لأحد الخيارات المذكورة.\n\n"
+            # Generic English instructions
+            "IMPORTANT INSTRUCTIONS:\n"
+            "- Read the question carefully and identify the available options.\n"
+            "- Answer with ONLY ONE WORD from the options mentioned in the question.\n"
+            "- Do NOT provide any explanation or additional text.\n"
+            "- If the question contains specific options, choose exactly one of them.\n"
+            "- Your answer must match exactly one of the mentioned options.\n\n"
             "الإجابة:"  # "Answer:" in Arabic to prompt for the answer
         )
 
@@ -247,17 +247,17 @@ class LMHDataset:
                 "aggregation": accuracy_score.custom_accuracy_aggregation,
                 "higher_is_better": True,
             }],
-            # More aggressive generation kwargs to stop early
+            # Aggressive generation kwargs to get short answers
             "generation_kwargs": {
                 "do_sample": False, 
-                "until": ["<|endoftext|>", "\n", ".", "،", "؟", "!", "؟", " "],  # Stop at various punctuation
-                "max_gen_toks": 5,  # Limit to very few tokens
+                "until": ["<|endoftext|>", "\n", ".", "،", "؟", "!", " "],  # Stop at various punctuation and spaces
+                "max_gen_toks": 22,
             },
         })
 
         self._write_yaml(yaml_data, suffix="Accuracy")
         self._copy_dependency("accuracy_score.py")
-
+        
     def _write_yaml(self, data: dict[str, Any], suffix: str) -> None:
         out_path = Path(self.directory) / f"{self.file_name}.yaml"
         with open(out_path, "w", encoding="utf8") as f:
