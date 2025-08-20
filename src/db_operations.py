@@ -185,11 +185,13 @@ def update_status(
         raise RuntimeError(f"Failed to update job status: {e}") from e
 
 
-def get_tasks_from_category(category: str, api_host: str, server_token: str) -> list[str]:
+def get_tasks_from_category(category: str, api_host: str, server_token: str,metric_type:Optional[str]=None) -> list[str]:
     if not category:
         raise ValueError("Category is required, terminating the process.")
 
     webhook_url = f"{api_host}/api/tasks/{category}"
+    if metric_type:
+        webhook_url += f"?type={metric_type}"
     response = requests.get(
         webhook_url,
         headers={
