@@ -8,7 +8,6 @@ from typing import Any
 from pathlib import Path
 
 
-from google.cloud import storage
 from . import bleu_score
 from . import accuracy_score
 from . import utils
@@ -20,54 +19,6 @@ ValidationError = {
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
-
-
-def load_dataset_from_local(
-    dataset_id: str, directory: str = "tasks"
-) -> dict[str, Any]:
-    """
-    Load a dataset from a local directory. The dataset is identified by a dataset ID
-    which corresponds to the file name without the `.json` extension.
-    """
-    # Create the path for the file
-    file_path = f"{directory}/{dataset_id}.json"
-
-    # Check if the file exists
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"{file_path} not found.")
-
-    # Load the dataset
-    with open(file_path, "r", encoding="utf8") as fp:
-        dataset = json.load(fp)
-        return dataset
-
-
-def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]:
-    """
-    Download a dataset from GCS. The dataset is identified by a dataset ID
-    which corresponds to its primary key in the database.
-    """
-    storage_client = storage.Client()
-    bucket_name = os.getenv("GCLOUD_BUCKET")
-    bucket = storage_client.bucket(bucket_name)
-    # Create a temporary directory to store the dataset
-    os.makedirs(directory, exist_ok=True)
-    blob = bucket.blob(f"datasets/{dataset_id}.json")
-    blob.download_to_filename(f".temp/{dataset_id}.json")
-
-    print(f"Downloaded {dataset_id}.json from GCS bucket.")
-
-    # Read the dataset from the file
-    with open(f".temp/{dataset_id}.json", "r", encoding="utf8") as fp:
-        dataset = json.load(fp)
-        dd = dataset["json"]
-        dd["task"] = dataset["task"]
-        dd["category"] = dataset["category"]
-        # Overwrite the dataset with the new data
-        with open(f".temp/{dataset_id}.json", "w", encoding="utf8") as fp:
-            json.dump(dd, fp, ensure_ascii=False)
-        return dd
-
 
 class LMHDataset:
     """

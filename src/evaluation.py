@@ -1,8 +1,10 @@
 """This module contains the code for running an evaluation job."""
 import os
+
+import lm_eval.evaluator
+from src.helpers import normalize_string
 from src.llm_as_a_judge import LLMJudge, ModelConfig
 from src.db_operations import JobStatus, add_results_to_db, update_status
-from src.utils import normalize_string
 import requests
 import lm_eval
 from typing import Any, List, Literal, Optional, Dict
@@ -47,7 +49,7 @@ class EvaluatationJob:
         tasks: List[str],
         model_args: dict[str, Any],
         category_name: str,
-        tasks_mapper: Optional[dict] = None,
+        tasks_mapper_dict: Optional[dict] = None,
         adapter: Literal[
             "local-chat-completions",
             "openai-chat-completions",
@@ -68,7 +70,7 @@ class EvaluatationJob:
         self.adapter = adapter
         self.job_id = job_id
         self.category_name = category_name
-        self.tasks_mapper = tasks_mapper
+        self.tasks_mapper_dict = tasks_mapper_dict
         self.benchmark_id = benchmark_id
         self.job_id = job_id
         self.api_host = api_host
@@ -159,7 +161,7 @@ class EvaluatationJob:
             update_status(api_host=self.api_host, job_id=self.job_id,
                           server_token=self.server_token, status=JobStatus.RUNNING)
         try:
-            results = lm_eval.simple_evaluate(
+            results = lm_eval.evaluator.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
                 tasks=self.tasks,
@@ -213,13 +215,12 @@ class EvaluatationJob:
                 del updated_results["config"]["model_args"]["api_key"]
 
             # Export the results to a file, and add them to the database
-            if self.tasks_mapper:
+            if self.tasks_mapper_dict:
                 self._export_results(updated_results)
             if self.task_id:
                 self._export_results_tasks(updated_results)
 
         except Exception as e:
-            #!TODO: now can return error to frontend or store it in databaase
             # Extract the full API error object
             api_error_data = self._extract_api_error_message(e)
             
@@ -235,6 +236,7 @@ class EvaluatationJob:
             
             # Re-raise with the full error object as message
             error_message = json.dumps(api_error_data) if isinstance(api_error_data, dict) else str(api_error_data)
+            exit()
             raise Exception(error_message) from e
 
 
@@ -247,7 +249,7 @@ class EvaluatationJob:
         for task_name, task_result in results["results"].items():
             if isinstance(task_result, dict):
                 if "task" not in task_result:
-                    task_id = self.task_id if self.task_id else self.tasks_mapper.get(task_name) if self.tasks_mapper else None
+                    task_id = self.task_id if self.task_id else self.tasks_mapper_dict.get(task_name) if self.tasks_mapper_dict else None
                     if task_id is None:
                         logger.warning(f"No mapping found for task '{task_name}'")
                     task_result["task"] = task_id
@@ -307,10 +309,10 @@ class EvaluatationJob:
         results_with_averages = {**results, "average_scores": average_scores}
         # Save results to a JSON file
         with open(os.path.join(
-                ".results", f"{self.category_name}.json"), "w", encoding="UTF-8") as fp:
+                ".results", f"{normalize_string(self.category_name)}.json"), "w", encoding="UTF-8") as fp:
             json.dump(results_with_averages, fp, ensure_ascii=False)
 
-        logger.info(f"Results exported to {self.category_name}.json")
+        logger.info(f"Results exported to {normalize_string(self.category_name)}.json")
 
         # Add results to the database
         if self.api_host and self.job_id and self.server_token and self.benchmark_id:

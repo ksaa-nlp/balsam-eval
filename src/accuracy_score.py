@@ -1,5 +1,4 @@
 import re
-import pyarabic.araby as araby
 import unicodedata
 import sys
 from lm_eval.api.registry import register_aggregation, register_metric
@@ -55,6 +54,16 @@ def extract_options_from_question(question_text):
     # Look for explicit yes/no instructions in quotes
     if 'يجب أن يكون الجواب بـ"نعم" أو "لا"' in question_text or 'يجب أن يكون الجواب بـ"نعم" أو "لا"' in question_text:
         return ['نعم', 'لا']
+    
+    # Pattern for multiple choice options like (A), (B), (C), (D)
+    multiple_choice_pattern = r'\([A-Za-z]\)'
+    mc_matches = re.findall(multiple_choice_pattern, question_text)
+    if mc_matches:
+        # Extract just the letter from (A), (B), etc.
+        for match in mc_matches:
+            letter = match.strip('()')
+            options.add(letter)
+            options.add(match)  # Also keep the version with parentheses
     
     # Pattern 1: "أم" or "or" patterns
     # Looking for "X أم Y" or "X or Y"
@@ -112,6 +121,7 @@ def extract_options_from_question(question_text):
 def simple_normalize(text, reference_options=None):
     """
     Simple normalization that tries to extract the core answer.
+    Enhanced to handle parentheses and multiple choice answers.
     """
     if isinstance(text, bool):
         return "نعم" if text else "لا"
@@ -122,23 +132,38 @@ def simple_normalize(text, reference_options=None):
     # Get the first meaningful part
     extracted = extract_first_word_or_line(text)
     
+    # Clean extracted text - remove parentheses and common punctuation
+    clean_extracted = re.sub(r'[()[\]{}]', '', extracted).strip()
+    
     # If we have reference options, try to match
     if reference_options:
         extracted_lower = extracted.lower().strip()
+        clean_extracted_lower = clean_extracted.lower().strip()
         
-        # Direct match
-        for option in reference_options:
-            if extracted_lower == option.lower().strip():
-                return option
-        
-        # Partial match
+        # Direct match with original extracted text
         for option in reference_options:
             option_lower = option.lower().strip()
-            if (option_lower in extracted_lower or 
-                extracted_lower in option_lower):
+            if extracted_lower == option_lower:
+                return option
+        
+        # Direct match with cleaned extracted text (without parentheses)
+        for option in reference_options:
+            option_lower = option.lower().strip()
+            clean_option = re.sub(r'[()[\]{}]', '', option_lower).strip()
+            if clean_extracted_lower == clean_option:
+                return option
+        
+        # Partial match - check if cleaned versions contain each other
+        for option in reference_options:
+            option_lower = option.lower().strip()
+            clean_option = re.sub(r'[()[\]{}]', '', option_lower).strip()
+            
+            # Check both directions for containment
+            if (clean_option in clean_extracted_lower or 
+                clean_extracted_lower in clean_option):
                 return option
     
-    return extracted
+    return clean_extracted if clean_extracted else extracted
 
 @register_aggregation("custom_accuracy")
 def custom_accuracy_aggregation(items):
@@ -198,14 +223,17 @@ def custom_accuracy_aggregation(items):
         print(f"Normalized Reference: '{norm_ref}'")
         print(f"Normalized Prediction: '{norm_pred}'")
         
-        # Check match (case insensitive)
-        is_correct = norm_ref.lower().strip() == norm_pred.lower().strip()
+        # Check match (case insensitive, and handle parentheses)
+        clean_ref = re.sub(r'[()[\]{}]', '', norm_ref).lower().strip()
+        clean_pred = re.sub(r'[()[\]{}]', '', norm_pred).lower().strip()
+        
+        is_correct = clean_ref == clean_pred
         
         if is_correct:
             correct += 1
-            print(f"✓ CORRECT")
+            print(f"✓ CORRECT ('{clean_ref}' == '{clean_pred}')")
         else:
-            print(f"✗ WRONG")
+            print(f"✗ WRONG ('{clean_ref}' != '{clean_pred}')")
 
     accuracy = (correct / total) if total > 0 else 0.0
     print(f"\n=== FINAL RESULT ===")

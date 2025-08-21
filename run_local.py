@@ -58,24 +58,24 @@ if __name__ == "__main__":
             # Skip datasets with no metric
             if d["json"]["metric_list"][0]["metric"] == "":
                 continue
-
+            
+            task_mapper[d["name"]] = d["task"]
+            
             with open(
-                f"./{TEMP_DIR}/{file.split('.')[0]}.json", "w", encoding="utf-8"
+                f"./{TEMP_DIR}/{file}", "w", encoding="utf-8"
             ) as f_out:
                 d["json"]["category"] = d["category"]
                 d["json"]["task"] = d["task"]
                 json.dump(d["json"], f_out, ensure_ascii=False)
                 
-            task_mapper[d["name"]] = d["task"]
-
             # Initialize LMHDataset
-            dataset = LMHDataset(str(file.split(".")[0]), TEMP_DIR)
+            dataset = LMHDataset(str(file.rsplit(".",1)[0]), TEMP_DIR)
             dataset.export()
 
             if tasks_temp.get(d["category"]) is None:
                 tasks_temp[d["category"]] = []
             tasks_temp[d["category"]].append(dataset.name)
-    
+
     # Model arguments
     model_args = {"model": MODEL_NAME}
     if BASE_URL:
@@ -111,7 +111,7 @@ if __name__ == "__main__":
                 tasks=datasets,
                 adapter=ADAPTER,
                 model_args=model_args,
-                tasks_mapper=task_mapper,
+                tasks_mapper_dict=task_mapper,
                 category_name=category,
                 job_id=submit_results["jobs_ids"].get(category, None),
                 llm_judge_api_key=LLM_JUDGE_API_KEY,

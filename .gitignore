@@ -41,3 +41,8 @@ scripts/datasets
 ignores
 .results_old
 .vscode/
+
+
+# temp
+.tasks
+.results

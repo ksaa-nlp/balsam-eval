@@ -6,7 +6,8 @@ import os
 from dotenv import load_dotenv
 from src.db_operations import get_tasks_from_category
 from src.evaluation import EvaluatationJob
-from src.task import LMHDataset, download_dataset_from_gcs
+from src.helpers import download_dataset_from_gcs
+from src.task import LMHDataset
 
 # Load environment variables
 load_dotenv()
