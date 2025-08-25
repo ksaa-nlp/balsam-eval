@@ -175,17 +175,17 @@ class LMHDataset:
             # Generic Arabic instructions that work for any question type
             "تعليمات مهمة:\n"
             "- اقرأ السؤال بعناية وحدد الخيارات المتاحة.\n"
-            "- أجب بكلمة واحدة فقط من الخيارات المذكورة في السؤال.\n"
+            "- إذا كانت الخيارات تحتوي على حروف (أ، ب، ج، د أو A، B، C، D)، أجب بالحرف فقط.\n"
+            "- إذا لم تكن هناك حروف، أجب بكلمة واحدة فقط من الخيارات المذكورة.\n"
             "- لا تكتب أي تفسير أو شرح إضافي.\n"
-            "- إذا كان السؤال يحتوي على خيارات محددة، اختر واحداً منها فقط.\n"
-            "- الإجابة يجب أن تكون مطابقة تماماً لأحد الخيارات المذكورة.\n\n"
+            "- الإجابة يجب أن تكون مطابقة تماماً لأحد الخيارات المذكورة أو الحرف المقابل.\n\n"
             # Generic English instructions
             "IMPORTANT INSTRUCTIONS:\n"
             "- Read the question carefully and identify the available options.\n"
-            "- Answer with ONLY ONE WORD from the options mentioned in the question.\n"
+            "- If options contain letters (A, B, C, D, etc.) followed by text, answer with ONLY the letter.\n"
+            "- If there are no letter options, answer with ONLY ONE WORD from the mentioned options.\n"
             "- Do NOT provide any explanation or additional text.\n"
-            "- If the question contains specific options, choose exactly one of them.\n"
-            "- Your answer must match exactly one of the mentioned options.\n\n"
+            "- Your answer must be either the correct letter or match exactly one of the mentioned options.\n\n"
             "الإجابة:"  # "Answer:" in Arabic to prompt for the answer
         )
 
@@ -202,13 +202,12 @@ class LMHDataset:
             "generation_kwargs": {
                 "do_sample": False, 
                 "until": ["<|endoftext|>", "\n", ".", "،", "؟", "!", " "],  # Stop at various punctuation and spaces
-                "max_gen_toks": 22,
+                "max_gen_toks": 5,  # Reduced from 22 to 5 since we only want letters
             },
         })
 
         self._write_yaml(yaml_data, suffix="Accuracy")
-        self._copy_dependency("accuracy_score.py")
-        
+        self._copy_dependency("accuracy_score.py")       
     def _write_yaml(self, data: dict[str, Any], suffix: str) -> None:
         out_path = Path(self.directory) / f"{self.file_name}.yaml"
         with open(out_path, "w", encoding="utf8") as f:
