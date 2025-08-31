@@ -20,6 +20,7 @@ SERVER_TOKEN = os.getenv("SERVER_TOKEN")
 API_HOST = os.getenv("API_HOST")
 USER_ID = os.getenv("USER_ID")
 BENCHMARK_ID = os.getenv("BENCHMARK_ID")
+EVALUATION_TYPES = os.getenv("EVALUATION_TYPES")
 LLM_JUDGE = os.getenv("JUDGE_MODEL")
 LLM_JUDGE_PROVIDER = os.getenv("JUDGE_PROVIDER")
 LLM_JUDGE_API_KEY = os.getenv("JUDGE_API_KEY")
@@ -94,7 +95,8 @@ if __name__ == "__main__":
             server_token=SERVER_TOKEN,
             api_host=API_HOST,
             user_id=USER_ID,
-            benchmark_id=BENCHMARK_ID
+            benchmark_id=BENCHMARK_ID,
+            evaluation_types=(EVALUATION_TYPES or "").split(",") or ["generation"]
         )
         if not submit_results["success"]:
             raise Exception(

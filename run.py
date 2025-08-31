@@ -28,10 +28,10 @@ MAX_TOKENS = os.getenv("MAX_TOKENS")
 TEMPERATURE = os.getenv("TEMPERATURE")
 MODEL_NAME = os.getenv("MODEL")
 JOB_ID = os.getenv("JOB_ID")
+EVALUATION_TYPES = os.getenv("EVALUATION_TYPES")
 LLM_JUDGE = os.getenv("JUDGE_MODEL")
 LLM_JUDGE_PROVIDER = os.getenv("JUDGE_PROVIDER")
 LLM_JUDGE_API_KEY = os.getenv("JUDGE_API_KEY")
-METRIC_TYPE = os.getenv("METRIC_TYPE")
 
 # Validation
 if not all([API_HOST, SERVER_TOKEN, CATEGORY_ID, ADAPTER, BENCHMARK_ID]):
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     if not CATEGORY_ID or not API_HOST or not SERVER_TOKEN:
         raise ValueError("CATEGORY, API_HOST, and SERVER_TOKEN must be set.")
     datasets_ids = get_tasks_from_category(
-        category=CATEGORY_ID, api_host=API_HOST, server_token=SERVER_TOKEN, metric_type=METRIC_TYPE
+        category=CATEGORY_ID, api_host=API_HOST, server_token=SERVER_TOKEN, evaluation_types=EVALUATION_TYPES
     )
 
     datasets: list[LMHDataset] = []

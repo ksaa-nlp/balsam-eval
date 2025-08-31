@@ -34,7 +34,8 @@ def submit_model_evaluation(
     server_token: str,
     api_host: str,
     user_id: str,
-    benchmark_id: str
+    benchmark_id: str,
+    evaluation_types: List[str]
 ) -> Dict[str, Any]:
     headers = {
         "Content-Type": "application/json",
@@ -49,7 +50,8 @@ def submit_model_evaluation(
         "apiKey": api_key,
         "categories": categories,
         "userId": user_id,
-        "benchmarkId": benchmark_id
+        "benchmarkId": benchmark_id,
+        "evaluationTypeValues": evaluation_types,
     }
 
     try:
@@ -185,13 +187,16 @@ def update_status(
         raise RuntimeError(f"Failed to update job status: {e}") from e
 
 
-def get_tasks_from_category(category: str, api_host: str, server_token: str,metric_type:Optional[str]=None) -> list[str]:
+def get_tasks_from_category(category: str, api_host: str, server_token: str, evaluation_types: Optional[str] = None) -> list[str]:
     if not category:
         raise ValueError("Category is required, terminating the process.")
 
     webhook_url = f"{api_host}/api/tasks/{category}"
-    if metric_type:
-        webhook_url += f"?type={metric_type}"
+    if evaluation_types:
+        types_param = "&types=".join(evaluation_types.split(','))
+        webhook_url += f"?types={types_param}"
+    else:
+        webhook_url += "?types=generation"
     response = requests.get(
         webhook_url,
         headers={
