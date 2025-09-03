@@ -335,7 +335,7 @@ class EvaluatationJob:
         average_scores = self._calculate_average_scores(results)
         results_with_averages = {**results, "average_scores": average_scores}
         # Save results to a JSON file
-        with open(f"{self.task_id}.json", "w", encoding="UTF-8") as fp:
+        with open(f"{normalize_string(self.task_id)}.json", "w", encoding="UTF-8") as fp:
             json.dump(results_with_averages, fp, ensure_ascii=False)
 
         logger.info(f"Results exported to {self.task_id}.json")
