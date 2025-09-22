@@ -135,6 +135,23 @@ def simple_normalize(text, reference_options=None):
     # Clean extracted text - remove parentheses and common punctuation
     clean_extracted = re.sub(r'[()[\]{}]', '', extracted).strip()
     
+    # NEW: Check if the extracted text starts with a letter followed by ) - this is likely a multiple choice answer
+    mc_pattern = r'^([A-Za-z])\)'
+    mc_match = re.match(mc_pattern, extracted.strip())
+    if mc_match:
+        # Extract just the letter part
+        letter_only = mc_match.group(1)
+        # If reference options include this letter, return it
+        if reference_options:
+            for option in reference_options:
+                if option.strip().upper() == letter_only.upper():
+                    return option
+        return letter_only
+    
+    # NEW: Check if the extracted text is just a letter (A, B, C, D, etc.)
+    if len(extracted.strip()) == 1 and extracted.strip().isalpha():
+        return extracted.strip()
+    
     # If we have reference options, try to match
     if reference_options:
         extracted_lower = extracted.lower().strip()
@@ -151,6 +168,13 @@ def simple_normalize(text, reference_options=None):
             option_lower = option.lower().strip()
             clean_option = re.sub(r'[()[\]{}]', '', option_lower).strip()
             if clean_extracted_lower == clean_option:
+                return option
+        
+        # NEW: Check if any reference option is a single letter that matches the start of our extracted text
+        for option in reference_options:
+            option_stripped = option.strip()
+            if (len(option_stripped) == 1 and option_stripped.isalpha() and 
+                extracted.strip().upper().startswith(option_stripped.upper())):
                 return option
         
         # Partial match - check if cleaned versions contain each other

@@ -46,3 +46,4 @@ ignores
 # temp
 .tasks
 .results
+.tasks_old
