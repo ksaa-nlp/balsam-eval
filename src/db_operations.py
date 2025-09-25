@@ -35,7 +35,7 @@ def submit_model_evaluation(
     api_host: str,
     user_id: str,
     benchmark_id: str,
-    evaluation_types: List[str]
+    evaluation_types: List[str] = []
 ) -> Dict[str, Any]:
     headers = {
         "Content-Type": "application/json",
@@ -51,8 +51,10 @@ def submit_model_evaluation(
         "categories": categories,
         "userId": user_id,
         "benchmarkId": benchmark_id,
-        "evaluationTypeValues": evaluation_types,
+        # "evaluationTypeValues": evaluation_types,
     }
+    if evaluation_types:
+        data["evaluationTypeValues"] = evaluation_types
 
     try:
         response = requests.post(

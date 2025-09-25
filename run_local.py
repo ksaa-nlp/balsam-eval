@@ -2,6 +2,7 @@
 
 import os
 import json
+import traceback
 from dotenv import load_dotenv
 
 from src.db_operations import submit_model_evaluation
@@ -98,11 +99,11 @@ if __name__ == "__main__":
             benchmark_id=BENCHMARK_ID,
             evaluation_types=(EVALUATION_TYPES or "").split(",") or ["generation"]
         )
+        print(submit_results)
         if not submit_results["success"]:
             raise Exception(
                 f"[ERROR] Failed to submit evaluation: {submit_results['error']}")
             
-        print(submit_results)
     else:
         submit_results = {"jobs_ids": {}}
     for category, datasets in tasks_temp.items():
