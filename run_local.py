@@ -97,12 +97,12 @@ if __name__ == "__main__":
             api_host=API_HOST,
             user_id=USER_ID,
             benchmark_id=BENCHMARK_ID,
-            evaluation_types=(EVALUATION_TYPES or "").split(",") or ["generation"]
+            evaluation_types=EVALUATION_TYPES.split(",") if EVALUATION_TYPES else [],
         )
         print(submit_results)
-        if not submit_results["success"]:
+        if submit_results["status_code"] != 200:
             raise Exception(
-                f"[ERROR] Failed to submit evaluation: {submit_results['error']}")
+                f"[ERROR] Failed to submit evaluation: {submit_results}")
             
     else:
         submit_results = {"jobs_ids": {}}
