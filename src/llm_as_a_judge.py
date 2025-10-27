@@ -5,8 +5,6 @@ from statistics import mean, median
 import json
 import time
 from tqdm import tqdm
-
-# Import your model adapters
 from src.local_model import LocalModelEdited
 from deepeval.models import GPTModel, OllamaModel, AnthropicModel, GeminiModel
 

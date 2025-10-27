@@ -1,4 +1,5 @@
 """This module contains the code for running an evaluation job."""
+import src.metrics
 import os
 
 import lm_eval.evaluator
@@ -12,10 +13,7 @@ import traceback
 import logging
 import json
 from statistics import mean
-
-# This import is necessary for the rouge metric to work and for gemini adapter to be available
-from . import metric  # noqa: F401
-from src.gemini_adapter import GeminiLM  # noqa: F401
+from src.gemini_adapter import GeminiLM
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -33,7 +31,7 @@ requests.post = lambda url, timeout=5000, **kwargs: requests.request(
 )
 
 
-class EvaluatationJob:
+class EvaluationJob:
     """
     Construct an evaluation job.
     A job is identified by a unique job ID, which should exist

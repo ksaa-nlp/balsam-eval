@@ -2,11 +2,10 @@
 
 import os
 import json
-import traceback
 from dotenv import load_dotenv
 
 from src.db_operations import submit_model_evaluation
-from src.evaluation import EvaluatationJob
+from src.evaluation import EvaluationJob
 from src.task import LMHDataset
 
 # Load environment variables
@@ -60,18 +59,16 @@ if __name__ == "__main__":
             # Skip datasets with no metric
             if d["json"]["metric_list"][0]["metric"] == "":
                 continue
-            
+
             task_mapper[d["name"]] = d["task"]
-            
-            with open(
-                f"./{TEMP_DIR}/{file}", "w", encoding="utf-8"
-            ) as f_out:
+
+            with open(f"./{TEMP_DIR}/{file}", "w", encoding="utf-8") as f_out:
                 d["json"]["category"] = d["category"]
                 d["json"]["task"] = d["task"]
                 json.dump(d["json"], f_out, ensure_ascii=False)
-                
+
             # Initialize LMHDataset
-            dataset = LMHDataset(str(file.rsplit(".",1)[0]), TEMP_DIR)
+            dataset = LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)
             dataset.export()
 
             if tasks_temp.get(d["category"]) is None:
@@ -86,7 +83,14 @@ if __name__ == "__main__":
         model_args["api_key"] = API_KEY
 
     # Initialize a model evaluation
-    if ADAPTER and SERVER_TOKEN and API_HOST and USER_ID and BENCHMARK_ID and tasks_temp:
+    if (
+        ADAPTER
+        and SERVER_TOKEN
+        and API_HOST
+        and USER_ID
+        and BENCHMARK_ID
+        and tasks_temp
+    ):
         submit_results = submit_model_evaluation(
             model_name=MODEL_NAME,
             model_url=BASE_URL,
@@ -101,16 +105,15 @@ if __name__ == "__main__":
         )
         print(submit_results)
         if submit_results["status_code"] != 200:
-            raise Exception(
-                f"[ERROR] Failed to submit evaluation: {submit_results}")
-            
+            raise Exception(f"[ERROR] Failed to submit evaluation: {submit_results}")
+
     else:
         submit_results = {"jobs_ids": {}}
     for category, datasets in tasks_temp.items():
         print("Running evaluation for category:", category)
 
         try:
-            job = EvaluatationJob(
+            job = EvaluationJob(
                 tasks=datasets,
                 adapter=ADAPTER,
                 model_args=model_args,
@@ -123,9 +126,8 @@ if __name__ == "__main__":
                 server_token=SERVER_TOKEN,
                 api_host=API_HOST,
                 benchmark_id=BENCHMARK_ID,
-                )
+            )
             job()
         except Exception as e:
-            print(
-                f"An error occurred while running the job for task {category}: {e}")
+            print(f"An error occurred while running the job for task {category}: {e}")
             continue

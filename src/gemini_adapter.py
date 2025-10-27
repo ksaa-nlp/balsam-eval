@@ -8,16 +8,7 @@ import os
 import time
 import logging
 from typing import Dict, List, Optional, Tuple, Any, Union
-
-# Check if google.generativeai is installed
-try:
-    import google.generativeai as genai
-except ImportError:
-    raise ImportError(
-        "google.generativeai is not installed. "
-        "Please install it with `pip install google-generativeai`"
-    )
-
+import google.generativeai as genai
 from lm_eval.api.model import LM
 from lm_eval.api.registry import register_model
 
