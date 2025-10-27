@@ -43,93 +43,6 @@ def extract_first_word_or_line(text):
 
     return first_word
 
-
-def extract_options_from_question(question_text):
-    """
-    Extract possible answer options from the question text.
-    """
-    if not question_text:
-        return []
-
-    options = set()
-    text_lower = question_text.lower()
-
-    # Look for explicit yes/no instructions in quotes
-    if (
-        'يجب أن يكون الجواب بـ"نعم" أو "لا"' in question_text
-        or 'يجب أن يكون الجواب بـ"نعم" أو "لا"' in question_text
-    ):
-        return ["نعم", "لا"]
-
-    # Pattern for multiple choice options like (A), (B), (C), (D)
-    multiple_choice_pattern = r"\([A-Za-z]\)"
-    mc_matches = re.findall(multiple_choice_pattern, question_text)
-    if mc_matches:
-        # Extract just the letter from (A), (B), etc.
-        for match in mc_matches:
-            letter = match.strip("()")
-            options.add(letter)
-            options.add(match)  # Also keep the version with parentheses
-
-    # Pattern 1: "أم" or "or" patterns
-    # Looking for "X أم Y" or "X or Y"
-    or_patterns = [
-        r"(\w+)\s+(?:أم|أو)\s+(\w+)",
-        r"(\w+)\s+or\s+(\w+)",
-        r'"([^"]+)"\s+(?:أو|أم|or)\s+"([^"]+)"',  # Quoted options
-    ]
-
-    for pattern in or_patterns:
-        matches = re.findall(pattern, question_text)  # Use original text for quotes
-        for match in matches:
-            options.update([word.strip().strip('"') for word in match if word.strip()])
-
-    # Pattern 2: Quoted options
-    quoted_matches = re.findall(r'["\'""]([^"\'""]+)["\'""]', question_text)
-    options.update([opt.strip() for opt in quoted_matches if opt.strip()])
-
-    # Pattern 3: After "إذا كانت" or similar
-    condition_patterns = [
-        r"إذا كان[ت]?\s+([^.؟!]+)",
-        r"whether (?:it )?(?:is |was )?([^.?!]+)",
-    ]
-
-    for pattern in condition_patterns:
-        matches = re.findall(pattern, text_lower)
-        for match in matches:
-            # Split by "أم" or "or"
-            parts = re.split(r"\s+(?:أم|أو|or)\s+", match)
-            options.update([part.strip() for part in parts if part.strip()])
-
-    # Common binary pairs - if we detect the context, add both options
-    binary_pairs = [
-        ["نعم", "لا"],
-        ["yes", "no"],
-        ["صح", "خطأ"],
-        ["true", "false"],
-        ["عادية", "مزعجة"],
-        ["normal", "annoying"],
-        ["جيد", "سيء"],
-        ["good", "bad"],
-        ["إيجابي", "سلبي"],
-        ["positive", "negative"],
-    ]
-
-    for pair in binary_pairs:
-        if any(word in text_lower for word in pair):
-            options.update(pair)
-            break
-
-    # Convert to list and clean
-    clean_options = []
-    for opt in options:
-        cleaned = opt.strip().strip('"\'"".،,')
-        if cleaned and len(cleaned) > 0:
-            clean_options.append(cleaned)
-
-    return clean_options
-
-
 def simple_normalize(text, reference_options=None):
     """
     Simple normalization that tries to extract the core answer.
@@ -219,7 +132,7 @@ def accuracy_aggregation(items):
     correct = 0
     total = len(items)
 
-    for i, item in enumerate(items):
+    for item in items:
         # Handle different item formats
         if isinstance(item, dict):
             ref = item.get("ref", "")
@@ -229,7 +142,6 @@ def accuracy_aggregation(items):
                 len(item) == 1
                 and isinstance(item[0], (list, tuple))
             ):
-                # Handle nested structure like [('ref', 'pred')]
                 inner_item = item[0]
                 if len(inner_item) >= 2:
                     ref = inner_item[0]
@@ -237,7 +149,6 @@ def accuracy_aggregation(items):
                 else:
                     continue
             elif len(item) >= 2:
-                # UPDATED: Handle direct structure like ['ref', 'pred']
                 ref = item[0]
                 pred = item[1]
             else:
