@@ -19,7 +19,7 @@ others = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ"""
 ALL_PUNCTUATIONS += "".join([o for o in others if o not in ALL_PUNCTUATIONS])
 
 
-def prepare_texts(text, change_curly_braces=False, remove_diacritics=True):
+def prepare_texts(text, change_curly_braces=False):
     """Preprocess text for ROUGE evaluation."""
     # Put spaces before and after each punctuation
     text = re.sub("([" + ALL_PUNCTUATIONS + "])", " \\1 ", text)
@@ -27,10 +27,6 @@ def prepare_texts(text, change_curly_braces=False, remove_diacritics=True):
     # Change all {} to []
     if change_curly_braces:
         text = text.replace("{", "[").replace("}", "]")
-    
-    # Remove diacritics
-    if remove_diacritics:
-        text = araby.strip_diacritics(text)
     
     return text
 
@@ -45,11 +41,11 @@ def rouge_aggregation(items):
     
     # Preprocess the texts
     refs = [
-        prepare_texts(ref, change_curly_braces=False, remove_diacritics=True).strip()
+        prepare_texts(ref, change_curly_braces=False).strip()
         for ref in refs
     ]
     preds = [
-        prepare_texts(pred, change_curly_braces=True, remove_diacritics=True).strip()
+        prepare_texts(pred, change_curly_braces=True).strip()
         for pred in preds
     ]
     
@@ -100,4 +96,4 @@ def process_results(doc, results):
     """Process results to extract predictions and references."""
     preds = results[0] if isinstance(results, list) else results
     golds = doc["output"]
-    return {"rouge": [(golds, preds)]}
+    return {"rouge": [golds, preds]}

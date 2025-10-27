@@ -3,7 +3,7 @@
 from typing import Any, Dict, Callable, Optional
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-
+from .metrics import bleu_metric, rouge_metric, accuracy_metric
 
 @dataclass
 class MetricConfig:
@@ -13,6 +13,7 @@ class MetricConfig:
     higher_is_better: bool = True
     output_type: str = "generate_until"
     generation_kwargs: Optional[Dict[str, Any]] = None
+    process_results: Optional[Callable[[Any], Any]] = None
 
 
 class BaseMetric(ABC):
@@ -41,6 +42,8 @@ class BaseMetric(ABC):
         
         # Update generation kwargs
         yaml_config["generation_kwargs"] = self.get_generation_kwargs()
+        if self.config.process_results is not None:
+            yaml_config["process_results"] = self.config.process_results
         
         # Add metric config
         yaml_config.update({
@@ -115,16 +118,17 @@ class MetricsRegistry:
     
     def _register_default_metrics(self):
         """Register default metrics."""
+        
         # BLEU
-        bleu_config = MetricConfig(name="bleu", higher_is_better=True, aggregation_name="custom_bleu")
+        bleu_config = MetricConfig(name="bleu", higher_is_better=True, aggregation_name="custom_bleu", process_results=bleu_metric.process_results)
         self._metrics["bleu"] = BleuMetric(bleu_config)
         
         # ROUGE
-        rouge_config = MetricConfig(name="rouge", higher_is_better=True)
+        rouge_config = MetricConfig(name="rouge", higher_is_better=True,process_results=rouge_metric.process_results)
         self._metrics["rouge"] = RougeMetric(rouge_config)
         
         # Accuracy
-        accuracy_config = MetricConfig(name="accuracy", higher_is_better=True)
+        accuracy_config = MetricConfig(name="accuracy", higher_is_better=True, process_results=accuracy_metric.process_results)
         self._metrics["accuracy"] = AccuracyMetric(accuracy_config)
     
     def register(self, name: str, metric: BaseMetric):

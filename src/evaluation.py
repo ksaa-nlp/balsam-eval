@@ -1,5 +1,5 @@
 """This module contains the code for running an evaluation job."""
-import src.metrics
+# import src.metrics
 import os
 
 import lm_eval.evaluator
