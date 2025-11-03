@@ -14,6 +14,7 @@ import logging
 import json
 from statistics import mean
 from src.gemini_adapter import GeminiLM
+import src.metrics 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
