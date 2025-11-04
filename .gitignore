@@ -47,3 +47,5 @@ ignores
 .tasks
 .results
 .tasks_old
+.tasks_full
+.tasks copy
