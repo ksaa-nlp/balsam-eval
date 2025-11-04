@@ -4,4 +4,4 @@ This service is used to evaluate models on the [Arabic Benchmarks platform](http
 
 # Contributions
 
-We welcome contributions form the community to enhance this service. Please read the [`CONTRIBUTING`](./CONTRIBUTING.md) guide to get started.
+We welcome contributions form the community to enhance this service. Please read the [`CONTRIBUTING`](./docs/CONTRIBUTING.md) guide to get started.

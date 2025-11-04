@@ -5,7 +5,7 @@ import os
 
 from dotenv import load_dotenv
 from src.db_operations import get_tasks_from_category
-from src.evaluation import EvaluatationJob
+from src.evaluation import EvaluationJob
 from src.helpers import download_dataset_from_gcs
 from src.task import LMHDataset
 
@@ -36,7 +36,8 @@ LLM_JUDGE_API_KEY = os.getenv("JUDGE_API_KEY")
 # Validation
 if not all([API_HOST, SERVER_TOKEN, CATEGORY_ID, ADAPTER, BENCHMARK_ID]):
     raise ValueError(
-        "API_HOST, SERVER_TOKEN, CATEGORY, BENCHMARK_ID, and ADAPTER environment variables are required")
+        "API_HOST, SERVER_TOKEN, CATEGORY, BENCHMARK_ID, and ADAPTER environment variables are required"
+    )
 if not MODEL_NAME:
     raise ValueError("MODEL name is required")
 
@@ -45,7 +46,10 @@ if __name__ == "__main__":
     if not CATEGORY_ID or not API_HOST or not SERVER_TOKEN:
         raise ValueError("CATEGORY, API_HOST, and SERVER_TOKEN must be set.")
     datasets_ids = get_tasks_from_category(
-        category=CATEGORY_ID, api_host=API_HOST, server_token=SERVER_TOKEN, evaluation_types=EVALUATION_TYPES
+        category=CATEGORY_ID,
+        api_host=API_HOST,
+        server_token=SERVER_TOKEN,
+        evaluation_types=EVALUATION_TYPES,
     )
 
     datasets: list[LMHDataset] = []
@@ -55,7 +59,7 @@ if __name__ == "__main__":
         dataset = LMHDataset(dataset_id, directory=".temp")
         dataset.export()
         datasets.append(dataset)
-        
+
     # Organize datasets by category and task
     categories: dict[str, dict[str, list[LMHDataset]]] = {}
     for dataset in datasets:
@@ -82,7 +86,7 @@ if __name__ == "__main__":
         print(f"Total tasks: {len(datasets)}")
 
         for task, _datasets in tasks.items():
-            job = EvaluatationJob(
+            job = EvaluationJob(
                 tasks=[dataset.name for dataset in _datasets],
                 adapter=ADAPTER,
                 model_args=model_args,
