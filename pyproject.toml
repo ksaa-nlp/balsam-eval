@@ -3,26 +3,22 @@ name = "balsam-lm-evaluation"
 version = "0.1.0"
 requires-python = ">=3.9,<4"
 dependencies = [
-  "lm-eval~=0.4.9.1",
-  "lm-eval[openai]~=0.4.9.1",
-  "lm-eval[api]~=0.4.9.1",
-  "pyyaml~=6.0.2",
-  "google-cloud-storage~=3.3.0",
+  "lm-eval[openai,api]~=0.4.9.1",
+  "pyyaml~=6.0.3",
+  "google-cloud-storage~=3.4.1",
   "six~=1.17.0",
-  "nltk~=3.9.1",
+  "nltk~=3.9.2",
   "pyarabic~=0.6.15",
   "google-generativeai~=0.8.5",
-  "deepeval~=3.3.9",
-  "python-dotenv~=1.1.1",
+  "deepeval~=3.6.9",
+  "python-dotenv~=1.2.1",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = [".", "src/"]
 
-[tool.coverage]
-
 [tool.coverage.run]
-omit = ['__init__.py', 'tests/*', '*/tests/*']
+omit = ["__init__.py", "tests/*", "*/tests/*"]
 
 [tool.coverage.report]
 skip_empty = true
