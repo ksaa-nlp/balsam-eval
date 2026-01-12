@@ -48,3 +48,5 @@ def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]
         return dd
 
 
+def mcq_custom_prompt():
+    return ""
