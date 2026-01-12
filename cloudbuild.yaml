@@ -2,7 +2,7 @@ steps:
   - name: 'gcr.io/kaniko-project/executor:latest'
     id: 'PREPARING_BUILD'
     args:
-      - '--destination=gcr.io/${PROJECT_ID}/benchmark:latest'
+      - '--destination=gcr.io/${PROJECT_ID}/benchmark-dev:latest'
       - '--cache=true'
       - '--single-snapshot'
       - '--compressed-caching=false'
@@ -13,7 +13,7 @@ steps:
       - '--ignore-path=/.git/'
       - '--ignore-path=~/.cache/pip/'
       - '--cache-ttl=72h'
-      - '--cache-repo=gcr.io/${PROJECT_ID}/benchmark-cache'
+      - '--cache-repo=gcr.io/${PROJECT_ID}/benchmark-dev-cache'
 
 timeout: 86400s
 options:
