@@ -3,7 +3,7 @@
 import os
 
 import lm_eval.evaluator
-from src.helpers import normalize_string
+from src.helpers import mcq_custom_prompt, normalize_string
 from src.llm_as_a_judge import LLMJudge, ModelConfig
 from src.db_operations import JobStatus, add_results_to_db, update_status
 import requests
@@ -179,7 +179,7 @@ class EvaluationJob:
             ) == "accuracy"
 
             llm_judge = None
-            if self.llm_judge_api_key and self.llm_judge_model and self.llm_judge_provider and not is_accuracy:
+            if self.llm_judge_api_key and self.llm_judge_model and self.llm_judge_provider:
                 # Initialize LLMJudge
                 llm_judge = LLMJudge(
                     model_configs=[
@@ -189,6 +189,7 @@ class EvaluationJob:
                             api_key=self.llm_judge_api_key
                         )
                     ],
+                    custom_prompt=mcq_custom_prompt() if is_accuracy else None,
                     aggregation_method="mean",
                     threshold=0.5
                 )
