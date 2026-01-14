@@ -60,15 +60,19 @@ if __name__ == "__main__":
             # TODO: EDIT HERE TO SUPPORT OLD AND NEW TEMPLATE
 
             # # Skip datasets with no metric
-            # if d["json"]["metric_list"][0]["metric"] == "":
-            #     continue
+            if "json" in d:
+                if d["json"]["metric_list"][0]["metric"] == "":
+                    continue
 
             task_mapper[d["name"]] = d["task"]
 
             with open(f"./{TEMP_DIR}/{file}", "w", encoding="utf-8") as f_out:
-                # d["json"]["category"] = d["category"]
-                # d["json"]["task"] = d["task"]
-                json.dump(d, f_out, ensure_ascii=False)
+                if "json" in d:
+                    d["json"]["category"] = d["category"]
+                    d["json"]["task"] = d["task"]
+                    json.dump(d["json"], f_out, ensure_ascii=False)
+                else:    
+                    json.dump(d, f_out, ensure_ascii=False)
 
             # Initialize LMHDataset
             dataset = LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)

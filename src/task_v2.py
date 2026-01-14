@@ -16,7 +16,7 @@ from .metrics_registry import get_metrics_registry
 
 logger = logging.getLogger(__name__)
 
-
+# TODO: need to not remove elements from orginal dict
 class LMHDataset:
     """
     Represents an LM Harness task.
