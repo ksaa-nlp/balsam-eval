@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 
 from src.db_operations import submit_model_evaluation
 from src.evaluation import EvaluationJob
-from src.task import LMHDataset
+from src.task_v2 import LMHDataset
+# from src.task import LMHDataset
 
 # Load environment variables
 load_dotenv()
@@ -55,17 +56,23 @@ if __name__ == "__main__":
         with open(f"./{TASKS_DIR}/{file}", "r", encoding="utf-8") as f:
             content = f.read()
             d = json.loads(content)
+            
+            # TODO: EDIT HERE TO SUPPORT OLD AND NEW TEMPLATE
 
-            # Skip datasets with no metric
-            if d["json"]["metric_list"][0]["metric"] == "":
-                continue
+            # # Skip datasets with no metric
+            if "json" in d:
+                if d["json"]["metric_list"][0]["metric"] == "":
+                    continue
 
             task_mapper[d["name"]] = d["task"]
 
             with open(f"./{TEMP_DIR}/{file}", "w", encoding="utf-8") as f_out:
-                d["json"]["category"] = d["category"]
-                d["json"]["task"] = d["task"]
-                json.dump(d["json"], f_out, ensure_ascii=False)
+                if "json" in d:
+                    d["json"]["category"] = d["category"]
+                    d["json"]["task"] = d["task"]
+                    json.dump(d["json"], f_out, ensure_ascii=False)
+                else:    
+                    json.dump(d, f_out, ensure_ascii=False)
 
             # Initialize LMHDataset
             dataset = LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)
