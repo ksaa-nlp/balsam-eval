@@ -3,14 +3,14 @@ name = "balsam-lm-evaluation"
 version = "0.1.0"
 requires-python = ">=3.9,<4"
 dependencies = [
-  "lm-eval[openai,api]~=0.4.9.1",
+  "lm-eval[openai,api]~=0.4.9.2",
   "pyyaml~=6.0.3",
-  "google-cloud-storage~=3.4.1",
+  "google-cloud-storage~=3.8.0",
   "six~=1.17.0",
   "nltk~=3.9.2",
   "pyarabic~=0.6.15",
-  "google-generativeai~=0.8.5",
-  "deepeval~=3.6.9",
+  "google-generativeai~=0.8.6",
+  "deepeval~=3.8.0",
   "python-dotenv~=1.2.1",
 ]
 
