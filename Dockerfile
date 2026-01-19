@@ -1,4 +1,4 @@
-FROM python:3.9-slim as build
+FROM python:3.10-slim as build
 ENV PYTHONUNBUFFERED 1
 RUN mkdir /tmp && chmod 1777 /tmp && apt-get update && \
     apt-get install -y --no-install-recommends git && \
