@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir ./
 #     nvidia-cusparse-cu12 nvidia-cudnn-cu12 nvidia-cusolver-cu12 \
 #     nvidia-cuda-nvrtc-cu12 nvidia-cuda-cupti-cu12 nvidia-cublas-cu12 -y
 
-FROM python:3.9-slim
+FROM python:3.10-slim
 WORKDIR /app
 COPY --from=build /opt/venv /opt/venv
 COPY . .
