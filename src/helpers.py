@@ -39,13 +39,16 @@ def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]
     # Read the dataset from the file
     with open(f".temp/{dataset_id}.json", "r", encoding="utf8") as fp:
         dataset = json.load(fp)
-        dd = dataset["json"]
-        dd["task"] = dataset["task"]
-        dd["category"] = dataset["category"]
-        # Overwrite the dataset with the new data
-        with open(f".temp/{dataset_id}.json", "w", encoding="utf8") as fp:
-            json.dump(dd, fp, ensure_ascii=False)
-        return dd
+        if "json" in dataset:
+            dd = dataset["json"]
+            dd["task"] = dataset["task"]
+            dd["category"] = dataset["category"]
+            # Overwrite the dataset with the new data
+            with open(f".temp/{dataset_id}.json", "w", encoding="utf8") as fp:
+                json.dump(dd, fp, ensure_ascii=False)
+            return dd
+        else:
+            return dataset
 
 
 def mcq_custom_prompt():
