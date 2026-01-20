@@ -1,5 +1,6 @@
 """This module contains the code for running an evaluation job."""
 import os
+from pathlib import Path
 
 import lm_eval.evaluator
 from src.helpers import normalize_string
@@ -161,27 +162,24 @@ class EvaluatationJob:
             update_status(api_host=self.api_host, job_id=self.job_id,
                           server_token=self.server_token, status=JobStatus.RUNNING)
         try:
+            # Convert relative path to absolute path
+            temp_dir = Path(".temp").resolve()
+            
             results = lm_eval.evaluator.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
                 tasks=self.tasks,
                 apply_chat_template=True,
-                task_manager=lm_eval.tasks.TaskManager(include_path=".temp"),
+                task_manager=lm_eval.tasks.TaskManager(include_path=str(temp_dir)),
                 batch_size="auto",
             )
             logger.info("Exporting results to %s.json", self.category_name)
 
             results = self._add_task_to_results(
                 results=results)
-            
-            is_accuracy = next(
-                (item.get("metric") for item in next(iter(results.get("configs", {}).values()), {}).get("metric_list", [])[:1]),
-                None
-            ) == "accuracy"
 
             llm_judge = None
-            if self.llm_judge_api_key and self.llm_judge_model and self.llm_judge_provider and not is_accuracy:
-                # Initialize LLMJudge
+            if self.llm_judge_api_key and self.llm_judge_model and self.llm_judge_provider:
                 llm_judge = LLMJudge(
                     model_configs=[
                         ModelConfig(
@@ -447,7 +445,7 @@ class EvaluatationJob:
                     sample["llm_explanation"] = f"Error during LLM evaluation: {str(e)}"
                     sample["llm_judge_details"] = {"error": str(e)}
 
-        # Calculate task-wise averages
+        # Calculate task-wise averages and add to results in the expected format
         for task_key in taskwise_scores:
             if taskwise_scores[task_key]:  # Check if list is not empty
                 avg_score = round(mean(taskwise_scores[task_key]), 4)
@@ -455,6 +453,15 @@ class EvaluatationJob:
 
                 processed_data["results"].setdefault(
                     task_key, {"alias": task_key})
+                
+                # Add in the format expected by _calculate_average_scores and export
+                # Using the ,none suffix format like other metrics
+                processed_data["results"][task_key]["llm_judge_score,none"] = avg_score
+                processed_data["results"][task_key]["llm_judge_score_stderr,none"] = 0.0
+                processed_data["results"][task_key]["llm_judge_score_raw,none"] = avg_score_raw
+                processed_data["results"][task_key]["llm_judge_score_raw_stderr,none"] = 0.0
+                
+                # Also keep the detailed info
                 processed_data["results"][task_key]["llm_as_judge"] = {
                     "average_score": avg_score,
                     "average_score_raw": avg_score_raw,
