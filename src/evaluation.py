@@ -197,6 +197,11 @@ class EvaluationJob:
 
             results = self._add_task_to_results(
                 results=results)
+            
+            is_accuracy = next(
+                (item.get("metric") for item in next(iter(results.get("configs", {}).values()), {}).get("metric_list", [])[:1]),
+                None
+            ) == "accuracy"
 
             llm_judge = None
             if self.llm_judge_api_key and self.llm_judge_model and self.llm_judge_provider:

@@ -75,7 +75,7 @@ if __name__ == "__main__":
                     json.dump(d, f_out, ensure_ascii=False)
 
             # Initialize LMHDataset
-            dataset = LMHDatasetV2(str(file.rsplit(".", 1)[0]), TEMP_DIR) if "json" not in d else LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR, d)
+            dataset = LMHDatasetV2(str(file.rsplit(".", 1)[0]), TEMP_DIR) if "json" not in d else LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)
             dataset.export()
 
             if tasks_temp.get(d["category"]) is None:
