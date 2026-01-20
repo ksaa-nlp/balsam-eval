@@ -8,6 +8,7 @@ from src.db_operations import get_tasks_from_category
 from src.evaluation import EvaluationJob
 from src.helpers import download_dataset_from_gcs
 from src.task import LMHDataset
+from src.task_v2 import LMHDataset as LMHDatasetV2
 
 # Load environment variables
 load_dotenv()
@@ -55,8 +56,14 @@ if __name__ == "__main__":
     datasets: list[LMHDataset] = []
     for dataset_id in datasets_ids:
         # Download and export each dataset
-        download_dataset_from_gcs(dataset_id=dataset_id, directory=".temp")
-        dataset = LMHDataset(dataset_id, directory=".temp")
+        returned_data = download_dataset_from_gcs(
+            dataset_id=dataset_id, directory=".temp"
+        )
+        dataset = (
+            LMHDataset(dataset_id, directory=".temp")
+            if "json" in returned_data
+            else LMHDatasetV2(dataset_id, directory=".temp")
+        )
         dataset.export()
         datasets.append(dataset)
 

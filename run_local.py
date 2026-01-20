@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 
 from src.db_operations import submit_model_evaluation
 from src.evaluation import EvaluationJob
-from src.task_v2 import LMHDataset
-# from src.task import LMHDataset
+from src.task_v2 import LMHDataset as LMHDatasetV2
+from src.task import LMHDataset
 
 # Load environment variables
 load_dotenv()
@@ -75,7 +75,7 @@ if __name__ == "__main__":
                     json.dump(d, f_out, ensure_ascii=False)
 
             # Initialize LMHDataset
-            dataset = LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)
+            dataset = LMHDatasetV2(str(file.rsplit(".", 1)[0]), TEMP_DIR) if "json" not in d else LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR, d)
             dataset.export()
 
             if tasks_temp.get(d["category"]) is None:
