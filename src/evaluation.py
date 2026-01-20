@@ -1,18 +1,18 @@
 """This module contains the code for running an evaluation job."""
 import os
 from pathlib import Path
-
-import lm_eval.evaluator
-from src.helpers import normalize_string
-from src.llm_as_a_judge import LLMJudge, ModelConfig
-from src.db_operations import JobStatus, add_results_to_db, update_status
-import requests
-import lm_eval
-from typing import Any, List, Literal, Optional, Dict
 import traceback
 import logging
 import json
 from statistics import mean
+from typing import Any, List, Literal, Optional, Dict
+
+import lm_eval.evaluator
+import lm_eval.tasks
+import requests
+from src.helpers import normalize_string
+from src.llm_as_a_judge import LLMJudge, ModelConfig
+from src.db_operations import JobStatus, add_results_to_db, update_status
 
 # This import is necessary for the rouge metric to work and for gemini adapter to be available
 from . import metric  # noqa: F401
@@ -27,6 +27,27 @@ if os.environ.get("ENV", "PROD") == "local":
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+
+# --- FIX START: Monkey Patch for pathlib.Path.relative_to ---
+# lm_eval 0.4.x crashes when pretty-printing external task paths because
+# it assumes all tasks are inside its own directory.
+# We patch pathlib.Path.relative_to to return the absolute path instead of raising
+# ValueError when the path is not a subpath.
+
+_original_relative_to = Path.relative_to
+
+def _safe_relative_to(self, *args, **kwargs):
+    try:
+        return _original_relative_to(self, *args, **kwargs)
+    except ValueError as e:
+        # Check if this is the specific "subpath" error causing the crash
+        if "not in the subpath of" in str(e):
+             # Return the absolute path (self) so printing continues safely
+             return self
+        raise e
+
+Path.relative_to = _safe_relative_to
+# --- FIX END ---
 
 # More robust request handling with explicit timeout
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
@@ -353,8 +374,6 @@ class EvaluatationJob:
                         result=value,
                         category_name=self.category_name,
                         benchmark_id=self.benchmark_id)
-            else:
-                logger.error("No results found in the evaluation job.")
         
 
     def process_results_with_llm_judge(
