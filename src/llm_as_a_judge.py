@@ -56,7 +56,7 @@ def create_model_adapter(config: ModelConfig) -> Any:
         )
     elif config.provider == "gemini":
         return GeminiModel(
-            model_name=config.name,
+            model=config.name,
             api_key=config.api_key,
             **base_params
         )

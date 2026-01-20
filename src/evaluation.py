@@ -1,18 +1,19 @@
 """This module contains the code for running an evaluation job."""
 # import src.metrics
 import os
-
-import lm_eval.evaluator
-from src.helpers import mcq_custom_prompt, normalize_string
-from src.llm_as_a_judge import LLMJudge, ModelConfig
-from src.db_operations import JobStatus, add_results_to_db, update_status
-import requests
-import lm_eval
-from typing import Any, List, Literal, Optional, Dict
+from pathlib import Path
 import traceback
 import logging
 import json
 from statistics import mean
+from typing import Any, List, Literal, Optional, Dict
+
+import lm_eval.evaluator
+import lm_eval.tasks
+import requests
+from src.helpers import mcq_custom_prompt, normalize_string
+from src.llm_as_a_judge import LLMJudge, ModelConfig
+from src.db_operations import JobStatus, add_results_to_db, update_status
 from src.gemini_adapter import GeminiLM
 import src.metrics 
 
@@ -25,6 +26,27 @@ if os.environ.get("ENV", "PROD") == "local":
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+
+# --- FIX START: Monkey Patch for pathlib.Path.relative_to ---
+# lm_eval 0.4.x crashes when pretty-printing external task paths because
+# it assumes all tasks are inside its own directory.
+# We patch pathlib.Path.relative_to to return the absolute path instead of raising
+# ValueError when the path is not a subpath.
+
+_original_relative_to = Path.relative_to
+
+def _safe_relative_to(self, *args, **kwargs):
+    try:
+        return _original_relative_to(self, *args, **kwargs)
+    except ValueError as e:
+        # Check if this is the specific "subpath" error causing the crash
+        if "not in the subpath of" in str(e):
+             # Return the absolute path (self) so printing continues safely
+             return self
+        raise e
+
+Path.relative_to = _safe_relative_to
+# --- FIX END ---
 
 # More robust request handling with explicit timeout
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
@@ -160,27 +182,24 @@ class EvaluationJob:
             update_status(api_host=self.api_host, job_id=self.job_id,
                           server_token=self.server_token, status=JobStatus.RUNNING)
         try:
+            # Convert relative path to absolute path
+            temp_dir = Path(".temp").resolve()
+            
             results = lm_eval.evaluator.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
                 tasks=self.tasks,
                 apply_chat_template=True,
-                task_manager=lm_eval.tasks.TaskManager(include_path=".temp"),
+                task_manager=lm_eval.tasks.TaskManager(include_path=str(temp_dir)),
                 batch_size="auto",
             )
             logger.info("Exporting results to %s.json", self.category_name)
 
             results = self._add_task_to_results(
                 results=results)
-            
-            is_accuracy = next(
-                (item.get("metric") for item in next(iter(results.get("configs", {}).values()), {}).get("metric_list", [])[:1]),
-                None
-            ) == "accuracy"
 
             llm_judge = None
             if self.llm_judge_api_key and self.llm_judge_model and self.llm_judge_provider:
-                # Initialize LLMJudge
                 llm_judge = LLMJudge(
                     model_configs=[
                         ModelConfig(
@@ -355,8 +374,6 @@ class EvaluationJob:
                         result=value,
                         category_name=self.category_name,
                         benchmark_id=self.benchmark_id)
-            else:
-                logger.error("No results found in the evaluation job.")
         
 
     def process_results_with_llm_judge(
@@ -447,7 +464,7 @@ class EvaluationJob:
                     sample["llm_explanation"] = f"Error during LLM evaluation: {str(e)}"
                     sample["llm_judge_details"] = {"error": str(e)}
 
-        # Calculate task-wise averages
+        # Calculate task-wise averages and add to results in the expected format
         for task_key in taskwise_scores:
             if taskwise_scores[task_key]:  # Check if list is not empty
                 avg_score = round(mean(taskwise_scores[task_key]), 4)
@@ -455,6 +472,15 @@ class EvaluationJob:
 
                 processed_data["results"].setdefault(
                     task_key, {"alias": task_key})
+                
+                # Add in the format expected by _calculate_average_scores and export
+                # Using the ,none suffix format like other metrics
+                processed_data["results"][task_key]["llm_judge_score,none"] = avg_score
+                processed_data["results"][task_key]["llm_judge_score_stderr,none"] = 0.0
+                processed_data["results"][task_key]["llm_judge_score_raw,none"] = avg_score_raw
+                processed_data["results"][task_key]["llm_judge_score_raw_stderr,none"] = 0.0
+                
+                # Also keep the detailed info
                 processed_data["results"][task_key]["llm_as_judge"] = {
                     "average_score": avg_score,
                     "average_score_raw": avg_score_raw,

@@ -49,5 +49,7 @@ ignores
 .tasks_old
 .tasks_full
 .tasks copy
+.tasks_full
+.tasks copy
 
 xx.py
