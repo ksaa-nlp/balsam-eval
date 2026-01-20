@@ -84,6 +84,7 @@ class LMHDataset:
 
         # Handle metric (could be a string in new template or dict in old)
         self.metric = task_dict.pop("metric", None)
+        self.category_id = task_dict.pop("category", None)
 
         # 5. Handle Data Splitting (Taking last X elements for dev)
         raw_data = task_dict.pop("data", [])

@@ -53,7 +53,7 @@ if __name__ == "__main__":
         evaluation_types=EVALUATION_TYPES,
     )
 
-    datasets: list[LMHDataset] = []
+    datasets: list[LMHDataset | LMHDatasetV2] = []
     for dataset_id in datasets_ids:
         # Download and export each dataset
         returned_data = download_dataset_from_gcs(
@@ -68,7 +68,7 @@ if __name__ == "__main__":
         datasets.append(dataset)
 
     # Organize datasets by category and task
-    categories: dict[str, dict[str, list[LMHDataset]]] = {}
+    categories: dict[str, dict[str, list[LMHDataset | LMHDatasetV2]]] = {}
     for dataset in datasets:
         if dataset.category_id:
             if categories.get(dataset.category_id) is None:
