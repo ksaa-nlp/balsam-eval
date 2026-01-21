@@ -88,7 +88,8 @@ class LMHDataset:
 
         # 5. Handle Data Splitting (Taking last X elements for dev)
         raw_data = task_dict.pop("data", [])
-        self.data = self._create_splits(raw_data, dev_size)
+        # self.data = self._create_splits(raw_data, dev_size)
+        self.data = raw_data
 
         # 6. Filter remaining metadata to keep YAML clean
         self.task_kwargs = {
