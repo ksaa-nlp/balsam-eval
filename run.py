@@ -78,6 +78,17 @@ if __name__ == "__main__":
                 categories[dataset.category_id][str(dataset.task_id)] = []
             categories[dataset.category_id][dataset.task_id].append(dataset)
 
+    # check if any categories are empty
+    for category in categories:
+        if len(categories[category]) == 0:
+            del categories[category]
+
+    # check if any tasks are empty
+    for category in categories:
+        for task in categories[category]:
+            if len(categories[category][task]) == 0:
+                del categories[category][task]
+
     print(f"Total categories: {len(categories)}")
     print(categories)
 
@@ -94,6 +105,8 @@ if __name__ == "__main__":
         print(f"Total tasks: {len(datasets)}")
 
         for task, _datasets in tasks.items():
+            if len(_datasets) == 0:
+                continue
             job = EvaluationJob(
                 tasks=[dataset.name for dataset in _datasets],
                 adapter=ADAPTER,
