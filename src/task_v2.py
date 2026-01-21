@@ -9,9 +9,8 @@ import logging
 import os
 import yaml
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Tuple
 from pathlib import Path
-import random
 from .metrics_registry import get_metrics_registry
 
 logger = logging.getLogger(__name__)
