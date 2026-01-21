@@ -9,6 +9,7 @@ from src.evaluation import EvaluationJob
 from src.helpers import download_dataset_from_gcs
 from src.task import LMHDataset
 from src.task_v2 import LMHDataset as LMHDatasetV2
+import glob
 
 # Load environment variables
 load_dotenv()
@@ -108,3 +109,6 @@ if __name__ == "__main__":
                 llm_judge_provider=LLM_JUDGE_PROVIDER,
             )
             job()
+            
+    result_files = glob.glob(".results/*.json") + glob.glob("*.json")
+    print(f"Generated result files: {result_files}")

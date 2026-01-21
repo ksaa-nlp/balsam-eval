@@ -355,14 +355,20 @@ class EvaluationJob:
 
     def _export_results_tasks(self, results: dict[str, Any]):
         """Export the results to a JSON file in the current working directory."""
-        # Add average scores to results for export
         average_scores = self._calculate_average_scores(results)
         results_with_averages = {**results, "average_scores": average_scores}
+        
+        filename = f"{normalize_string(self.task_id)}.json"
+        
         # Save results to a JSON file
-        with open(f"{normalize_string(self.task_id)}.json", "w", encoding="UTF-8") as fp:
+        with open(filename, "w", encoding="UTF-8") as fp:
             json.dump(results_with_averages, fp, ensure_ascii=False)
 
-        logger.info(f"Results exported to {self.task_id}.json")
+        logger.info(f"Results exported to {filename}")
+        
+        # Log all JSON files in current directory for debugging
+        json_files = [f for f in os.listdir('.') if f.endswith('.json')]
+        logger.info(f"JSON files in current directory: {json_files}")
 
         # Add results to the database
         if self.api_host and self.job_id and self.server_token and self.benchmark_id:
