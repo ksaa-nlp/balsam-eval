@@ -11,7 +11,7 @@ import yaml
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
-
+import random
 from .metrics_registry import get_metrics_registry
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,8 @@ class LMHDataset:
     }
 
     def __init__(
-        self, file_name: str = "dataset-n", directory: str = None, dev_size: int = 5
+        self, file_name: str = "dataset-n", 
+        directory: str = None, 
     ) -> None:
         """
         Args:
@@ -88,7 +89,7 @@ class LMHDataset:
 
         # 5. Handle Data Splitting (Taking last X elements for dev)
         raw_data = task_dict.pop("data", [])
-        self.data = self._create_splits(raw_data, dev_size)
+        self.data = self._create_splits(raw_data)
 
         # 6. Filter remaining metadata to keep YAML clean
         self.task_kwargs = {
@@ -192,16 +193,21 @@ class LMHDataset:
         task["data"] = data_rows
         return task
 
-    def _create_splits(self, raw_data: list, dev_size: int) -> Dict[str, list]:
-        """Logic: Take last X elements for dev, remaining for test."""
-        if not raw_data:
-            return {"test": [], "dev": []}
-        if dev_size <= 0:
-            return {"test": raw_data, "dev": []}
-        if dev_size >= len(raw_data):
-            return {"test": [], "dev": raw_data}
+    def _create_splits(self, raw_data: Any) -> Dict[str, list]:
+            """
+           extract the dev/test data from the template and return error
+            """
+            if isinstance(raw_data, dict):
+                if "test" not in raw_data and "dev" not in raw_data:
+                    raise ValueError("Invalid Template: 'data' object must contain 'test' or 'dev' keys.")
+                return {
+                    "test": raw_data.get("test", []),
+                    "dev": raw_data.get("dev", [])
+                }
 
-        return {"test": raw_data[:-dev_size], "dev": raw_data[-dev_size:]}
+            raise ValueError("ERROR: Unsupported Dataset Template.")
+
+
 
     def _escape_newline(self, task: Any) -> Any:
         if isinstance(task, dict):
