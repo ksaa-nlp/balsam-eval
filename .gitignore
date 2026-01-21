@@ -55,3 +55,4 @@ ignores
 .tasks copy
 
 xx.py
+.DS_Store

@@ -110,6 +110,10 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
     if "llm_as_judge" in result:
         final_results["llmAsJudgeScore"] = result["llm_as_judge"].get(
             "average_score", 0)
+        
+    if "mcq_llm_as_judge" in result:
+        final_results["MCQllmAsJudgeScore"] = result["mcq_llm_as_judge"].get(
+            "average_score", 0)
 
     return final_results
 
