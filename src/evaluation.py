@@ -157,7 +157,7 @@ class EvaluatationJob:
             return {
                 "error": {
                     "message": str(exception),
-                    "type": "unknown_error",
+                    "type": type(exception).__name__,
                     "param": None,
                     "code": "unknown",
                 }
@@ -184,9 +184,16 @@ class EvaluatationJob:
                 status=JobStatus.RUNNING,
             )
         try:
+            logger.info("=" * 80)
+            logger.info(f"Starting evaluation job for category: {self.category_name}")
+            logger.info(f"Tasks: {self.tasks}")
+            logger.info(f"Adapter: {self.adapter}")
+            logger.info(f"Model args: {self.model_args}")
+            logger.info("=" * 80)
 
             temp_dir = Path(".temp").resolve()
 
+            logger.info("Calling lm_eval.evaluator.simple_evaluate...")
             results = lm_eval.evaluator.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
@@ -195,6 +202,7 @@ class EvaluatationJob:
                 task_manager=lm_eval.tasks.TaskManager(include_path=str(temp_dir)),
                 batch_size="auto",
             )
+            logger.info("✅ simple_evaluate completed successfully")
             logger.info("Exporting results to %s.json", self.category_name)
 
             results = self._add_task_to_results(results=results)
@@ -250,7 +258,52 @@ class EvaluatationJob:
             if self.task_id:
                 self._export_results_tasks(updated_results)
 
+        except AssertionError as e:
+            # Special handling for assertion errors
+            logger.error("=" * 80)
+            logger.error("❌ ASSERTION ERROR OCCURRED")
+            logger.error("=" * 80)
+            logger.error(f"Assertion message: {str(e)}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
+            
+            # Try to extract more context
+            import sys
+            tb = sys.exc_info()[2]
+            while tb.tb_next:
+                frame = tb.tb_frame
+                logger.error(f"Frame: {frame.f_code.co_filename}:{frame.f_lineno} in {frame.f_code.co_name}")
+                logger.error(f"  Locals: {list(frame.f_locals.keys())}")
+                tb = tb.tb_next
+            
+            logger.error("=" * 80)
+
+            api_error_data = self._extract_api_error_message(e)
+
+            if self.api_host and self.job_id and self.server_token:
+                error_message = (
+                    json.dumps(api_error_data)
+                    if isinstance(api_error_data, dict)
+                    else str(api_error_data)
+                )
+                update_status(
+                    api_host=self.api_host,
+                    job_id=self.job_id,
+                    server_token=self.server_token,
+                    status=JobStatus.FAILED,
+                    error_message=error_message,
+                )
+
+            error_message = (
+                json.dumps(api_error_data)
+                if isinstance(api_error_data, dict)
+                else str(api_error_data)
+            )
+            raise Exception(error_message) from e
+
         except Exception as e:
+            logger.error("=" * 80)
+            logger.error(f"❌ EXCEPTION OCCURRED: {type(e).__name__}")
+            logger.error("=" * 80)
 
             api_error_data = self._extract_api_error_message(e)
 
@@ -277,9 +330,9 @@ class EvaluatationJob:
                 if isinstance(api_error_data, dict)
                 else str(api_error_data)
             )
-            exit()
             raise Exception(error_message) from e
 
+    # Rest of the methods remain the same...
     def _add_task_to_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Add task_id to each result in the results dictionary."""
         if "results" not in results:

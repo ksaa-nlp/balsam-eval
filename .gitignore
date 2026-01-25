@@ -49,3 +49,4 @@ ignores
 .tasks_old
 .tasks_full
 .tasks copy
+.DS_Store
