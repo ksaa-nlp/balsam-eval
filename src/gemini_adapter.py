@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 class GeminiLM(LM):
     """
     Gemini model API integration for the LM Evaluation Harness
-    (updated to google.genai)
     """
 
     def __init__(
@@ -132,15 +131,25 @@ class GeminiLM(LM):
     # ---------------------------------------------------------------------
 
     def generate_until(self, instances: List[Any]) -> List[str]:
+        """
+        Generate text until stop sequences are encountered.
+        
+        CRITICAL: Must return exactly one result per instance to avoid
+        reordering assertion errors in lm_eval.
+        """
         results = []
 
-        for instance in instances:
+        for idx, instance in enumerate(instances):
             prompt, stop_seqs = self._extract_instance_data(instance)
 
             if not prompt:
+                logger.warning(f"Empty prompt encountered at index {idx}")
                 results.append("")
                 continue
 
+            response_text = None
+            last_error = None
+            
             for attempt in range(self.max_retries):
                 try:
                     response = self.client.models.generate_content(
@@ -149,24 +158,49 @@ class GeminiLM(LM):
                         config=self._gen_config(stop_seqs),
                     )
 
-                    results.append(response.text or "")
-                    break
+                    response_text = response.text if response.text else ""
+                    break  # Success - exit retry loop
 
                 except Exception as e:
-                    logger.warning(f"Generation error: {e}")
+                    last_error = e
+                    logger.warning(
+                        f"Generation error at index {idx}, "
+                        f"attempt {attempt + 1}/{self.max_retries}: {e}"
+                    )
                     if attempt < self.max_retries - 1:
                         time.sleep(self.retry_timeout * (attempt + 1))
-                    else:
-                        results.append("")
+            
+            # If all retries failed, append empty string but log the error
+            if response_text is None:
+                logger.error(
+                    f"All {self.max_retries} attempts failed for request {idx}. "
+                    f"Last error: {last_error}. Returning empty string."
+                )
+                results.append("")
+            else:
+                results.append(response_text)
 
+        # CRITICAL: Verify count matches to prevent reordering assertion errors
+        assert len(results) == len(instances), (
+            f"Result count mismatch: {len(results)} results for {len(instances)} instances"
+        )
+        
         return results
 
     def greedy_until(self, requests: List[Any]) -> List[str]:
+        """
+        Generate text greedily (temperature=0) until stop sequences.
+        
+        CRITICAL: Must return exactly one result per request to avoid
+        reordering assertion errors in lm_eval.
+        """
         results = []
 
-        for req in requests:
+        for idx, req in enumerate(requests):
             prompt, stop_seqs = self._extract_instance_data(req)
+            
             if not prompt:
+                logger.warning(f"Empty prompt encountered at index {idx}")
                 results.append("")
                 continue
 
@@ -182,11 +216,16 @@ class GeminiLM(LM):
                         stop_sequences=stop_seqs or None,
                     ),
                 )
-                results.append(response.text or "")
+                results.append(response.text if response.text else "")
+                
             except Exception as e:
-                logger.error(f"Greedy generation error: {e}")
+                logger.error(f"Greedy generation error at index {idx}: {e}")
                 results.append("")
 
+        assert len(results) == len(requests), (
+            f"Result count mismatch: {len(results)} results for {len(requests)} requests"
+        )
+        
         return results
 
     # ---------------------------------------------------------------------
@@ -194,11 +233,19 @@ class GeminiLM(LM):
     # ---------------------------------------------------------------------
 
     def loglikelihood(self, instances: List[Any]) -> List[Tuple[float, bool]]:
+        """
+        Gemini API does not support loglikelihood computation.
+        Returns dummy values.
+        """
         return [(0.0, True) for _ in instances]
 
     def loglikelihood_rolling(
         self, instances: List[Any]
     ) -> List[List[Tuple[float, bool]]]:
+        """
+        Gemini API does not support rolling loglikelihood computation.
+        Returns dummy values.
+        """
         return [[(0.0, True)] for _ in instances]
 
     # ---------------------------------------------------------------------
@@ -206,10 +253,12 @@ class GeminiLM(LM):
     # ---------------------------------------------------------------------
 
     def _tokenize(self, text: str) -> List[str]:
+        """Simple tokenization fallback using regex split."""
         import re
         return [t for t in re.split(r"\s+|[,.!?;:\"()\[\]{}]", text) if t]
 
     def _count_tokens(self, text: str) -> int:
+        """Count tokens using Gemini's API or fallback to simple tokenization."""
         try:
             resp = self.client.models.count_tokens(
                 model=self.model_name,
@@ -220,12 +269,15 @@ class GeminiLM(LM):
             return len(self._tokenize(text))
 
     def token_count(self, instances: List[str]) -> List[int]:
+        """Return token counts for a list of text instances."""
         return [self._count_tokens(str(x)) for x in instances]
 
     def tokenize(self, text: str) -> List[str]:
+        """Tokenize text into a list of tokens."""
         return self._tokenize(text)
 
     def detokenize(self, tokens: List[str]) -> str:
+        """Convert tokens back to text."""
         return " ".join(tokens)
 
     # ---------------------------------------------------------------------
@@ -234,6 +286,7 @@ class GeminiLM(LM):
 
     @staticmethod
     def _format_chat_prompt(messages: List[Dict[str, str]]) -> str:
+        """Format chat messages into a single prompt string."""
         out = []
         for msg in messages:
             role = msg.get("role", "user").capitalize()
@@ -247,6 +300,7 @@ class GeminiLM(LM):
         add_generation_prompt: bool = True,
         **kwargs,
     ) -> str:
+        """Apply chat template to messages."""
         if isinstance(messages, str):
             return messages
 
@@ -266,6 +320,10 @@ class GeminiLM(LM):
         max_tokens: Optional[int] = None,
         stop: Optional[Union[str, List[str]]] = None,
     ) -> str:
+        """
+        Create a completion for the given prompt.
+        Convenience method for direct API usage.
+        """
         stop_seqs = None
         if stop:
             stop_seqs = [stop] if isinstance(stop, str) else stop
