@@ -1,21 +1,21 @@
 """This module contains the code for running an evaluation job."""
 
 import os
-from pathlib import Path
-import traceback
-import logging
+import sys
 import json
-from statistics import mean
+import logging
+import traceback
+from pathlib import Path
 from typing import Any, List, Literal, Optional, Dict
+from statistics import mean
 
 import lm_eval.evaluator
 import lm_eval.tasks
 import requests
+
 from src.helpers import normalize_string
 from src.llm_as_a_judge import LLMJudge, ModelConfig
 from src.db_operations import JobStatus, add_results_to_db, update_status
-
-
 from . import metric
 from src.gemini_adapter import GeminiLM
 
@@ -38,9 +38,7 @@ def _safe_relative_to(self, *args, **kwargs):
     try:
         return _original_relative_to(self, *args, **kwargs)
     except ValueError as e:
-
         if "not in the subpath of" in str(e):
-
             return self
         raise e
 
@@ -116,10 +114,8 @@ class EvaluatationJob:
     def _extract_api_error_message(self, exception: Exception):
         """Extract the full API error object from various exception types."""
         try:
-
             if hasattr(exception, "response") and exception.response is not None:
                 try:
-
                     error_data = exception.response.json()
                     if "error" in error_data:
                         return error_data
@@ -129,9 +125,7 @@ class EvaluatationJob:
             error_str = str(exception)
 
             if "API request failed with error message:" in error_str:
-
                 import re
-
                 json_match = re.search(r"\{(?:[^{}]|{[^{}]*})*\}", error_str)
                 if json_match:
                     try:
@@ -146,7 +140,6 @@ class EvaluatationJob:
                     if isinstance(arg, dict) and "error" in arg:
                         return arg
                     elif isinstance(arg, str):
-
                         try:
                             parsed = json.loads(arg)
                             if "error" in parsed:
@@ -194,14 +187,18 @@ class EvaluatationJob:
             temp_dir = Path(".temp").resolve()
 
             logger.info("Calling lm_eval.evaluator.simple_evaluate...")
+            
+            # CRITICAL FIX: Force batch_size to 1 to prevent reordering issues
+            # Process requests one at a time to ensure responses match requests
             results = lm_eval.evaluator.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
                 tasks=self.tasks,
                 apply_chat_template=True,
                 task_manager=lm_eval.tasks.TaskManager(include_path=str(temp_dir)),
-                batch_size="auto",
+                batch_size=1,  # CRITICAL: Changed from "auto" to 1
             )
+                
             logger.info("✅ simple_evaluate completed successfully")
             logger.info("Exporting results to %s.json", self.category_name)
 
@@ -266,13 +263,42 @@ class EvaluatationJob:
             logger.error(f"Assertion message: {str(e)}")
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
             
-            # Try to extract more context
-            import sys
+            # Try to extract more context from the error
             tb = sys.exc_info()[2]
-            while tb.tb_next:
+            logger.error("\nDetailed frame analysis:")
+            frame_count = 0
+            while tb is not None:
                 frame = tb.tb_frame
-                logger.error(f"Frame: {frame.f_code.co_filename}:{frame.f_lineno} in {frame.f_code.co_name}")
-                logger.error(f"  Locals: {list(frame.f_locals.keys())}")
+                frame_count += 1
+                logger.error(f"\nFrame #{frame_count}: {frame.f_code.co_filename}:{tb.tb_lineno} in {frame.f_code.co_name}")
+                logger.error(f"  Available locals: {list(frame.f_locals.keys())}")
+                
+                # Log specific variables that might help debug
+                if 'res' in frame.f_locals:
+                    res_val = frame.f_locals['res']
+                    logger.error(f"  res type: {type(res_val)}")
+                    if hasattr(res_val, '__len__'):
+                        logger.error(f"  res length: {len(res_val)}")
+                        if isinstance(res_val, (list, tuple)) and len(res_val) > 0:
+                            logger.error(f"  res[0]: {res_val[0] if len(res_val) > 0 else 'N/A'}")
+                            # Check for empty strings in results
+                            empty_count = sum(1 for item in res_val if item == "")
+                            if empty_count > 0:
+                                logger.error(f"  WARNING: Found {empty_count} empty strings in results!")
+                
+                if 'cloned_reqs' in frame.f_locals:
+                    reqs = frame.f_locals['cloned_reqs']
+                    logger.error(f"  cloned_reqs type: {type(reqs)}")
+                    if hasattr(reqs, '__len__'):
+                        logger.error(f"  cloned_reqs length: {len(reqs)}")
+                
+                if 'cov' in frame.f_locals:
+                    cov = frame.f_locals['cov']
+                    logger.error(f"  cov: {cov}")
+                    if isinstance(cov, (list, tuple)):
+                        false_count = sum(1 for item in cov if not item)
+                        logger.error(f"  WARNING: {false_count} items not covered in reordering!")
+                
                 tb = tb.tb_next
             
             logger.error("=" * 80)
@@ -311,7 +337,6 @@ class EvaluatationJob:
             logger.error("Extracted API error data: %s", api_error_data)
 
             if self.api_host and self.job_id and self.server_token:
-
                 error_message = (
                     json.dumps(api_error_data)
                     if isinstance(api_error_data, dict)
@@ -332,7 +357,6 @@ class EvaluatationJob:
             )
             raise Exception(error_message) from e
 
-    # Rest of the methods remain the same...
     def _add_task_to_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Add task_id to each result in the results dictionary."""
         if "results" not in results:
@@ -374,7 +398,6 @@ class EvaluatationJob:
                     metric_name = key.replace(",none", "")
 
                     if isinstance(value, dict):
-
                         for sub_metric, sub_value in value.items():
                             if isinstance(sub_value, (int, float)):
                                 if sub_metric not in total_scores:
@@ -383,7 +406,6 @@ class EvaluatationJob:
                                 total_scores[sub_metric] += sub_value
                                 task_counts[sub_metric] += 1
                     elif isinstance(value, (int, float)):
-
                         if metric_name not in total_scores:
                             total_scores[metric_name] = 0.0
                             task_counts[metric_name] = 0
