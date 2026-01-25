@@ -3,6 +3,8 @@ Gemini API backing for LM Evaluation Harness (google.genai version).
 
 This module provides a complete implementation of the Gemini model for use
 with LM Evaluation Harness, using the new google.genai SDK.
+
+Enhanced with retry logic for empty responses.
 """
 
 import os
@@ -23,6 +25,7 @@ logger = logging.getLogger(__name__)
 class GeminiLM(LM):
     """
     Gemini model API integration for the LM Evaluation Harness
+    Enhanced with retry logic for empty responses
     """
 
     def __init__(
@@ -127,7 +130,7 @@ class GeminiLM(LM):
         return str(instance), []
 
     # ---------------------------------------------------------------------
-    # Generation
+    # Generation with Enhanced Retry Logic
     # ---------------------------------------------------------------------
 
     def generate_until(self, instances: List[Any]) -> List[str]:
@@ -136,6 +139,8 @@ class GeminiLM(LM):
         
         CRITICAL: Must return exactly one result per instance to avoid
         reordering assertion errors in lm_eval.
+        
+        Enhanced with retry logic for empty responses.
         """
         results = []
 
@@ -159,7 +164,27 @@ class GeminiLM(LM):
                     )
 
                     response_text = response.text if response.text else ""
-                    break  # Success - exit retry loop
+                    
+                    # Check if response is empty and retry if so
+                    if response_text.strip() == "":
+                        logger.warning(
+                            f"Empty response at index {idx}, "
+                            f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
+                        )
+                        # If this was the last attempt, we'll use the empty string
+                        if attempt < self.max_retries - 1:
+                            time.sleep(self.retry_timeout * (attempt + 1))
+                            continue  # Try again
+                        else:
+                            logger.error(
+                                f"All {self.max_retries} attempts returned empty response "
+                                f"for request {idx}. Using empty string."
+                            )
+                            break  # Accept the empty response on last attempt
+                    else:
+                        # Got a non-empty response, exit retry loop
+                        logger.debug(f"Got valid response at index {idx} on attempt {attempt + 1}")
+                        break
 
                 except Exception as e:
                     last_error = e
@@ -170,7 +195,7 @@ class GeminiLM(LM):
                     if attempt < self.max_retries - 1:
                         time.sleep(self.retry_timeout * (attempt + 1))
             
-            # If all retries failed, append empty string but log the error
+            # If all retries failed due to exceptions (response_text is still None)
             if response_text is None:
                 logger.error(
                     f"All {self.max_retries} attempts failed for request {idx}. "
@@ -178,6 +203,7 @@ class GeminiLM(LM):
                 )
                 results.append("")
             else:
+                # response_text could be empty string or actual content
                 results.append(response_text)
 
         # CRITICAL: Verify count matches to prevent reordering assertion errors
@@ -193,6 +219,8 @@ class GeminiLM(LM):
         
         CRITICAL: Must return exactly one result per request to avoid
         reordering assertion errors in lm_eval.
+        
+        Enhanced with retry logic for empty responses.
         """
         results = []
 
@@ -204,23 +232,61 @@ class GeminiLM(LM):
                 results.append("")
                 continue
 
-            try:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.0,
-                        max_output_tokens=self.max_tokens,
-                        top_p=1.0,
-                        top_k=1,
-                        stop_sequences=stop_seqs or None,
-                    ),
+            response_text = None
+            last_error = None
+            
+            for attempt in range(self.max_retries):
+                try:
+                    response = self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.0,
+                            max_output_tokens=self.max_tokens,
+                            top_p=1.0,
+                            top_k=1,
+                            stop_sequences=stop_seqs or None,
+                        ),
+                    )
+                    
+                    response_text = response.text if response.text else ""
+                    
+                    # Check if response is empty and retry if so
+                    if response_text.strip() == "":
+                        logger.warning(
+                            f"Empty greedy response at index {idx}, "
+                            f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
+                        )
+                        if attempt < self.max_retries - 1:
+                            time.sleep(self.retry_timeout * (attempt + 1))
+                            continue
+                        else:
+                            logger.error(
+                                f"All {self.max_retries} attempts returned empty response "
+                                f"for greedy request {idx}. Using empty string."
+                            )
+                            break
+                    else:
+                        logger.debug(f"Got valid greedy response at index {idx} on attempt {attempt + 1}")
+                        break  # Got a non-empty response
+                    
+                except Exception as e:
+                    last_error = e
+                    logger.error(
+                        f"Greedy generation error at index {idx}, "
+                        f"attempt {attempt + 1}/{self.max_retries}: {e}"
+                    )
+                    if attempt < self.max_retries - 1:
+                        time.sleep(self.retry_timeout * (attempt + 1))
+
+            if response_text is None:
+                logger.error(
+                    f"All {self.max_retries} attempts failed for greedy request {idx}. "
+                    f"Last error: {last_error}. Returning empty string."
                 )
-                results.append(response.text if response.text else "")
-                
-            except Exception as e:
-                logger.error(f"Greedy generation error at index {idx}: {e}")
                 results.append("")
+            else:
+                results.append(response_text)
 
         assert len(results) == len(requests), (
             f"Result count mismatch: {len(results)} results for {len(requests)} requests"
@@ -323,21 +389,58 @@ class GeminiLM(LM):
         """
         Create a completion for the given prompt.
         Convenience method for direct API usage.
+        
+        Includes retry logic for empty responses.
         """
         stop_seqs = None
         if stop:
             stop_seqs = [stop] if isinstance(stop, str) else stop
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=temperature if temperature is not None else self.temperature,
-                max_output_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-                top_p=self.top_p,
-                top_k=self.top_k,
-                stop_sequences=stop_seqs,
-            ),
-        )
+        response_text = None
+        last_error = None
+        
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=temperature if temperature is not None else self.temperature,
+                        max_output_tokens=max_tokens if max_tokens is not None else self.max_tokens,
+                        top_p=self.top_p,
+                        top_k=self.top_k,
+                        stop_sequences=stop_seqs,
+                    ),
+                )
 
-        return response.text or ""
+                response_text = response.text or ""
+                
+                # Retry on empty response
+                if response_text.strip() == "":
+                    logger.warning(
+                        f"Empty completion response, "
+                        f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
+                    )
+                    if attempt < self.max_retries - 1:
+                        time.sleep(self.retry_timeout * (attempt + 1))
+                        continue
+                    else:
+                        logger.error(
+                            f"All {self.max_retries} attempts returned empty response. "
+                            "Returning empty string."
+                        )
+                        break
+                else:
+                    break
+                    
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Completion error, attempt {attempt + 1}/{self.max_retries}: {e}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_timeout * (attempt + 1))
+        
+        if response_text is None:
+            logger.error(f"All attempts failed. Last error: {last_error}. Returning empty string.")
+            return ""
+        
+        return response_text
