@@ -4,7 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.10,<4"
 dependencies = [
     "lm-eval[openai,api]~=0.4.9.2",
-    "transformers~=5.0.0",
+    "transformers==4.57.6",
     "pyyaml~=6.0.3",
     "google-cloud-storage~=3.8.0",
     "six~=1.17.0",
