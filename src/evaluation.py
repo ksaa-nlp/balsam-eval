@@ -1,22 +1,22 @@
 """This module contains the code for running an evaluation job."""
 
-# import src.metrics
 import os
-from pathlib import Path
-import traceback
-import logging
+import sys
 import json
-from statistics import mean
+import logging
+import traceback
+from pathlib import Path
 from typing import Any, List, Literal, Optional, Dict
+from statistics import mean
 
 import lm_eval.evaluator
 import lm_eval.tasks
 import requests
+
 from src.helpers import mcq_custom_prompt, normalize_string
 from src.llm_as_a_judge import LLMJudge, ModelConfig
 from src.db_operations import JobStatus, add_results_to_db, update_status
 from src.gemini_adapter import GeminiLM
-import src.metrics
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -32,21 +32,19 @@ if os.environ.get("ENV", "PROD") == "local":
 
 _original_relative_to = Path.relative_to
 
+
 def _safe_relative_to(self, *args, **kwargs):
     try:
         return _original_relative_to(self, *args, **kwargs)
     except ValueError as e:
-        # Check if this is the specific "subpath" error causing the crash
         if "not in the subpath of" in str(e):
-            # Return the absolute path (self) so printing continues safely
             return self
         raise e
 
 
 Path.relative_to = _safe_relative_to
-# --- FIX END ---
 
-# More robust request handling with explicit timeout
+
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
     method="POST", url=url, timeout=timeout, **kwargs
 )
@@ -91,7 +89,6 @@ class EvaluationJob:
         self.category_name = category_name
         self.tasks_mapper_dict = tasks_mapper_dict
         self.benchmark_id = benchmark_id
-        self.job_id = job_id
         self.api_host = api_host
         self.server_token = server_token
         self.llm_judge_model = llm_judge_model
@@ -115,41 +112,32 @@ class EvaluationJob:
     def _extract_api_error_message(self, exception: Exception):
         """Extract the full API error object from various exception types."""
         try:
-            # Check if it's an HTTPError from requests
             if hasattr(exception, "response") and exception.response is not None:
                 try:
-                    # Try to parse JSON error response
                     error_data = exception.response.json()
                     if "error" in error_data:
-                        return error_data  # Return the full error object
+                        return error_data
                 except (json.JSONDecodeError, ValueError):
                     pass
 
-            # Check if the error message contains API error details in the string representation
             error_str = str(exception)
 
-            # Look for OpenAI API error pattern in the traceback or error message
             if "API request failed with error message:" in error_str:
-                # Extract JSON from the error string - look for complete error object
                 import re
-
-                # Look for the complete JSON object including nested structures
                 json_match = re.search(r"\{(?:[^{}]|{[^{}]*})*\}", error_str)
                 if json_match:
                     try:
                         error_json = json.loads(json_match.group())
                         if "error" in error_json:
-                            return error_json  # Return the full error object
+                            return error_json
                     except json.JSONDecodeError:
                         pass
 
-            # Check the exception's args for nested error information
             if hasattr(exception, "args") and exception.args:
                 for arg in exception.args:
                     if isinstance(arg, dict) and "error" in arg:
-                        return arg  # Return the full error object
+                        return arg
                     elif isinstance(arg, str):
-                        # Try to parse the string as JSON
                         try:
                             parsed = json.loads(arg)
                             if "error" in parsed:
@@ -157,11 +145,10 @@ class EvaluationJob:
                         except json.JSONDecodeError:
                             pass
 
-            # Last resort: create a simple error object with the exception message
             return {
                 "error": {
                     "message": str(exception),
-                    "type": "unknown_error",
+                    "type": type(exception).__name__,
                     "param": None,
                     "code": "unknown",
                 }
@@ -179,7 +166,7 @@ class EvaluationJob:
             }
 
     def __call__(self):
-        """Run a simple evaluation job."""
+        """Run the evaluation job."""
         if self.api_host and self.job_id and self.server_token:
             update_status(
                 api_host=self.api_host,
@@ -188,17 +175,26 @@ class EvaluationJob:
                 status=JobStatus.RUNNING,
             )
         try:
-            # Convert relative path to absolute path
+            logger.info("=" * 80)
+            logger.info(f"Starting evaluation job for category: {self.category_name}")
+            logger.info(f"Tasks: {self.tasks}")
+            logger.info(f"Adapter: {self.adapter}")
+            logger.info(f"Model args: {self.model_args}")
+            logger.info("=" * 80)
+
             temp_dir = Path(".temp").resolve()
 
+            logger.info("Calling lm_eval.evaluator.simple_evaluate...")
             results = lm_eval.evaluator.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
                 tasks=self.tasks,
                 apply_chat_template=True,
                 task_manager=lm_eval.tasks.TaskManager(include_path=str(temp_dir)),
-                batch_size="auto",
+                batch_size=1,
             )
+
+            logger.info("✅ simple_evaluate completed successfully")
             logger.info("Exporting results to %s.json", self.category_name)
 
             results = self._add_task_to_results(results=results)
@@ -263,21 +259,22 @@ class EvaluationJob:
             ):
                 del updated_results["config"]["model_args"]["api_key"]
 
-            # Export the results to a file, and add them to the database
             if self.tasks_mapper_dict:
                 self._export_results(updated_results)
             if self.task_id:
                 self._export_results_tasks(updated_results)
 
         except Exception as e:
-            # Extract the full API error object
+            logger.error("=" * 80)
+            logger.error(f"❌ EXCEPTION OCCURRED: {type(e).__name__}")
+            logger.error("=" * 80)
+
             api_error_data = self._extract_api_error_message(e)
 
             logger.error("Full traceback: %s", traceback.format_exc())
             logger.error("Extracted API error data: %s", api_error_data)
 
             if self.api_host and self.job_id and self.server_token:
-                # Convert error object to string for database storage
                 error_message = (
                     json.dumps(api_error_data)
                     if isinstance(api_error_data, dict)
@@ -291,17 +288,14 @@ class EvaluationJob:
                     error_message=error_message,
                 )
 
-            # Re-raise with the full error object as message
             error_message = (
                 json.dumps(api_error_data)
                 if isinstance(api_error_data, dict)
                 else str(api_error_data)
             )
-            exit()
             raise Exception(error_message) from e
 
     def _add_task_to_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Add task_id to each result in the results dictionary."""
         if "results" not in results:
             logger.warning("No 'results' key found in results dictionary")
             return results
@@ -329,20 +323,17 @@ class EvaluationJob:
         return results
 
     def _calculate_average_scores(self, results: dict[str, Any]) -> dict[str, float]:
-        """Calculate the average scores of the model for ROUGE or other metrics."""
         total_scores = {}
-        task_counts = {}  # Track how many tasks contribute to each metric
+        task_counts = {}
 
         for task in results.get("results", {}):
             task_results = results["results"][task]
 
-            # Handle different metric types
             for key, value in task_results.items():
                 if key.endswith(",none") and not key.endswith("_stderr,none"):
                     metric_name = key.replace(",none", "")
 
                     if isinstance(value, dict):
-                        # Handle nested metrics like ROUGE
                         for sub_metric, sub_value in value.items():
                             if isinstance(sub_value, (int, float)):
                                 if sub_metric not in total_scores:
@@ -351,14 +342,12 @@ class EvaluationJob:
                                 total_scores[sub_metric] += sub_value
                                 task_counts[sub_metric] += 1
                     elif isinstance(value, (int, float)):
-                        # Handle simple metrics like accuracy
                         if metric_name not in total_scores:
                             total_scores[metric_name] = 0.0
                             task_counts[metric_name] = 0
                         total_scores[metric_name] += value
                         task_counts[metric_name] += 1
 
-        # Calculate averages for all metrics
         average_scores = {}
         for metric_name, total_score in total_scores.items():
             count = task_counts[metric_name]
@@ -371,11 +360,9 @@ class EvaluationJob:
         return average_scores
 
     def _export_results(self, results: dict[str, Any]):
-        """Export the results to a JSON file in the current working directory."""
-        # Add average scores to results for export
         average_scores = self._calculate_average_scores(results)
         results_with_averages = {**results, "average_scores": average_scores}
-        # Save results to a JSON file
+
         with open(
             os.path.join(".results", f"{normalize_string(self.category_name)}.json"),
             "w",
@@ -385,7 +372,6 @@ class EvaluationJob:
 
         logger.info(f"Results exported to {normalize_string(self.category_name)}.json")
 
-        # Add results to the database
         if self.api_host and self.job_id and self.server_token and self.benchmark_id:
             if "results" in results_with_averages:
                 for key, value in results_with_averages["results"].items():
@@ -398,27 +384,18 @@ class EvaluationJob:
                         category_name=self.category_name,
                         benchmark_id=self.benchmark_id,
                     )
-            else:
-                logger.error("No results found in the evaluation job.")
 
     def _export_results_tasks(self, results: dict[str, Any]):
-        """Export the results to a JSON file in the current working directory."""
         average_scores = self._calculate_average_scores(results)
         results_with_averages = {**results, "average_scores": average_scores}
 
         filename = f"{normalize_string(self.task_id)}.json"
 
-        # Save results to a JSON file
         with open(filename, "w", encoding="UTF-8") as fp:
             json.dump(results_with_averages, fp, ensure_ascii=False)
 
         logger.info(f"Results exported to {filename}")
 
-        # Log all JSON files in current directory for debugging
-        json_files = [f for f in os.listdir(".") if f.endswith(".json")]
-        logger.info(f"JSON files in current directory: {json_files}")
-
-        # Add results to the database
         if self.api_host and self.job_id and self.server_token and self.benchmark_id:
             if "results" in results_with_averages:
                 for key, value in results_with_averages["results"].items():
@@ -441,18 +418,6 @@ class EvaluationJob:
         llm_judge: "LLMJudge",
         is_mcq: bool = False,
     ) -> Dict[str, Any]:
-        """
-        Process results dictionary using LLMJudge to evaluate and score responses.
-
-        Args:
-            results_data: Dictionary containing samples and results in the same format as the JSON files
-            llm_judge: Initialized LLMJudge instance
-            is_mcq: Boolean flag to indicate if this is a multiple choice question task
-
-        Returns:
-            Modified results_data dictionary with LLM judge scores added
-        """
-        # Make a copy to avoid modifying the original
         processed_data = results_data.copy()
 
         samples = processed_data.get("samples", {})
@@ -461,7 +426,6 @@ class EvaluationJob:
         all_scores = []
         all_scores_raw = []
 
-        # Flatten all samples for processing
         all_samples = [
             (task_key, sample)
             for task_key, sample_list in samples.items()
@@ -471,7 +435,6 @@ class EvaluationJob:
         taskwise_scores = {}
         taskwise_scores_raw = {}
 
-        # Determine the prefix based on is_mcq flag
         prefix = "mcq_" if is_mcq else ""
 
         for sample_key, sample in all_samples:
@@ -488,7 +451,6 @@ class EvaluationJob:
 
             if expected_output and response:
                 try:
-                    # Use LLMJudge to evaluate the answer
                     evaluation_result = llm_judge.evaluate_answer(
                         question=question,
                         reference_answer=expected_output,
@@ -498,12 +460,10 @@ class EvaluationJob:
                         metadata={"task": sample_key},
                     )
 
-                    # Extract scores from the evaluation result
                     normalized_score = evaluation_result["overall_score"]
                     raw_score = evaluation_result["overall_raw_score"]
                     explanation = evaluation_result["aggregated_explanation"]
 
-                    # Add scores to the sample with prefix
                     sample[f"{prefix}llm_score"] = normalized_score
                     sample[f"{prefix}llm_score_raw"] = raw_score
                     sample[f"{prefix}llm_explanation"] = explanation
@@ -513,52 +473,34 @@ class EvaluationJob:
                         "passed": evaluation_result["overall_passed"],
                     }
 
-                    # Collect scores for aggregation
                     all_scores.append(normalized_score)
                     all_scores_raw.append(raw_score)
                     taskwise_scores.setdefault(sample_key, []).append(normalized_score)
                     taskwise_scores_raw.setdefault(sample_key, []).append(raw_score)
 
                 except Exception as e:
-                    # Handle evaluation errors with prefix
                     sample[f"{prefix}llm_score"] = None
                     sample[f"{prefix}llm_score_raw"] = None
-                    sample[f"{prefix}llm_explanation"] = (
-                        f"Error during LLM evaluation: {str(e)}"
-                    )
+                    sample[f"{prefix}llm_explanation"] = f"Error during LLM evaluation: {str(e)}"
                     sample[f"{prefix}llm_judge_details"] = {"error": str(e)}
 
-        # Calculate task-wise averages and add to results in the expected format
         for task_key in taskwise_scores:
-            if taskwise_scores[task_key]:  # Check if list is not empty
+            if taskwise_scores[task_key]:
                 avg_score = round(mean(taskwise_scores[task_key]), 4)
                 avg_score_raw = round(mean(taskwise_scores_raw[task_key]), 4)
 
                 processed_data["results"].setdefault(task_key, {"alias": task_key})
 
-                # Add in the format expected by _calculate_average_scores and export
-                # Using the ,none suffix format like other metrics with prefix
-                processed_data["results"][task_key][
-                    f"{prefix}llm_judge_score,none"
-                ] = avg_score
-                processed_data["results"][task_key][
-                    f"{prefix}llm_judge_score_stderr,none"
-                ] = 0.0
-                processed_data["results"][task_key][
-                    f"{prefix}llm_judge_score_raw,none"
-                ] = avg_score_raw
-                processed_data["results"][task_key][
-                    f"{prefix}llm_judge_score_raw_stderr,none"
-                ] = 0.0
-
-                # Also keep the detailed info with prefix
+                processed_data["results"][task_key][f"{prefix}llm_judge_score,none"] = avg_score
+                processed_data["results"][task_key][f"{prefix}llm_judge_score_stderr,none"] = 0.0
+                processed_data["results"][task_key][f"{prefix}llm_judge_score_raw,none"] = avg_score_raw
+                processed_data["results"][task_key][f"{prefix}llm_judge_score_raw_stderr,none"] = 0.0
                 processed_data["results"][task_key][f"{prefix}llm_as_judge"] = {
                     "average_score": avg_score,
                     "average_score_raw": avg_score_raw,
                     "num_samples": len(taskwise_scores[task_key]),
                 }
 
-        # Calculate overall averages with prefix
         if all_scores:
             processed_data[f"overall_{prefix}llm_as_judge"] = round(mean(all_scores), 4)
             processed_data[f"overall_{prefix}llm_as_judge_stats"] = {
@@ -569,9 +511,7 @@ class EvaluationJob:
             }
 
         if all_scores_raw:
-            processed_data[f"overall_{prefix}llm_as_judge_raw"] = round(
-                mean(all_scores_raw), 4
-            )
+            processed_data[f"overall_{prefix}llm_as_judge_raw"] = round(mean(all_scores_raw), 4)
             processed_data[f"overall_{prefix}llm_as_judge_raw_stats"] = {
                 "total_samples": len(all_scores_raw),
                 "average_score_raw": round(mean(all_scores_raw), 4),
