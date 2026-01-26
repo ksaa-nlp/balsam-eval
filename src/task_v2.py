@@ -16,7 +16,7 @@ from .metrics_registry import get_metrics_registry
 
 logger = logging.getLogger(__name__)
 
-# TODO: need to not remove elements from orginal dict
+# TODO: need to not remove elements from original dict
 class LMHDataset:
     """
     Represents an LM Harness task.
@@ -88,7 +88,6 @@ class LMHDataset:
 
         # 5. Handle Data Splitting (Taking last X elements for dev)
         raw_data = task_dict.pop("data", [])
-        # self.data = self._create_splits(raw_data, dev_size)
         self.data = raw_data
 
         # 6. Filter remaining metadata to keep YAML clean
@@ -193,17 +192,6 @@ class LMHDataset:
         task["data"] = data_rows
         return task
 
-    def _create_splits(self, raw_data: list, dev_size: int) -> Dict[str, list]:
-        """Logic: Take last X elements for dev, remaining for test."""
-        if not raw_data:
-            return {"test": [], "dev": []}
-        if dev_size <= 0:
-            return {"test": raw_data, "dev": []}
-        if dev_size >= len(raw_data):
-            return {"test": [], "dev": raw_data}
-
-        return {"test": raw_data[:-dev_size], "dev": raw_data[-dev_size:]}
-
     def _escape_newline(self, task: Any) -> Any:
         if isinstance(task, dict):
             return {k: self._escape_newline(v) for k, v in task.items()}
@@ -249,7 +237,7 @@ class LMHDataset:
         # 2. Build the configuration dictionary
         base_yaml = self._build_base_yaml()
 
-        # 3. Apply metric logic from registry
+        # 3. Apply metric logic from simplified registry
         registry = get_metrics_registry()
         m_name = self.metric["metric"] if isinstance(self.metric, dict) else self.metric
 
@@ -258,41 +246,35 @@ class LMHDataset:
             final_yaml = base_yaml
             logger.warning("No metric specified in dataset. Using base configuration.")
         else:
-            metric_info = registry.get_metric_info(m_name)
+            # Check if it's a custom metric in the registry
+            detected_metric = registry.detect_metric_type(m_name)
             
-            if not metric_info["found"]:
-                # Metric not found
-                logger.warning(f"Metric '{m_name}' not found in custom or LM Harness registries. " 
-                             f"Including it in YAML but it may not work during evaluation.")
+            if detected_metric:
+                # Custom metric found - get the metric object and apply its configuration
+                metric_obj = registry.get(detected_metric)
+                if metric_obj:
+                    final_yaml = metric_obj.get_yaml_config(base_yaml)
+                    logger.info(f"Using custom metric: {detected_metric}")
+                else:
+                    # This shouldn't happen, but handle it gracefully
+                    logger.warning(f"Metric '{detected_metric}' detected but couldn't retrieve object. Using base config with metric name.")
+                    final_yaml = base_yaml.copy()
+                    final_yaml["metric_list"] = [{
+                        "metric": m_name,
+                        "aggregation": m_name,
+                        "higher_is_better": True,
+                    }]
+            else:
+                # Metric not found in custom registry - assume it's an LM Harness built-in metric
+                # Just include the metric name in the YAML and let LM Harness handle it
+                logger.info(f"Metric '{m_name}' not found in custom registry. "
+                          f"Assuming it's a built-in LM Harness metric.")
                 final_yaml = base_yaml.copy()
                 final_yaml["metric_list"] = [{
                     "metric": m_name,
                     "aggregation": m_name,
                     "higher_is_better": True,
                 }]
-            elif metric_info["source"] == "custom":
-                # Custom metric with YAML configuration
-                metric_obj = metric_info["custom_metric"]
-                final_yaml = metric_obj.get_yaml_config(base_yaml)
-                logger.info(f"Using custom metric: {metric_info['name']}")
-            else:
-                # LM Harness metric - use metric configuration
-                final_yaml = base_yaml.copy()
-                final_yaml["output_type"] = metric_info["output_type"]
-                final_yaml["metric_list"] = [{
-                    "metric": metric_info["name"],
-                    "aggregation": metric_info["aggregation"],
-                    "higher_is_better": metric_info["higher_is_better"],
-                }]
-                
-                # Adjust generation_kwargs based on output_type
-                if metric_info["output_type"] == "loglikelihood":
-                    # For loglikelihood tasks, we don't need generation_kwargs
-                    if "generation_kwargs" in final_yaml:
-                        del final_yaml["generation_kwargs"]
-                
-                logger.info(f"Using LM Harness metric: {metric_info['name']} "
-                          f"(output_type: {metric_info['output_type']})")
 
         # 4. Write YAML
         self._write_yaml(final_yaml)
@@ -333,16 +315,16 @@ class LMHDataset:
         }
 
     def _write_yaml(self, data: Dict[str, Any]) -> None:
-            """Writes dictionary to YAML file with proper string formatting."""
-            out_path = Path(self.directory) / f"{self.file_name}.yaml"
-            
-            # Custom representer for multiline strings to use literal style (|)
-            def str_representer(dumper, data):
-                if '\n' in data:
-                    return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
-                return dumper.represent_scalar('tag:yaml.org,2002:str', data)
-            
-            yaml.add_representer(str, str_representer)
-            
-            with open(out_path, "w", encoding="utf8") as f:
-                yaml.dump(data, f, sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
+        """Writes dictionary to YAML file with proper string formatting."""
+        out_path = Path(self.directory) / f"{self.file_name}.yaml"
+        
+        # Custom representer for multiline strings to use literal style (|)
+        def str_representer(dumper, data):
+            if '\n' in data:
+                return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+            return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+        
+        yaml.add_representer(str, str_representer)
+        
+        with open(out_path, "w", encoding="utf8") as f:
+            yaml.dump(data, f, sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
