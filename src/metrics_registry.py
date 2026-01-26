@@ -87,9 +87,10 @@ class MetricsRegistry:
             
         metric_name_lower = metric_name.lower()
         
-        # First check custom metrics (exact match)
-        if metric_name_lower in self._metrics:
-            return metric_name_lower
+        # First check custom metrics (exact match) - CASE INSENSITIVE
+        for registered in self._metrics.keys():
+            if registered.lower() == metric_name_lower:
+                return registered  # Return the actual registered name
         
         # Check custom metrics (partial match)
         for registered in self._metrics.keys():
@@ -107,7 +108,7 @@ class MetricsRegistry:
                 return registered
         
         return None
-
+    
     def get_metric_info(self, metric_name: str) -> Dict[str, Any]:
         """Get information about a metric."""
         metric_type = self.detect_metric_type(metric_name)
