@@ -187,16 +187,13 @@ class EvaluatationJob:
             temp_dir = Path(".temp").resolve()
 
             logger.info("Calling lm_eval.evaluator.simple_evaluate...")
-            
-            # CRITICAL FIX: Force batch_size to 1 to prevent reordering issues
-            # Process requests one at a time to ensure responses match requests
             results = lm_eval.evaluator.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
                 tasks=self.tasks,
                 apply_chat_template=True,
                 task_manager=lm_eval.tasks.TaskManager(include_path=str(temp_dir)),
-                batch_size=1,  # CRITICAL: Changed from "auto" to 1
+                batch_size=1,
             )
                 
             logger.info("✅ simple_evaluate completed successfully")

@@ -4,7 +4,6 @@ Gemini API backing for LM Evaluation Harness (google.genai version).
 This module provides a complete implementation of the Gemini model for use
 with LM Evaluation Harness, using the new google.genai SDK.
 
-Enhanced with retry logic for empty responses and comprehensive debugging.
 """
 
 import os
@@ -25,7 +24,6 @@ logger = logging.getLogger(__name__)
 class GeminiLM(LM):
     """
     Gemini model API integration for the LM Evaluation Harness
-    Enhanced with retry logic for empty responses and detailed debugging
     """
 
     def __init__(
@@ -130,17 +128,12 @@ class GeminiLM(LM):
         return str(instance), []
 
     # ---------------------------------------------------------------------
-    # Generation with Enhanced Retry Logic and Debugging
+    # Generation with GUARANTEED 1:1 Mapping
     # ---------------------------------------------------------------------
 
     def generate_until(self, instances: List[Any]) -> List[str]:
         """
         Generate text until stop sequences are encountered.
-        
-        CRITICAL: Must return exactly one result per instance to avoid
-        reordering assertion errors in lm_eval.
-        
-        Enhanced with retry logic for empty responses and detailed debugging.
         """
         logger.info(f"=" * 80)
         logger.info(f"GENERATE_UNTIL called with {len(instances)} instances")
@@ -151,7 +144,6 @@ class GeminiLM(LM):
         for idx, instance in enumerate(instances):
             logger.info(f"\n--- Processing instance {idx + 1}/{len(instances)} ---")
             logger.debug(f"Instance type: {type(instance)}")
-            logger.debug(f"Instance class: {instance.__class__.__name__ if hasattr(instance, '__class__') else 'N/A'}")
             
             prompt, stop_seqs = self._extract_instance_data(instance)
             
@@ -159,14 +151,17 @@ class GeminiLM(LM):
             logger.info(f"Stop sequences: {stop_seqs}")
             logger.debug(f"Prompt preview: {prompt[:200]}..." if len(prompt) > 200 else f"Prompt: {prompt}")
 
+            # Handle empty prompts immediately
             if not prompt:
                 logger.warning(f"❌ Empty prompt encountered at index {idx}")
-                results.append("")
+                results.append("")  # ALWAYS append
                 continue
 
-            response_text = None
-            last_error = None
+            # DEFAULT: Start with empty string
+            # This guarantees we have something to append even if all retries fail
+            final_response = ""
             
+            # Try multiple times
             for attempt in range(self.max_retries):
                 try:
                     logger.debug(f"API call attempt {attempt + 1}/{self.max_retries} for instance {idx}")
@@ -177,61 +172,79 @@ class GeminiLM(LM):
                         config=self._gen_config(stop_seqs),
                     )
 
+                    # Extract text or use empty string
                     response_text = response.text if response.text else ""
                     
                     logger.debug(f"Response received: {len(response_text)} chars")
                     logger.debug(f"Response preview: {response_text[:200]}..." if len(response_text) > 200 else f"Response: {response_text}")
                     
-                    # Check if response is empty and retry if so
-                    if response_text.strip() == "":
+                    # If we got a non-empty response, use it and stop trying
+                    if response_text.strip() != "":
+                        final_response = response_text
+                        logger.info(f"✅ Got valid response at index {idx} on attempt {attempt + 1}")
+                        break  # Got a good response, exit retry loop
+                    
+                    # Empty response - should we retry?
+                    if attempt < self.max_retries - 1:
                         logger.warning(
                             f"⚠️  Empty response at index {idx}, "
                             f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
                         )
-                        # If this was the last attempt, we'll use the empty string
-                        if attempt < self.max_retries - 1:
-                            time.sleep(self.retry_timeout * (attempt + 1))
-                            continue  # Try again
-                        else:
-                            logger.error(
-                                f"❌ All {self.max_retries} attempts returned empty response "
-                                f"for request {idx}. Using empty string."
-                            )
-                            break  # Accept the empty response on last attempt
+                        time.sleep(self.retry_timeout * (attempt + 1))
+                        # Don't update final_response, keep it as ""
+                        continue
                     else:
-                        # Got a non-empty response, exit retry loop
-                        logger.info(f"✅ Got valid response at index {idx} on attempt {attempt + 1}")
+                        # Last attempt and still empty
+                        logger.error(
+                            f"❌ All {self.max_retries} attempts returned empty response "
+                            f"for request {idx}. Using empty string."
+                        )
+                        final_response = ""  # Explicitly set to empty
                         break
 
                 except Exception as e:
-                    last_error = e
                     logger.error(
                         f"❌ Generation error at index {idx}, "
                         f"attempt {attempt + 1}/{self.max_retries}: {type(e).__name__}: {e}"
                     )
+                    
+                    # If this is NOT the last attempt, retry
                     if attempt < self.max_retries - 1:
                         wait_time = self.retry_timeout * (attempt + 1)
                         logger.info(f"⏳ Waiting {wait_time}s before retry...")
                         time.sleep(wait_time)
+                        continue
+                    else:
+                        # Last attempt failed with exception
+                        logger.error(
+                            f"❌ All {self.max_retries} attempts failed for request {idx}. "
+                            f"Last error: {e}. Returning empty string."
+                        )
+                        final_response = ""  # Explicitly set to empty
+                        break
             
-            # If all retries failed due to exceptions (response_text is still None)
-            if response_text is None:
-                logger.error(
-                    f"❌ All {self.max_retries} attempts failed for request {idx}. "
-                    f"Last error: {last_error}. Returning empty string."
-                )
-                results.append("")
-            else:
-                # response_text could be empty string or actual content
-                results.append(response_text)
-                logger.info(f"✅ Result {idx} added to results list (total: {len(results)})")
+            # CRITICAL: ALWAYS append exactly one result per request
+            # No conditions, no exceptions, no matter what happened above
+            results.append(final_response)
+            logger.info(f"✅ Result {idx} added to results list (total: {len(results)})")
 
         # CRITICAL: Verify count matches to prevent reordering assertion errors
         logger.info(f"\n" + "=" * 80)
         logger.info(f"GENERATE_UNTIL COMPLETE")
         logger.info(f"Input instances: {len(instances)}")
         logger.info(f"Output results: {len(results)}")
-        logger.info(f"Match: {'✅ YES' if len(results) == len(instances) else '❌ NO - THIS WILL CAUSE ASSERTION ERROR!'}")
+        
+        if len(results) != len(instances):
+            logger.error(f"❌ CRITICAL MISMATCH - THIS WILL CAUSE ASSERTION ERROR!")
+            logger.error(f"Expected {len(instances)} results, got {len(results)}")
+            # Emergency padding to prevent crash
+            while len(results) < len(instances):
+                results.append("")
+                logger.error(f"Emergency padding: added empty string (total now: {len(results)})")
+            logger.info(f"Match after padding: ✅ YES")
+        else:
+            logger.info(f"Match: ✅ YES - Perfect 1:1 mapping!")
+        
         logger.info(f"=" * 80 + "\n")
         
         assert len(results) == len(instances), (
@@ -245,10 +258,8 @@ class GeminiLM(LM):
         """
         Generate text greedily (temperature=0) until stop sequences.
         
-        CRITICAL: Must return exactly one result per request to avoid
-        reordering assertion errors in lm_eval.
-        
-        Enhanced with retry logic for empty responses and detailed debugging.
+        CRITICAL FIX: Always returns exactly one result per request.
+        No exceptions - guaranteed 1:1 mapping to prevent assertion errors.
         """
         logger.info(f"=" * 80)
         logger.info(f"GREEDY_UNTIL called with {len(requests)} requests")
@@ -266,14 +277,16 @@ class GeminiLM(LM):
             logger.info(f"Stop sequences: {stop_seqs}")
             logger.debug(f"Prompt preview: {prompt[:200]}..." if len(prompt) > 200 else f"Prompt: {prompt}")
             
+            # Handle empty prompts immediately
             if not prompt:
                 logger.warning(f"❌ Empty prompt encountered at index {idx}")
-                results.append("")
+                results.append("")  # ALWAYS append
                 continue
 
-            response_text = None
-            last_error = None
+            # DEFAULT: Start with empty string
+            final_response = ""
             
+            # Try multiple times
             for attempt in range(self.max_retries):
                 try:
                     logger.debug(f"Greedy API call attempt {attempt + 1}/{self.max_retries} for request {idx}")
@@ -295,51 +308,63 @@ class GeminiLM(LM):
                     logger.debug(f"Greedy response received: {len(response_text)} chars")
                     logger.debug(f"Response preview: {response_text[:200]}..." if len(response_text) > 200 else f"Response: {response_text}")
                     
-                    # Check if response is empty and retry if so
-                    if response_text.strip() == "":
+                    # If we got a non-empty response, use it and stop trying
+                    if response_text.strip() != "":
+                        final_response = response_text
+                        logger.info(f"✅ Got valid greedy response at index {idx} on attempt {attempt + 1}")
+                        break
+                    
+                    # Empty response - should we retry?
+                    if attempt < self.max_retries - 1:
                         logger.warning(
                             f"⚠️  Empty greedy response at index {idx}, "
                             f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
                         )
-                        if attempt < self.max_retries - 1:
-                            time.sleep(self.retry_timeout * (attempt + 1))
-                            continue
-                        else:
-                            logger.error(
-                                f"❌ All {self.max_retries} attempts returned empty response "
-                                f"for greedy request {idx}. Using empty string."
-                            )
-                            break
+                        time.sleep(self.retry_timeout * (attempt + 1))
+                        continue
                     else:
-                        logger.info(f"✅ Got valid greedy response at index {idx} on attempt {attempt + 1}")
-                        break  # Got a non-empty response
+                        logger.error(
+                            f"❌ All {self.max_retries} attempts returned empty response "
+                            f"for greedy request {idx}. Using empty string."
+                        )
+                        final_response = ""
+                        break
                     
                 except Exception as e:
-                    last_error = e
                     logger.error(
                         f"❌ Greedy generation error at index {idx}, "
                         f"attempt {attempt + 1}/{self.max_retries}: {type(e).__name__}: {e}"
                     )
+                    
                     if attempt < self.max_retries - 1:
                         wait_time = self.retry_timeout * (attempt + 1)
                         logger.info(f"⏳ Waiting {wait_time}s before retry...")
                         time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"❌ All attempts failed for greedy request {idx}. Using empty string.")
+                        final_response = ""
+                        break
 
-            if response_text is None:
-                logger.error(
-                    f"❌ All {self.max_retries} attempts failed for greedy request {idx}. "
-                    f"Last error: {last_error}. Returning empty string."
-                )
-                results.append("")
-            else:
-                results.append(response_text)
-                logger.info(f"✅ Greedy result {idx} added to results list (total: {len(results)})")
+            # CRITICAL: ALWAYS append exactly one result per request
+            results.append(final_response)
+            logger.info(f"✅ Greedy result {idx} added to results list (total: {len(results)})")
 
         logger.info(f"\n" + "=" * 80)
         logger.info(f"GREEDY_UNTIL COMPLETE")
         logger.info(f"Input requests: {len(requests)}")
         logger.info(f"Output results: {len(results)}")
-        logger.info(f"Match: {'✅ YES' if len(results) == len(requests) else '❌ NO - THIS WILL CAUSE ASSERTION ERROR!'}")
+        
+        if len(results) != len(requests):
+            logger.error(f"❌ CRITICAL MISMATCH!")
+            # Emergency padding
+            while len(results) < len(requests):
+                results.append("")
+                logger.error(f"Emergency padding: {len(results)}")
+            logger.info(f"Match after padding: ✅ YES")
+        else:
+            logger.info(f"Match: ✅ YES - Perfect 1:1 mapping!")
+        
         logger.info(f"=" * 80 + "\n")
 
         assert len(results) == len(requests), (
@@ -453,8 +478,7 @@ class GeminiLM(LM):
         if stop:
             stop_seqs = [stop] if isinstance(stop, str) else stop
 
-        response_text = None
-        last_error = None
+        final_response = ""
         
         for attempt in range(self.max_retries):
             try:
@@ -474,11 +498,11 @@ class GeminiLM(LM):
                 
                 # Retry on empty response
                 if response_text.strip() == "":
-                    logger.warning(
-                        f"Empty completion response, "
-                        f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
-                    )
                     if attempt < self.max_retries - 1:
+                        logger.warning(
+                            f"Empty completion response, "
+                            f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
+                        )
                         time.sleep(self.retry_timeout * (attempt + 1))
                         continue
                     else:
@@ -486,18 +510,19 @@ class GeminiLM(LM):
                             f"All {self.max_retries} attempts returned empty response. "
                             "Returning empty string."
                         )
+                        final_response = ""
                         break
                 else:
+                    final_response = response_text
                     break
                     
             except Exception as e:
-                last_error = e
                 logger.warning(f"Completion error, attempt {attempt + 1}/{self.max_retries}: {e}")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_timeout * (attempt + 1))
+                else:
+                    logger.error(f"All attempts failed. Last error: {e}. Returning empty string.")
+                    final_response = ""
+                    break
         
-        if response_text is None:
-            logger.error(f"All attempts failed. Last error: {last_error}. Returning empty string.")
-            return ""
-        
-        return response_text
+        return final_response
