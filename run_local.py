@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from src.db_operations import submit_model_evaluation
 from src.evaluation import EvaluatationJob
 from src.task import LMHDataset
+from src.adapter_utils import process_adapter_and_url
 
 # Load environment variables
 load_dotenv()
@@ -44,6 +45,9 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 if __name__ == "__main__":
     os.environ["ENV"] = "local"  # setup local env for logging to stdout
 
+    # Process adapter and base_url using shared utility
+    processed_adapter, processed_base_url = process_adapter_and_url(ADAPTER, BASE_URL)
+
     # Read the tasks from directory
     tasks_temp: dict = dict()
     task_mapper: dict = dict()
@@ -78,19 +82,19 @@ if __name__ == "__main__":
                 tasks_temp[d["category"]] = []
             tasks_temp[d["category"]].append(dataset.name)
 
-    # Model arguments
+    # Model arguments with processed base_url
     model_args = {"model": MODEL_NAME}
-    if BASE_URL:
-        model_args["base_url"] = BASE_URL
+    if processed_base_url:
+        model_args["base_url"] = processed_base_url
     if API_KEY:
         model_args["api_key"] = API_KEY
 
     # Initialize a model evaluation
-    if ADAPTER and SERVER_TOKEN and API_HOST and USER_ID and BENCHMARK_ID and tasks_temp:
+    if processed_adapter and SERVER_TOKEN and API_HOST and USER_ID and BENCHMARK_ID and tasks_temp:
         submit_results = submit_model_evaluation(
             model_name=MODEL_NAME,
-            model_url=BASE_URL,
-            adapter=ADAPTER,
+            model_url=processed_base_url,  # Use processed base_url
+            adapter=processed_adapter,  # Use processed adapter
             api_key=API_KEY,
             categories=list(tasks_temp.keys()),
             server_token=SERVER_TOKEN,
@@ -106,13 +110,14 @@ if __name__ == "__main__":
             
     else:
         submit_results = {"jobs_ids": {}}
+        
     for category, datasets in tasks_temp.items():
         print("Running evaluation for category:", category)
 
         try:
             job = EvaluatationJob(
                 tasks=datasets,
-                adapter=ADAPTER,
+                adapter=processed_adapter,  # Use processed adapter
                 model_args=model_args,
                 tasks_mapper_dict=task_mapper,
                 category_name=category,
@@ -123,7 +128,7 @@ if __name__ == "__main__":
                 server_token=SERVER_TOKEN,
                 api_host=API_HOST,
                 benchmark_id=BENCHMARK_ID,
-                )
+            )
             job()
         except Exception as e:
             print(
