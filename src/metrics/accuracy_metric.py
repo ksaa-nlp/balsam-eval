@@ -15,7 +15,7 @@ PUNCT_TABLE = dict.fromkeys(
     if unicodedata.category(chr(i)).startswith("P")
 )
 ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
-others = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"—ـ"""
+others = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ"""
 ALL_PUNCTUATIONS += "".join([o for o in others if o not in ALL_PUNCTUATIONS])
 
 
@@ -55,9 +55,14 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
         mcq_mapping: Dict mapping letters to full option text (e.g., {"A": "Paris", "B": "Lyon"})
     
     Returns:
-        Normalized text
+        Normalized text or empty string if text is empty/None
     """
     logger.debug(f"simple_normalize called with text='{text}', mcq_mapping={mcq_mapping}")
+    
+    # Handle None or empty cases first
+    if text is None or text == "":
+        logger.debug("simple_normalize: Received None or empty string")
+        return ""
     
     if isinstance(text, bool):
         result = "نعم" if text else "لا"
@@ -67,6 +72,11 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
     if not isinstance(text, str):
         text = str(text)
         logger.debug(f"simple_normalize: Converted to string: '{text}'")
+    
+    # Check again after conversion
+    if not text.strip():
+        logger.debug("simple_normalize: Empty string after strip")
+        return ""
     
     extracted = extract_first_word_or_line(text)
     clean_extracted = re.sub(r"[()[\]{}]", "", extracted).strip()
@@ -169,11 +179,21 @@ if "accuracy" not in le_registry.AGGREGATION_REGISTRY:
                 logger.warning(f"accuracy_aggregation: Skipping invalid item at index {idx}: {type(item)}")
                 continue
             
+            # Handle empty predictions - count as incorrect
+            if pred is None or (isinstance(pred, str) and not pred.strip()):
+                logger.warning(f"accuracy_aggregation [{idx}]: Empty prediction, counting as incorrect")
+                continue
+            
             logger.debug(f"accuracy_aggregation [{idx}]: ref='{ref}', pred='{pred}'")
             
             # Normalize both reference and prediction
             norm_ref = simple_normalize(ref, mcq_mapping=mcq_mapping)
             norm_pred = simple_normalize(pred, mcq_mapping=mcq_mapping)
+            
+            # If normalization resulted in empty strings, skip
+            if not norm_ref or not norm_pred:
+                logger.warning(f"accuracy_aggregation [{idx}]: Normalization resulted in empty string(s), counting as incorrect")
+                continue
             
             logger.debug(f"accuracy_aggregation [{idx}]: norm_ref='{norm_ref}', norm_pred='{norm_pred}'")
             
@@ -213,20 +233,28 @@ def process_results(doc, results):
     """
     logger.debug(f"process_results: doc keys={list(doc.keys())}, results type={type(results)}")
     
+    # Extract prediction with better empty handling
     if isinstance(results, str):
         pred = results.strip()
     elif isinstance(results, list) and results:
-        pred = str(results[0]).strip()
+        pred = str(results[0]).strip() if results[0] is not None else ""
     elif isinstance(results, dict):
-        pred = str(results.get("text", results.get("generated_text", results.get("prediction", "")))).strip()
+        raw_pred = results.get("text", results.get("generated_text", results.get("prediction", "")))
+        pred = str(raw_pred).strip() if raw_pred is not None else ""
     else:
-        pred = str(results).strip()
+        pred = str(results).strip() if results is not None else ""
+    
+    # Ensure pred is not None
+    if pred is None:
+        pred = ""
     
     logger.debug(f"process_results: Extracted prediction='{pred}'")
     
     ref = doc.get("output", "")
     if isinstance(ref, list) and ref:
-        ref = str(ref[0])
+        ref = str(ref[0]) if ref[0] is not None else ""
+    elif ref is None:
+        ref = ""
     
     logger.debug(f"process_results: Reference='{ref}'")
     
