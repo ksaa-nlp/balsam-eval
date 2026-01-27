@@ -17,6 +17,7 @@ from src.helpers import mcq_custom_prompt, normalize_string
 from src.llm_as_a_judge import LLMJudge, ModelConfig
 from src.db_operations import JobStatus, add_results_to_db, update_status
 from src.gemini_adapter import GeminiLM
+import src.metrics
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
