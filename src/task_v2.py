@@ -201,6 +201,75 @@ class LMHDataset:
             return task.replace("\n", "\\n")
         return task
 
+    def _normalize_schema(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Normalize all items to have the same schema by:
+        1. Collecting all unique keys across all items
+        2. Defining a standard schema with required and optional fields
+        3. Ensuring all items have all fields (with None/empty defaults for missing ones)
+        """
+        if not items:
+            return items
+        
+        # Collect all unique keys across all items
+        all_keys = set()
+        for item in items:
+            all_keys.update(item.keys())
+        
+        logger.info(f"Found {len(all_keys)} unique keys across {len(items)} items: {sorted(all_keys)}")
+        
+        # Define standard required fields that should always be present
+        # These are the core fields expected by lm_eval
+        required_fields = {
+            "id": None,
+            "input": "",
+            "output": "",
+        }
+        
+        # Optional fields that may or may not be present
+        optional_fields = {
+            "mcq": None,  # Will be list or None
+            "instruction": "",
+            "Experimental prompts": None,
+            "source_link": "",
+            "difficulty": "",
+            "source": "",
+        }
+        
+        # Combine all fields
+        standard_schema = {**required_fields, **optional_fields}
+        
+        # Add any other keys found in the data to the schema
+        for key in all_keys:
+            if key not in standard_schema:
+                logger.warning(f"Found unexpected field '{key}' in data, adding to schema")
+                standard_schema[key] = ""
+        
+        # Normalize each item
+        normalized = []
+        for idx, item in enumerate(items):
+            normalized_item = {}
+            
+            for field, default_value in standard_schema.items():
+                if field in item:
+                    normalized_item[field] = item[field]
+                else:
+                    # Use default value for missing fields
+                    # For list fields, use empty list instead of None
+                    if field == "mcq" and default_value is None:
+                        # Don't add mcq if it doesn't exist
+                        continue
+                    elif field == "Experimental prompts" and default_value is None:
+                        # Don't add Experimental prompts if it doesn't exist
+                        continue
+                    else:
+                        normalized_item[field] = default_value
+            
+            normalized.append(normalized_item)
+        
+        logger.info(f"Normalized {len(normalized)} items to consistent schema")
+        return normalized
+
     def _export_data(self, split: str) -> None:
         """Saves a split list to a JSON file (required by LM Harness)."""
         items = self.data.get(split, [])
@@ -217,10 +286,15 @@ class LMHDataset:
             if isinstance(it.get("output"), list) and it["output"]:
                 it["output"] = it["output"][0]
             processed.append(it)
+        
+        # Normalize schema across all items to prevent column mismatch errors
+        processed = self._normalize_schema(processed)
 
         out_path = f"{self.directory}/{self.file_name}_{split}.json"
         with open(out_path, "w", encoding="utf8") as f:
             json.dump(processed, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"Exported {len(processed)} items to {out_path}")
 
     def validate(self) -> None:
         if not any(self.data.values()):
