@@ -50,6 +50,17 @@ def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]
         else:
             return dataset
 
+def sanitize_config_name(name: str) -> str:
+    """
+    Sanitize a name for use as a dataset config name.
+    Removes characters that are problematic for Windows filesystems.
+    """
+    # Characters blacklisted by HuggingFace datasets: <>:/\|?*
+    forbidden_chars = '<>:/\\|?*'
+    sanitized = name
+    for char in forbidden_chars:
+        sanitized = sanitized.replace(char, '_')
+    return sanitized
 
 def mcq_custom_prompt():
     return '''

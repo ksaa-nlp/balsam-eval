@@ -12,9 +12,12 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
+from src.helpers import sanitize_config_name
+
 from .metrics_registry import get_metrics_registry
 
 logger = logging.getLogger(__name__)
+
 
 # TODO: need to not remove elements from original dict
 class LMHDataset:
@@ -210,14 +213,16 @@ class LMHDataset:
         """
         if not items:
             return items
-        
+
         # Collect all unique keys across all items
         all_keys = set()
         for item in items:
             all_keys.update(item.keys())
-        
-        logger.info(f"Found {len(all_keys)} unique keys across {len(items)} items: {sorted(all_keys)}")
-        
+
+        logger.info(
+            f"Found {len(all_keys)} unique keys across {len(items)} items: {sorted(all_keys)}"
+        )
+
         # Define standard required fields that should always be present
         # These are the core fields expected by lm_eval
         required_fields = {
@@ -225,7 +230,7 @@ class LMHDataset:
             "input": "",
             "output": "",
         }
-        
+
         # Optional fields that may or may not be present
         optional_fields = {
             "mcq": None,  # Will be list or None
@@ -235,21 +240,23 @@ class LMHDataset:
             "difficulty": "",
             "source": "",
         }
-        
+
         # Combine all fields
         standard_schema = {**required_fields, **optional_fields}
-        
+
         # Add any other keys found in the data to the schema
         for key in all_keys:
             if key not in standard_schema:
-                logger.warning(f"Found unexpected field '{key}' in data, adding to schema")
+                logger.warning(
+                    f"Found unexpected field '{key}' in data, adding to schema"
+                )
                 standard_schema[key] = ""
-        
+
         # Normalize each item
         normalized = []
         for idx, item in enumerate(items):
             normalized_item = {}
-            
+
             for field, default_value in standard_schema.items():
                 if field in item:
                     normalized_item[field] = item[field]
@@ -264,9 +271,9 @@ class LMHDataset:
                         continue
                     else:
                         normalized_item[field] = default_value
-            
+
             normalized.append(normalized_item)
-        
+
         logger.info(f"Normalized {len(normalized)} items to consistent schema")
         return normalized
 
@@ -286,14 +293,14 @@ class LMHDataset:
             if isinstance(it.get("output"), list) and it["output"]:
                 it["output"] = it["output"][0]
             processed.append(it)
-        
+
         # Normalize schema across all items to prevent column mismatch errors
         processed = self._normalize_schema(processed)
 
         out_path = f"{self.directory}/{self.file_name}_{split}.json"
         with open(out_path, "w", encoding="utf8") as f:
             json.dump(processed, f, ensure_ascii=False, indent=2)
-        
+
         logger.info(f"Exported {len(processed)} items to {out_path}")
 
     def validate(self) -> None:
@@ -322,7 +329,7 @@ class LMHDataset:
         else:
             # Check if it's a custom metric in the registry
             detected_metric = registry.detect_metric_type(m_name)
-            
+
             if detected_metric:
                 # Custom metric found - get the metric object and apply its configuration
                 metric_obj = registry.get(detected_metric)
@@ -331,24 +338,32 @@ class LMHDataset:
                     logger.info(f"Using custom metric: {detected_metric}")
                 else:
                     # This shouldn't happen, but handle it gracefully
-                    logger.warning(f"Metric '{detected_metric}' detected but couldn't retrieve object. Using base config with metric name.")
+                    logger.warning(
+                        f"Metric '{detected_metric}' detected but couldn't retrieve object. Using base config with metric name."
+                    )
                     final_yaml = base_yaml.copy()
-                    final_yaml["metric_list"] = [{
-                        "metric": m_name,
-                        "aggregation": m_name,
-                        "higher_is_better": True,
-                    }]
+                    final_yaml["metric_list"] = [
+                        {
+                            "metric": m_name,
+                            "aggregation": m_name,
+                            "higher_is_better": True,
+                        }
+                    ]
             else:
                 # Metric not found in custom registry - assume it's an LM Harness built-in metric
                 # Just include the metric name in the YAML and let LM Harness handle it
-                logger.info(f"Metric '{m_name}' not found in custom registry. "
-                          f"Assuming it's a built-in LM Harness metric.")
+                logger.info(
+                    f"Metric '{m_name}' not found in custom registry. "
+                    f"Assuming it's a built-in LM Harness metric."
+                )
                 final_yaml = base_yaml.copy()
-                final_yaml["metric_list"] = [{
-                    "metric": m_name,
-                    "aggregation": m_name,
-                    "higher_is_better": True,
-                }]
+                final_yaml["metric_list"] = [
+                    {
+                        "metric": m_name,
+                        "aggregation": m_name,
+                        "higher_is_better": True,
+                    }
+                ]
 
         # 4. Write YAML
         self._write_yaml(final_yaml)
@@ -376,7 +391,7 @@ class LMHDataset:
         return {
             "task": self.name,
             "dataset_path": "json",
-            "dataset_name": self.name,
+            "dataset_name": sanitize_config_name(self.name),
             "test_split": "test" if "test" in data_files else None,
             "validation_split": "dev" if "dev" in data_files else None,
             "doc_to_text": doc_to_text,
@@ -391,14 +406,21 @@ class LMHDataset:
     def _write_yaml(self, data: Dict[str, Any]) -> None:
         """Writes dictionary to YAML file with proper string formatting."""
         out_path = Path(self.directory) / f"{self.file_name}.yaml"
-        
+
         # Custom representer for multiline strings to use literal style (|)
         def str_representer(dumper, data):
-            if '\n' in data:
-                return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
-            return dumper.represent_scalar('tag:yaml.org,2002:str', data)
-        
+            if "\n" in data:
+                return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+            return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
         yaml.add_representer(str, str_representer)
-        
+
         with open(out_path, "w", encoding="utf8") as f:
-            yaml.dump(data, f, sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
+            yaml.dump(
+                data,
+                f,
+                sort_keys=False,
+                allow_unicode=True,
+                default_flow_style=False,
+                width=1000,
+            )
