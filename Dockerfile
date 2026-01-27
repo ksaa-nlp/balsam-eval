@@ -14,13 +14,14 @@ RUN mkdir -p /tmp && chmod 1777 /tmp && \
 
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml ./
+# Copy dependency files (lock file ensures reproducible builds)
+COPY pyproject.toml uv.lock ./
 
-# Create virtual environment and install dependencies with uv
+# Create virtual environment and install dependencies with uv using lock file
+# This ensures exact versions are installed every time
 RUN uv venv /opt/venv && \
     . /opt/venv/bin/activate && \
-    uv pip install -e .
+    uv sync --frozen
 
 # Final stage
 FROM python:3.10-slim

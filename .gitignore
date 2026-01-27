@@ -1,8 +1,7 @@
 # pyenv
 .python-version
 
-# uv
-uv.lock
+# uv - Note: uv.lock should be committed for reproducible builds
 .venv/
 
 # Installer logs
@@ -55,5 +54,4 @@ ignores
 .tasks copy
 
 xx.py
-.DS_Store
 .DS_Store
