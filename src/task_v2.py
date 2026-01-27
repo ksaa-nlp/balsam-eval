@@ -76,13 +76,24 @@ class LMHDataset:
         # 3. Escape newlines to prevent YAML formatting issues
         task_dict = self._escape_newline(task_dict)
         self.metadata = {}
-
+        
+        # Create a consistent task name using sanitize_config_name
+        # Use underscores instead of spaces/dashes to avoid parsing issues
+        task_part = task_dict.get("task", "Unknown_Task")
+        category_part = task_dict.get("category", "Unknown_Category")
+        # Sanitize individual parts first, then combine with a shorter hex suffix
+        sanitized_task = sanitize_config_name(task_part)
+        sanitized_category = sanitize_config_name(category_part)
+        # Use 8 bytes (16 hex chars) for uniqueness
+        unique_suffix = os.urandom(8).hex()
+        self.name = f"{sanitized_task}_{sanitized_category}_{unique_suffix}"
+        
         for key in ("version", "author", "organization", "category", "task", "source"):
             if key in task_dict:
                 self.metadata[key] = task_dict[key]
 
         # 4. Extract core harness fields
-        self.name = task_dict.pop("name", "Unknown Task")
+        task_dict.pop("name", "Unknown Task")
         self.task_id = task_dict.pop("task", "unknown_task_id")
 
         # Handle metric (could be a string in new template or dict in old)
