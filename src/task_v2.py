@@ -81,12 +81,14 @@ class LMHDataset:
         # Use underscores instead of spaces/dashes to avoid parsing issues
         task_part = task_dict.get("task", "Unknown_Task")
         category_part = task_dict.get("category", "Unknown_Category")
+        type_part = task_dict.get("Type of result", "")
+        metric_part = task_dict.get("metric", "")
         # Sanitize individual parts first, then combine with a shorter hex suffix
         sanitized_task = sanitize_config_name(task_part)
         sanitized_category = sanitize_config_name(category_part)
         # Use 8 bytes (16 hex chars) for uniqueness
-        unique_suffix = os.urandom(8).hex()
-        self.name = f"{sanitized_task}_{sanitized_category}_{unique_suffix}"
+        unique_suffix = os.urandom(5).hex()
+        self.name = f"{sanitized_task}_{sanitized_category}_{type_part}_{metric_part}_{unique_suffix}"
         
         for key in ("version", "author", "organization", "category", "task", "source"):
             if key in task_dict:
