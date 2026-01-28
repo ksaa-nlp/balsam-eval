@@ -99,14 +99,24 @@ def submit_model_evaluation(
 
 def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
     final_results = {}
+    
+    # Handle ROUGE metric (returns a dictionary)
     if "rouge,none" in result:
-        final_results["nGramScore"] = result["rouge,none"].get("rougeLsum", 0)
+        rouge_result = result["rouge,none"]
+        # If rouge_result is a dict, extract rougeLsum; otherwise use the value directly
+        if isinstance(rouge_result, dict):
+            final_results["nGramScore"] = rouge_result.get("rougeLsum", 0)
+        else:
+            final_results["nGramScore"] = rouge_result
+    # Handle BLEU metric (returns a float)
     elif "bleu,none" in result:
         final_results["nGramScore"] = result["bleu,none"]
 
+    # Handle accuracy metric
     if "accuracy,none" in result:
         final_results["mcqScore"] = result["accuracy,none"]
 
+    # Handle LLM as judge metrics
     if "llm_as_judge" in result:
         final_results["llmAsJudgeScore"] = result["llm_as_judge"].get(
             "average_score", 0)

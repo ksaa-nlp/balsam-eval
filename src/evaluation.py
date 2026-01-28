@@ -13,8 +13,8 @@ import lm_eval.evaluator
 import lm_eval.tasks
 import requests
 
-from src.helpers import mcq_custom_prompt, normalize_string
-from src.llm_as_a_judge import LLMJudge, ModelConfig
+from src.helpers import normalize_string
+from src.llm_as_a_judge import MCQLLMJudge, GenerativeLLMJudge, ModelConfig
 from src.db_operations import JobStatus, add_results_to_db, update_status
 from src.gemini_adapter import GeminiLM
 import src.metrics
@@ -229,8 +229,8 @@ class EvaluationJob:
                 and self.llm_judge_model
                 and self.llm_judge_provider
             ):
-                logger.info(f"Processing {len(generation_tasks)} generation tasks with LLM judge...")
-                llm_judge_generation = LLMJudge(
+                logger.info(f"Processing {len(generation_tasks)} generation tasks with GenerativeLLMJudge...")
+                llm_judge_generation = GenerativeLLMJudge(
                     model_configs=[
                         ModelConfig(
                             name=self.llm_judge_model,
@@ -238,7 +238,7 @@ class EvaluationJob:
                             api_key=self.llm_judge_api_key,
                         )
                     ],
-                    custom_prompt=None,  # Use default prompt for generation
+                    custom_prompt=None,  # Use default prompt for generation (0-3 scale)
                     aggregation_method="mean",
                     threshold=0.5,
                 )
@@ -256,8 +256,8 @@ class EvaluationJob:
                 and self.llm_judge_model
                 and self.llm_judge_provider
             ):
-                logger.info(f"Processing {len(mcq_tasks)} MCQ tasks with LLM judge...")
-                llm_judge_mcq = LLMJudge(
+                logger.info(f"Processing {len(mcq_tasks)} MCQ tasks with MCQLLMJudge...")
+                llm_judge_mcq = MCQLLMJudge(
                     model_configs=[
                         ModelConfig(
                             name=self.llm_judge_model,
@@ -265,7 +265,7 @@ class EvaluationJob:
                             api_key=self.llm_judge_api_key,
                         )
                     ],
-                    custom_prompt=mcq_custom_prompt(),  # Use MCQ-specific prompt
+                    custom_prompt=None,  # Use default MCQ prompt (binary 0-1 scoring)
                     aggregation_method="mean",
                     threshold=0.5,
                 )
@@ -348,55 +348,25 @@ class EvaluationJob:
             if isinstance(task_result, dict):
                 if "task" not in task_result:
                     # First try: use explicit task_id if provided
-                    task_id = self.task_id
-                    
-                    # Second try: use tasks_mapper_dict
-                    if task_id is None and self.tasks_mapper_dict:
-                        task_id = self.tasks_mapper_dict.get(task_name)
-                    
-                    # Third try: extract from task name pattern
-                    # Pattern is: Task_Category_Type_Metric_Hash
-                    # We want the FIRST part (the task)
-                    if task_id is None:
-                        parts = task_name.split('_')
-                        
-                        # Known types and metrics help identify boundaries
-                        known_types = ["generative", "mcq"]
-                        known_metrics = ["rouge", "bleu", "accuracy", "custom_bleu"]
-                        
-                        # Find where type starts
-                        type_idx = None
-                        for i, part in enumerate(parts):
-                            if part in known_types:
-                                type_idx = i
-                                break
-                        
-                        if type_idx is not None and type_idx >= 2:
-                            # Task and Category are before type_idx
-                            # Since task and category are often the same (duplicated),
-                            # take the first half of everything before type
-                            task_category_parts = parts[:type_idx]
-                            mid = len(task_category_parts) // 2
-                            
-                            # Task is the first half
-                            task_parts = task_category_parts[:mid] if mid > 0 else [task_category_parts[0]]
-                            task_id = ' '.join(task_parts)  # Join with space for readability
-                            logger.info(f"Extracted task_id '{task_id}' from task_name '{task_name}'")
-                        elif len(parts) >= 1:
-                            # Fallback: just use first part
-                            task_id = parts[0]
-                            logger.info(f"Fallback: using first part '{task_id}'")
-                    
-                    # Fourth try: use the full task name as fallback
-                    if task_id is None:
-                        task_id = task_name
-                        logger.info(f"Using full task_name as task_id: '{task_id}'")
-                    
-                    task_result["task"] = task_id
-            else:
-                logger.warning(
-                    f"Task result for '{task_name}' is not a dictionary, skipping task_id addition"
-                )
+                    if self.task_id:
+                        task_result["task"] = self.task_id
+                        logger.info(f"Task ID set from explicit task_id: {self.task_id}")
+                    # Second try: use tasks_mapper if available
+                    elif self.tasks_mapper_dict and task_name in self.tasks_mapper_dict:
+                        task_result["task"] = self.tasks_mapper_dict[task_name]
+                        logger.info(f"Task ID mapped: {task_name} → {task_result['task']}")
+                    # Third try: parse from task_name (NEW LOGIC - extract first part)
+                    else:
+                        parts = task_name.split("_")
+                        if len(parts) >= 5:
+                            # First part is the task name
+                            extracted_task = parts[0]
+                            task_result["task"] = extracted_task
+                            logger.info(f"Task ID extracted from name: {task_name} → {extracted_task}")
+                        else:
+                            # Fallback: use the task_name as-is
+                            task_result["task"] = task_name
+                            logger.warning(f"Task ID fallback to full name: {task_name}")
 
         return results
 
@@ -550,7 +520,7 @@ class EvaluationJob:
     def process_results_with_llm_judge(
         self,
         results_data: Dict[str, Any],
-        llm_judge: "LLMJudge",
+        llm_judge,  # Can be MCQLLMJudge or GenerativeLLMJudge
         is_mcq: bool = False,
         task_filter: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
@@ -559,7 +529,7 @@ class EvaluationJob:
         
         Args:
             results_data: The evaluation results
-            llm_judge: The LLM judge instance
+            llm_judge: The LLM judge instance (MCQLLMJudge or GenerativeLLMJudge)
             is_mcq: Whether this is for MCQ tasks (affects prefix in output keys)
             task_filter: Optional list of task names to process. If None, process all tasks.
         """
