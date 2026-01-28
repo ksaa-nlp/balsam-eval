@@ -12,6 +12,7 @@ from statistics import mean
 import lm_eval.evaluator
 import lm_eval.tasks
 import requests
+from tqdm import tqdm
 
 from src.helpers import normalize_string
 from src.llm_as_a_judge import MCQLLMJudge, GenerativeLLMJudge, ModelConfig
@@ -574,8 +575,8 @@ class EvaluationJob:
         taskwise_scores_raw = {}
 
         prefix = "mcq_" if is_mcq else ""
-
-        for sample_key, sample in filtered_samples:
+        pbar_desc = "Evaluating (MCQ)" if is_mcq else "Evaluating (Gen)"
+        for sample_key, sample in tqdm(filtered_samples, desc=pbar_desc, unit="sample"):
             if not isinstance(sample, dict):
                 continue
 
