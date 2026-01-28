@@ -452,15 +452,28 @@ class EvaluationJob:
                 continue
 
             for key, value in task_result.items():
-                if key.endswith(",none") and isinstance(value, (int, float)):
-                    metric_name = key.replace(",none", "")
-                    if metric_name not in all_scores:
-                        all_scores[metric_name] = []
-                    all_scores[metric_name].append(value)
+                if key.endswith(",none"):
+                    # Handle ROUGE (dictionary with multiple scores)
+                    if isinstance(value, dict):
+                        # For ROUGE, use rougeLsum as the representative score
+                        if "rougeLsum" in value:
+                            metric_name = key.replace(",none", "")
+                            if metric_name not in all_scores:
+                                all_scores[metric_name] = []
+                            all_scores[metric_name].append(value["rougeLsum"])
+                            logger.debug(f"Task '{task_name}': Added ROUGE rougeLsum={value['rougeLsum']}")
+                    # Handle numeric values (BLEU, accuracy, etc.)
+                    elif isinstance(value, (int, float)):
+                        metric_name = key.replace(",none", "")
+                        if metric_name not in all_scores:
+                            all_scores[metric_name] = []
+                        all_scores[metric_name].append(value)
+                        logger.debug(f"Task '{task_name}': Added {metric_name}={value}")
 
         for metric_name, scores in all_scores.items():
             if scores:
                 average_scores[metric_name] = round(mean(scores), 4)
+                logger.info(f"Average {metric_name}: {average_scores[metric_name]} (from {len(scores)} tasks)")
 
         return average_scores
 
