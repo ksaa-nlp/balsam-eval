@@ -200,38 +200,6 @@ class EvaluationJob:
 
             results = self._add_task_to_results(results=results)
 
-            is_accuracy = (
-                next(
-                    (
-                        item.get("metric")
-                        for item in next(
-                            iter(results.get("configs", {}).values()), {}
-                        ).get("metric_list", [])[:1]
-                    ),
-                    None,
-                )
-                == "accuracy"
-            )
-
-            llm_judge = None
-            if (
-                self.llm_judge_api_key
-                and self.llm_judge_model
-                and self.llm_judge_provider
-            ):
-                llm_judge = LLMJudge(
-                    model_configs=[
-                        ModelConfig(
-                            name=self.llm_judge_model,
-                            provider=self.llm_judge_provider,
-                            api_key=self.llm_judge_api_key,
-                        )
-                    ],
-                    custom_prompt=mcq_custom_prompt() if is_accuracy else None,
-                    aggregation_method="mean",
-                    threshold=0.5,
-                )
-
             if not results:
                 logger.warning("No results found for the evaluation job.")
                 if self.api_host and self.job_id and self.server_token:
@@ -244,14 +212,67 @@ class EvaluationJob:
                     )
                 return
 
-            if llm_judge and isinstance(llm_judge, LLMJudge):
-                logger.info("Processing results with LLM judge...")
-                updated_results = self.process_results_with_llm_judge(
-                    results_data=results, llm_judge=llm_judge, is_mcq=is_accuracy
+            # Detect which tasks are MCQ (accuracy) and which are generation
+            mcq_tasks, generation_tasks = self._separate_mcq_and_generation_tasks(results)
+            
+            updated_results = results
+
+            # Run LLM judge for generation tasks if needed
+            if (
+                generation_tasks 
+                and self.llm_judge_api_key
+                and self.llm_judge_model
+                and self.llm_judge_provider
+            ):
+                logger.info(f"Processing {len(generation_tasks)} generation tasks with LLM judge...")
+                llm_judge_generation = LLMJudge(
+                    model_configs=[
+                        ModelConfig(
+                            name=self.llm_judge_model,
+                            provider=self.llm_judge_provider,
+                            api_key=self.llm_judge_api_key,
+                        )
+                    ],
+                    custom_prompt=None,  # Use default prompt for generation
+                    aggregation_method="mean",
+                    threshold=0.5,
                 )
-            else:
-                logger.info("Skipping LLM judge processing.")
-                updated_results = results
+                updated_results = self.process_results_with_llm_judge(
+                    results_data=updated_results,
+                    llm_judge=llm_judge_generation,
+                    is_mcq=False,
+                    task_filter=generation_tasks
+                )
+
+            # Run LLM judge for MCQ tasks if needed
+            if (
+                mcq_tasks
+                and self.llm_judge_api_key
+                and self.llm_judge_model
+                and self.llm_judge_provider
+            ):
+                logger.info(f"Processing {len(mcq_tasks)} MCQ tasks with LLM judge...")
+                llm_judge_mcq = LLMJudge(
+                    model_configs=[
+                        ModelConfig(
+                            name=self.llm_judge_model,
+                            provider=self.llm_judge_provider,
+                            api_key=self.llm_judge_api_key,
+                        )
+                    ],
+                    custom_prompt=mcq_custom_prompt(),  # Use MCQ-specific prompt
+                    aggregation_method="mean",
+                    threshold=0.5,
+                )
+                updated_results = self.process_results_with_llm_judge(
+                    results_data=updated_results,
+                    llm_judge=llm_judge_mcq,
+                    is_mcq=True,
+                    task_filter=mcq_tasks
+                )
+            
+            if not generation_tasks and not mcq_tasks:
+                logger.info("No LLM judge processing needed (no judge config or no tasks).")
 
             if (
                 "config" in updated_results
@@ -322,6 +343,71 @@ class EvaluationJob:
                 )
 
         return results
+
+    def _separate_mcq_and_generation_tasks(self, results: Dict[str, Any]) -> tuple[list[str], list[str]]:
+        """
+        Separate tasks into MCQ (accuracy metric) and generation tasks.
+        
+        Returns:
+            tuple: (mcq_tasks, generation_tasks) - lists of task names
+        """
+        mcq_tasks = []
+        generation_tasks = []
+        
+        configs = results.get("configs", {})
+        
+        for task_name, task_config in configs.items():
+            metric_list = task_config.get("metric_list", [])
+            if metric_list:
+                # Get the first metric
+                first_metric = metric_list[0]
+                metric_name = first_metric.get("metric") if isinstance(first_metric, dict) else first_metric
+                
+                if metric_name == "accuracy":
+                    mcq_tasks.append(task_name)
+                    logger.debug(f"Task '{task_name}' identified as MCQ (accuracy metric)")
+                else:
+                    generation_tasks.append(task_name)
+                    logger.debug(f"Task '{task_name}' identified as generation (metric: {metric_name})")
+            else:
+                # No metric specified, default to generation
+                generation_tasks.append(task_name)
+                logger.debug(f"Task '{task_name}' has no metric, defaulting to generation")
+        
+        logger.info(f"Separated tasks: {len(mcq_tasks)} MCQ, {len(generation_tasks)} generation")
+        return mcq_tasks, generation_tasks
+
+    def _normalize_mcq_answer(self, answer: str, mcq_mapping: dict) -> str:
+        """
+        Normalize MCQ answer to full text using the mapping.
+        Converts letter answers (A, B, C, D) to their full text equivalents.
+        
+        Args:
+            answer: The answer to normalize (could be "A", "B", or full text)
+            mcq_mapping: Dict mapping letters to full option text (e.g., {"A": "نعم", "B": "لا"})
+            
+        Returns:
+            Normalized answer as full text
+        """
+        if not answer or not mcq_mapping:
+            return answer
+        
+        answer_stripped = answer.strip()
+        
+        # Check if it's a single letter
+        if len(answer_stripped) == 1 and answer_stripped.upper() in mcq_mapping:
+            normalized = mcq_mapping[answer_stripped.upper()]
+            logger.debug(f"Converted letter '{answer_stripped}' to '{normalized}'")
+            return normalized
+        
+        # Check if it's already the full text (case-insensitive match)
+        answer_lower = answer_stripped.lower()
+        for letter, option_text in mcq_mapping.items():
+            if answer_lower == option_text.lower().strip():
+                return option_text  # Return the exact option text from mapping
+        
+        # If no match found, return original (might be already normalized or invalid)
+        return answer_stripped
 
     def _calculate_average_scores(self, results: dict[str, Any]) -> dict[str, float]:
         total_scores = {}
@@ -418,7 +504,17 @@ class EvaluationJob:
         results_data: Dict[str, Any],
         llm_judge: "LLMJudge",
         is_mcq: bool = False,
+        task_filter: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+        """
+        Process results with LLM judge.
+        
+        Args:
+            results_data: The evaluation results
+            llm_judge: The LLM judge instance
+            is_mcq: Whether this is for MCQ tasks (affects prefix in output keys)
+            task_filter: Optional list of task names to process. If None, process all tasks.
+        """
         processed_data = results_data.copy()
 
         samples = processed_data.get("samples", {})
@@ -427,18 +523,28 @@ class EvaluationJob:
         all_scores = []
         all_scores_raw = []
 
-        all_samples = [
-            (task_key, sample)
-            for task_key, sample_list in samples.items()
-            for sample in sample_list
-        ]
+        # Filter samples if task_filter is provided
+        if task_filter:
+            filtered_samples = [
+                (task_key, sample)
+                for task_key, sample_list in samples.items()
+                if task_key in task_filter
+                for sample in sample_list
+            ]
+            logger.info(f"Filtering to {len(task_filter)} tasks, {len(filtered_samples)} total samples")
+        else:
+            filtered_samples = [
+                (task_key, sample)
+                for task_key, sample_list in samples.items()
+                for sample in sample_list
+            ]
 
         taskwise_scores = {}
         taskwise_scores_raw = {}
 
         prefix = "mcq_" if is_mcq else ""
 
-        for sample_key, sample in all_samples:
+        for sample_key, sample in filtered_samples:
             if not isinstance(sample, dict):
                 continue
 
@@ -449,6 +555,27 @@ class EvaluationJob:
             response = responses[0]
             expected_output = sample.get("doc", {}).get("output", "")
             question = sample.get("doc", {}).get("input", "")
+
+            # For MCQ tasks, normalize answers to text BEFORE sending to judge
+            # This way the judge just compares text to text (e.g., "لا" vs "لا" instead of "B" vs "لا")
+            mcq_options = sample.get("doc", {}).get("mcq", [])
+            if is_mcq and mcq_options:
+                # Create letter-to-text mapping
+                mcq_mapping = {chr(65 + i): opt for i, opt in enumerate(mcq_options)}
+                
+                # Normalize both the model's response and the expected output
+                original_response = response
+                original_expected = expected_output
+                
+                response = self._normalize_mcq_answer(response, mcq_mapping)
+                expected_output = self._normalize_mcq_answer(expected_output, mcq_mapping)
+                
+                logger.debug(f"MCQ Normalization:")
+                logger.debug(f"  Response: '{original_response}' → '{response}'")
+                logger.debug(f"  Expected: '{original_expected}' → '{expected_output}'")
+                
+                # Now both are text, judge can simply compare them
+                # No need to pass full prompt with options anymore!
 
             if expected_output and response:
                 try:
