@@ -97,6 +97,11 @@ class EvaluationJob:
         self.llm_judge_api_key = llm_judge_api_key
         self.task_id = task_id
 
+        # FIX #2: Add eos_string to model_args if not present to avoid EOS warning
+        if 'eos_string' not in self.model_args:
+            self.model_args['eos_string'] = '<|endoftext|>'
+            logger.info("Added default eos_string='<|endoftext|>' to model_args")
+
         API_KEY = os.getenv("API_KEY")
         if API_KEY and (
             self.adapter == "openai-chat-completions"
@@ -279,22 +284,26 @@ class EvaluationJob:
                 and "model_args" in updated_results["config"]
                 and "api_key" in updated_results["config"]["model_args"]
             ):
-                del updated_results["config"]["model_args"]["api_key"]
+                updated_results["config"]["model_args"].pop("api_key")
 
-            if self.tasks_mapper_dict:
+            if self.task_id is None:
                 self._export_results(updated_results)
-            if self.task_id:
+            else:
                 self._export_results_tasks(updated_results)
 
+            if self.api_host and self.job_id and self.server_token:
+                update_status(
+                    api_host=self.api_host,
+                    job_id=self.job_id,
+                    server_token=self.server_token,
+                    status=JobStatus.COMPLETED,
+                )
+            logger.info("✅ Evaluation job completed successfully")
+
         except Exception as e:
-            logger.error("=" * 80)
-            logger.error(f"❌ EXCEPTION OCCURRED: {type(e).__name__}")
-            logger.error("=" * 80)
-
+            logger.error(f"❌ Error in evaluation job: {e}")
+            logger.error(traceback.format_exc())
             api_error_data = self._extract_api_error_message(e)
-
-            logger.error("Full traceback: %s", traceback.format_exc())
-            logger.error("Extracted API error data: %s", api_error_data)
 
             if self.api_host and self.job_id and self.server_token:
                 error_message = (
@@ -318,6 +327,19 @@ class EvaluationJob:
             raise Exception(error_message) from e
 
     def _add_task_to_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        FIX #1: Enhanced task mapping with better fallback logic
+        
+        Task names follow pattern: "Task_Category_Type_Metric_Hash"
+        Example: "Program Execution_Program Execution_generative_rouge_458b3abaf4"
+        
+        Based on task_v2.py generation code:
+        - Task: "Program Execution" (FIRST part) ← This is what we want!
+        - Category: "Program Execution" (duplicated)
+        - Type: "generative" or "mcq"
+        - Metric: "rouge", "bleu", "accuracy"
+        - Hash: 10-character unique ID
+        """
         if "results" not in results:
             logger.warning("No 'results' key found in results dictionary")
             return results
@@ -325,17 +347,51 @@ class EvaluationJob:
         for task_name, task_result in results["results"].items():
             if isinstance(task_result, dict):
                 if "task" not in task_result:
-                    task_id = (
-                        self.task_id
-                        if self.task_id
-                        else (
-                            self.tasks_mapper_dict.get(task_name)
-                            if self.tasks_mapper_dict
-                            else None
-                        )
-                    )
+                    # First try: use explicit task_id if provided
+                    task_id = self.task_id
+                    
+                    # Second try: use tasks_mapper_dict
+                    if task_id is None and self.tasks_mapper_dict:
+                        task_id = self.tasks_mapper_dict.get(task_name)
+                    
+                    # Third try: extract from task name pattern
+                    # Pattern is: Task_Category_Type_Metric_Hash
+                    # We want the FIRST part (the task)
                     if task_id is None:
-                        logger.warning(f"No mapping found for task '{task_name}'")
+                        parts = task_name.split('_')
+                        
+                        # Known types and metrics help identify boundaries
+                        known_types = ["generative", "mcq"]
+                        known_metrics = ["rouge", "bleu", "accuracy", "custom_bleu"]
+                        
+                        # Find where type starts
+                        type_idx = None
+                        for i, part in enumerate(parts):
+                            if part in known_types:
+                                type_idx = i
+                                break
+                        
+                        if type_idx is not None and type_idx >= 2:
+                            # Task and Category are before type_idx
+                            # Since task and category are often the same (duplicated),
+                            # take the first half of everything before type
+                            task_category_parts = parts[:type_idx]
+                            mid = len(task_category_parts) // 2
+                            
+                            # Task is the first half
+                            task_parts = task_category_parts[:mid] if mid > 0 else [task_category_parts[0]]
+                            task_id = ' '.join(task_parts)  # Join with space for readability
+                            logger.info(f"Extracted task_id '{task_id}' from task_name '{task_name}'")
+                        elif len(parts) >= 1:
+                            # Fallback: just use first part
+                            task_id = parts[0]
+                            logger.info(f"Fallback: using first part '{task_id}'")
+                    
+                    # Fourth try: use the full task name as fallback
+                    if task_id is None:
+                        task_id = task_name
+                        logger.info(f"Using full task_name as task_id: '{task_id}'")
+                    
                     task_result["task"] = task_id
             else:
                 logger.warning(
@@ -400,50 +456,42 @@ class EvaluationJob:
             logger.debug(f"Converted letter '{answer_stripped}' to '{normalized}'")
             return normalized
         
-        # Check if it's already the full text (case-insensitive match)
-        answer_lower = answer_stripped.lower()
-        for letter, option_text in mcq_mapping.items():
-            if answer_lower == option_text.lower().strip():
-                return option_text  # Return the exact option text from mapping
+        # Check for "A)" format
+        import re
+        match = re.match(r"^([A-Za-z])\)", answer_stripped)
+        if match:
+            letter = match.group(1).upper()
+            if letter in mcq_mapping:
+                normalized = mcq_mapping[letter]
+                logger.debug(f"Converted '{letter})' to '{normalized}'")
+                return normalized
         
-        # If no match found, return original (might be already normalized or invalid)
-        return answer_stripped
+        # If it's already full text, return as-is
+        return answer
 
-    def _calculate_average_scores(self, results: dict[str, Any]) -> dict[str, float]:
-        total_scores = {}
-        task_counts = {}
-
-        for task in results.get("results", {}):
-            task_results = results["results"][task]
-
-            for key, value in task_results.items():
-                if key.endswith(",none") and not key.endswith("_stderr,none"):
-                    metric_name = key.replace(",none", "")
-
-                    if isinstance(value, dict):
-                        for sub_metric, sub_value in value.items():
-                            if isinstance(sub_value, (int, float)):
-                                if sub_metric not in total_scores:
-                                    total_scores[sub_metric] = 0.0
-                                    task_counts[sub_metric] = 0
-                                total_scores[sub_metric] += sub_value
-                                task_counts[sub_metric] += 1
-                    elif isinstance(value, (int, float)):
-                        if metric_name not in total_scores:
-                            total_scores[metric_name] = 0.0
-                            task_counts[metric_name] = 0
-                        total_scores[metric_name] += value
-                        task_counts[metric_name] += 1
-
+    def _calculate_average_scores(self, results: Dict[str, Any]) -> Dict[str, float]:
+        """Calculate average scores across all tasks."""
         average_scores = {}
-        for metric_name, total_score in total_scores.items():
-            count = task_counts[metric_name]
-            if count > 0:
-                average_scores[metric_name] = total_score / count
-            else:
-                average_scores[metric_name] = 0.0
+        all_scores = {}
 
-        logger.info("Average Scores: %s", average_scores)
+        if "results" not in results:
+            return average_scores
+
+        for task_name, task_result in results["results"].items():
+            if not isinstance(task_result, dict):
+                continue
+
+            for key, value in task_result.items():
+                if key.endswith(",none") and isinstance(value, (int, float)):
+                    metric_name = key.replace(",none", "")
+                    if metric_name not in all_scores:
+                        all_scores[metric_name] = []
+                    all_scores[metric_name].append(value)
+
+        for metric_name, scores in all_scores.items():
+            if scores:
+                average_scores[metric_name] = round(mean(scores), 4)
+
         return average_scores
 
     def _export_results(self, results: dict[str, Any]):
