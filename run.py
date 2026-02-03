@@ -4,6 +4,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
+from src.adapter_utils import process_adapter_and_url
 from src.db_operations import get_tasks_from_category
 from src.evaluation import EvaluationJob
 from src.helpers import download_dataset_from_gcs
