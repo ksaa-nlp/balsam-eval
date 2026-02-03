@@ -1,13 +1,16 @@
 # pyenv
 .python-version
 
+# uv
+uv.lock
+.venv/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
 
 # Environments
 .env
-.venv
 venv/
 env/
 ENV/
@@ -42,11 +45,16 @@ ignores
 .results_old
 .vscode/
 
-
 # temp
 .tasks
 .results
 .tasks_old
 .tasks_full
 .tasks copy
+.tasks_full
+.tasks copy
+
+xx.py
 .DS_Store
+.DS_Store
+temp.py

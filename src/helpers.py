@@ -1,5 +1,6 @@
 # A function to normalize strings to id like format (normalized and sanitized to be used as a file name too)
 import unicodedata
+
 """A module for working with tasks and datasets."""
 
 import json
@@ -14,13 +15,12 @@ def normalize_string(text: str) -> str:
         unicodedata.normalize("NFKC", text)
         .lower()
         .replace("\x00", "")
-        .strip()
-        [:255]
+        .strip()[:255]
         .replace(" ", "_")
         .replace(".", "_")
         .replace("/", "_")
     )
-    
+
 def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]:
     """
     Download a dataset from GCS. The dataset is identified by a dataset ID
@@ -39,12 +39,26 @@ def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]
     # Read the dataset from the file
     with open(f".temp/{dataset_id}.json", "r", encoding="utf8") as fp:
         dataset = json.load(fp)
-        dd = dataset["json"]
-        dd["task"] = dataset["task"]
-        dd["category"] = dataset["category"]
-        # Overwrite the dataset with the new data
-        with open(f".temp/{dataset_id}.json", "w", encoding="utf8") as fp:
-            json.dump(dd, fp, ensure_ascii=False)
-        return dd
+        if "json" in dataset:
+            dd = dataset["json"]
+            dd["task"] = dataset["task"]
+            dd["category"] = dataset["category"]
+            # Overwrite the dataset with the new data
+            with open(f".temp/{dataset_id}.json", "w", encoding="utf8") as fp:
+                json.dump(dd, fp, ensure_ascii=False)
+            return dd
+        else:
+            return dataset
 
 
+def sanitize_config_name(name: str) -> str:
+    """
+    Sanitize a name for use as a dataset config name.
+    Removes characters that are problematic for Windows filesystems.
+    """
+    # Characters blacklisted by HuggingFace datasets: <>:/\|?*
+    forbidden_chars = "<>:/\\|?*"
+    sanitized = name
+    for char in forbidden_chars:
+        sanitized = sanitized.replace(char, "_")
+    return sanitized

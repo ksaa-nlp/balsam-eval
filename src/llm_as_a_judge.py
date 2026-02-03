@@ -1,14 +1,27 @@
+"""
+Refactored LLM Judge system with base class and specialized MCQ/Generative classes.
+
+The main improvement is separating concerns:
+- Base class handles common logic (model calling, aggregation, batch processing)
+- MCQ judge uses binary 0-1 scoring with simpler prompt
+- Generative judge uses 0-3 scoring with normalization to 0-1
+"""
+
 from typing import Dict, Any, Optional, Literal, List, Union
 from dataclasses import dataclass
+from abc import ABC, abstractmethod
 from deepeval.test_case import LLMTestCase
 from statistics import mean, median
 import json
 import time
+import logging
 from tqdm import tqdm
-
-# Import your model adapters
 from src.local_model import LocalModelEdited
 from deepeval.models import GPTModel, OllamaModel, AnthropicModel, GeminiModel
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class EvaluationResult:
@@ -17,6 +30,7 @@ class EvaluationResult:
     raw_score: float
     explanation: str
     passed: bool
+
 
 @dataclass
 class ModelConfig:
@@ -27,6 +41,7 @@ class ModelConfig:
     endpoint_url: Optional[str] = None
     other: Optional[Dict[str, Any]] = None
 
+
 @dataclass
 class TestCaseDict:
     """Dictionary representation of a test case."""
@@ -36,6 +51,7 @@ class TestCaseDict:
     context: Optional[str] = None
     id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+
 
 def create_model_adapter(config: ModelConfig) -> Any:
     """Create a model adapter based on the configuration."""
@@ -78,8 +94,9 @@ def create_model_adapter(config: ModelConfig) -> Any:
     else:
         raise ValueError(f"Unsupported provider: {config.provider}")
 
+
 def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) -> Dict[str, Any]:
-    """Call model adapter with retry logic similar to the first implementation."""
+    """Call model adapter with retry logic."""
     
     for attempt in range(max_retries):
         try:
@@ -110,9 +127,8 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
             # Handle different response formats
             response_text = None
             if isinstance(model_response, tuple):
-                # Handle tuple responses (response_text, metadata)
                 response_text = model_response[0]
-                print(f"🔍 Model returned tuple, using first element: {type(model_response[0])}")
+                logger.debug(f"Model returned tuple, using first element: {type(model_response[0])}")
             elif isinstance(model_response, str):
                 response_text = model_response
             elif hasattr(model_response, 'text'):
@@ -122,7 +138,7 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
             else:
                 response_text = str(model_response)
             
-            # Parse the response exactly like the first implementation
+            # Parse the response
             try:
                 # Clean the response text
                 raw_text = response_text.strip().replace("```json", "").replace("```", "").strip()
@@ -134,17 +150,17 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                         "explanation": parsed["explanation"]
                     }
 
-                print(f"⚠️ Missing keys in parsed output (attempt {attempt+1}): {parsed}")
+                logger.warning(f"Missing keys in parsed output (attempt {attempt+1}): {parsed}")
             except Exception as e:
-                print(f"⚠️ JSON parsing or structure error (attempt {attempt+1}): {e}")
-                print(f"🔍 Raw response: {response_text}")
+                logger.warning(f"JSON parsing or structure error (attempt {attempt+1}): {e}")
+                logger.debug(f"Raw response: {response_text}")
 
         except Exception as e:
-            print(f"❌ Model call error (attempt {attempt+1}): {e}")
+            logger.error(f"Model call error (attempt {attempt+1}): {e}")
 
         # Wait before retry with exponential backoff
         wait_time = min(2 ** attempt, 30)
-        print(f"⏳ Retrying after {wait_time} seconds...")
+        logger.info(f"Retrying after {wait_time} seconds...")
         time.sleep(wait_time)
 
     return {
@@ -152,8 +168,22 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
         "explanation": "Error: Unable to parse a valid response after retries"
     }
 
-class LLMJudge:
-    """Fixed LLM Judge system that uses model adapters with proper error handling."""
+
+class BaseLLMJudge(ABC):
+    """
+    Base class for LLM Judge systems.
+    
+    Handles common logic like:
+    - Model adapter management
+    - Batch processing
+    - Result aggregation
+    - Error handling
+    
+    Subclasses must implement:
+    - get_evaluation_prompt(): Returns the prompt template
+    - normalize_score(): Normalizes raw score to 0-1 range
+    - get_max_score(): Returns maximum possible raw score
+    """
 
     def __init__(
         self,
@@ -166,45 +196,43 @@ class LLMJudge:
         self.model_adapters = [create_model_adapter(config) for config in model_configs]
         self.aggregation_method = aggregation_method
         self.threshold = threshold
+        self.custom_prompt = custom_prompt
+
+    @abstractmethod
+    def get_evaluation_prompt(self) -> str:
+        """Get the evaluation prompt template. Must be implemented by subclasses."""
+        pass
+
+    @abstractmethod
+    def normalize_score(self, raw_score: float) -> float:
+        """
+        Normalize raw score to 0-1 range.
         
-        # Use the exact same prompt as your working direct API approach
-        self.evaluation_prompt = custom_prompt if custom_prompt is not None else self._get_default_prompt()
+        Args:
+            raw_score: The raw score from the model
+            
+        Returns:
+            Normalized score between 0 and 1
+        """
+        pass
 
-    def _get_default_prompt(self) -> str:
-        """Get the exact same prompt as your direct API approach."""
-        return '''You are an impartial and expert judge evaluating the quality of text generated by another AI model.
- 
-Your task is to score the generated output based on the original prompt and a provided ground truth answer, following a specific scoring rubric.
- 
-You will be provided with three pieces of information:
-1. The original prompt given to the generative model.
-2. The ground truth answer, representing the ideal or expected output.
-3. The actual output generated by the generative model.
- 
-Evaluate the generated output by comparing it to the ground truth, considering how well it addresses the original prompt.
- 
-**Scoring Rubric:**
-* **Score 0:** The automatically generated output is completely wrong, irrelevant, or unrelated to the prompt and ground truth.
-* **Score 1:** Poor answer. The output attempts to address the prompt but contains significant errors, is largely incomplete, or is difficult to understand. It shows little resemblance to the ground truth.
-* **Score 2:** Acceptable but different. The output is somewhat correct or addresses parts of the prompt reasonably well, but it differs significantly from the ground truth. It might be missing details present in the ground truth, include extra information not in the ground truth, or present the information in a substantially different structure or style, but is still a valid (though not ideal) response to the prompt.
-* **Score 3:** Perfect or almost perfect. The output is accurate, complete, and closely matches the ground truth in content and style, effectively answering the original prompt. Minor differences in wording or formatting that do not affect the meaning or quality are acceptable for a score of 3.
- 
-**Output Format:**
-Your output must be *only* a JSON object containing two keys:
-1. `score`: An integer between 0 and 3 based on the rubric above.
-2. `explanation`: A brief, concise string explaining *why* you assigned that score, referencing the differences or similarities between the generated output and the ground truth in the context of the prompt.
- 
-**Example Output JSON:**
-```json
-{
-  "score": 3,
-  "explanation": "The generated output is accurate and complete, closely matching the ground truth."
-}```'''
+    @abstractmethod
+    def get_max_score(self) -> float:
+        """Get the maximum possible raw score."""
+        pass
 
-    def _evaluate_single_model(self, question, reference_answer, given_answer, context, config, adapter) -> Dict[str, Any]:
+    def _evaluate_single_model(
+        self, 
+        question: str, 
+        reference_answer: str, 
+        given_answer: str, 
+        context: Optional[str], 
+        config: ModelConfig, 
+        adapter: Any
+    ) -> Dict[str, Any]:
         """Evaluate using a single model with proper error handling."""
-        # Create the exact same prompt structure as your working approach
-        prompt = self.evaluation_prompt
+        # Create the prompt
+        prompt = self.custom_prompt if self.custom_prompt else self.get_evaluation_prompt()
         prompt += f'\n\n[PROMPT]\n{question}\n[/PROMPT]\n'
         prompt += f'[GROUND TRUTH]\n{reference_answer}\n[/GROUND TRUTH]\n'
         prompt += f'[GENERATED OUTPUT]\n{given_answer}\n[/GENERATED OUTPUT]'
@@ -215,8 +243,9 @@ Your output must be *only* a JSON object containing two keys:
             
             raw_score = result["score"]
             explanation = result["explanation"]
-            # Normalize score from 0-3 to 0-1 exactly like your direct approach
-            norm_score = round(raw_score / 3, 4) if raw_score is not None else 0
+            
+            # Normalize score using subclass-specific logic
+            norm_score = self.normalize_score(raw_score) if raw_score is not None else 0
             passed = norm_score >= self.threshold
 
             return {
@@ -229,6 +258,7 @@ Your output must be *only* a JSON object containing two keys:
             }
             
         except Exception as e:
+            logger.error(f"Error evaluating with {config.name}: {e}")
             return {
                 "model": config.name,
                 "provider": config.provider,
@@ -257,7 +287,7 @@ Your output must be *only* a JSON object containing two keys:
             )
             model_results.append(result)
 
-        # Aggregate results (same as your direct approach)
+        # Aggregate results
         agg = self._aggregate_model_results(model_results)
 
         return {
@@ -278,12 +308,16 @@ Your output must be *only* a JSON object containing two keys:
         }
 
     def _aggregate_model_results(self, model_results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Aggregate results across models (same as direct approach)."""
+        """Aggregate results across models."""
         scores = [res["score"] for res in model_results if res["score"] is not None]
         raw_scores = [res["raw_score"] for res in model_results if res["raw_score"] is not None]
 
         if not scores:
-            return {"overall_score": 0, "overall_raw_score": 0, "aggregated_explanation": "No valid scores"}
+            return {
+                "overall_score": 0, 
+                "overall_raw_score": 0, 
+                "aggregated_explanation": "No valid scores"
+            }
 
         agg_score = median(scores) if self.aggregation_method == "median" else mean(scores)
         agg_raw = median(raw_scores) if self.aggregation_method == "median" else mean(raw_scores)
@@ -349,7 +383,7 @@ Your output must be *only* a JSON object containing two keys:
         }
 
     def _calculate_batch_statistics(self, results: List[Dict[str, Any]]):
-        """Calculate batch statistics (same as direct approach)."""
+        """Calculate batch statistics."""
         scores = [r["overall_score"] for r in results]
         raw_scores = [r["overall_raw_score"] for r in results]
 
@@ -359,11 +393,124 @@ Your output must be *only* a JSON object containing two keys:
             "median_score": median(scores),
             "average_raw_score": mean(raw_scores),
             "median_raw_score": median(raw_scores),
-            "pass_rate": sum(1 for s in scores if s >= self.threshold) / len(scores)
+            "pass_rate": sum(1 for s in scores if s >= self.threshold) / len(scores) if scores else 0
         }
 
     def save_results(self, results: Dict[str, Any], filename: str) -> None:
         """Save results to file."""
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
-        print(f"✅ Results saved to {filename}")
+        logger.info(f"✅ Results saved to {filename}")
+
+
+class MCQLLMJudge(BaseLLMJudge):
+    """
+    LLM Judge specialized for Multiple Choice Questions.
+    
+    Key differences from generative:
+    - Uses binary 0-1 scoring (correct/incorrect)
+    - No normalization needed (score is already 0-1)
+    - Simpler prompt focused on exact matching
+    - Handles Arabic-English letter equivalence (A=أ, B=ب, etc.)
+    """
+
+    def get_evaluation_prompt(self) -> str:
+        """Get MCQ-specific evaluation prompt with binary 0-1 scoring."""
+        return """You are an impartial and expert evaluator for a multiple-choice question.
+
+You will be given two pieces of information:
+1. The gold (correct) answer.
+2. The answer generated by the model.
+
+Your task is to determine whether the generated answer is correct.
+
+**Evaluation Rules:**
+- Assign a score of **1** if any of the following conditions hold:
+  - The generated answer matches the gold answer **by letter**, including **Arabic–English equivalence** (e.g., "A" = "أ", "B" = "ب", "C" = "ج", "D" = "د", "E" = "هـ", "F" = "و").
+  - The generated answer matches the gold answer **by choice text** (e.g., both are "1/4").
+  - The answers correspond to **yes/no equivalents**, where ("yes" = "نعم") and ("no" = "لا").
+- Otherwise, assign a score of **0**.
+
+Ignore differences in capitalization, spacing, punctuation, and script (Arabic or Latin).
+
+**Output Format:**
+Return only a JSON object with:
+1. `score`: 1 if correct, 0 if incorrect.
+2. `explanation`: A concise reason explaining why the answer is correct or incorrect.
+
+**Example Output JSON:**
+
+{
+  "score": 1,
+  "explanation": "The generated answer matches the correct choice considering Arabic-English and yes/no equivalences."
+}"""
+
+    def normalize_score(self, raw_score: float) -> float:
+        """
+        For MCQ, score is already 0-1, no normalization needed.
+        Just ensure it's within valid range.
+        """
+        if raw_score is None:
+            return 0.0
+        # Clamp to 0-1 range
+        return max(0.0, min(1.0, float(raw_score)))
+
+    def get_max_score(self) -> float:
+        """MCQ uses binary scoring, max is 1."""
+        return 1.0
+
+
+class GenerativeLLMJudge(BaseLLMJudge):
+    """
+    LLM Judge specialized for Generative (open-ended) tasks.
+    
+    Key differences from MCQ:
+    - Uses 0-3 scoring scale for nuanced evaluation
+    - Normalizes to 0-1 by dividing by 3
+    - More detailed rubric for partial credit
+    - Focuses on semantic similarity, not exact matching
+    """
+
+    def get_evaluation_prompt(self) -> str:
+        """Get generative-specific evaluation prompt with 0-3 scoring."""
+        return """You are an impartial and expert judge evaluating the quality of text generated by another AI model.
+
+Your task is to score the generated output based on the original prompt and a provided ground truth answer, following a specific scoring rubric.
+
+You will be provided with three pieces of information:
+1. The original prompt given to the generative model.
+2. The ground truth answer, representing the ideal or expected output.
+3. The actual output generated by the generative model.
+
+Evaluate the generated output by comparing it to the ground truth, considering how well it addresses the original prompt.
+
+**Scoring Rubric:**
+* **Score 0:** The automatically generated output is completely wrong, irrelevant, or unrelated to the prompt and ground truth.
+* **Score 1:** Poor answer. The output attempts to address the prompt but contains significant errors, is largely incomplete, or is difficult to understand. It shows little resemblance to the ground truth.
+* **Score 2:** Acceptable but different. The output is somewhat correct or addresses parts of the prompt reasonably well, but it differs significantly from the ground truth. It might be missing details present in the ground truth, include extra information not in the ground truth, or present the information in a substantially different structure or style, but is still a valid (though not ideal) response to the prompt.
+* **Score 3:** Perfect or almost perfect. The output is accurate, complete, and closely matches the ground truth in content and style, effectively answering the original prompt. Minor differences in wording or formatting that do not affect the meaning or quality are acceptable for a score of 3.
+
+**Output Format:**
+Your output must be *only* a JSON object containing two keys:
+1. `score`: An integer between 0 and 3 based on the rubric above.
+2. `explanation`: A brief, concise string explaining *why* you assigned that score, referencing the differences or similarities between the generated output and the ground truth in the context of the prompt.
+
+**Example Output JSON:**
+```json
+{
+  "score": 3,
+  "explanation": "The generated output is accurate and complete, closely matching the ground truth."
+}```"""
+
+    def normalize_score(self, raw_score: float) -> float:
+        """
+        Normalize score from 0-3 scale to 0-1 scale.
+        """
+        if raw_score is None:
+            return 0.0
+        # Normalize by dividing by max score (3)
+        return round(float(raw_score) / 3.0, 5)
+
+    def get_max_score(self) -> float:
+        """Generative uses 0-3 scoring scale."""
+        return 3.0

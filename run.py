@@ -4,11 +4,13 @@ import logging
 import os
 
 from dotenv import load_dotenv
+from src.adapter_utils import process_adapter_and_url
 from src.db_operations import get_tasks_from_category
-from src.evaluation import EvaluatationJob
+from src.evaluation import EvaluationJob
 from src.helpers import download_dataset_from_gcs
 from src.task import LMHDataset
-from src.adapter_utils import process_adapter_and_url
+from src.task_v2 import LMHDataset as LMHDatasetV2
+import glob
 
 # Load environment variables
 load_dotenv()
@@ -37,7 +39,8 @@ LLM_JUDGE_API_KEY = os.getenv("JUDGE_API_KEY")
 # Validation
 if not all([API_HOST, SERVER_TOKEN, CATEGORY_ID, ADAPTER, BENCHMARK_ID]):
     raise ValueError(
-        "API_HOST, SERVER_TOKEN, CATEGORY, BENCHMARK_ID, and ADAPTER environment variables are required")
+        "API_HOST, SERVER_TOKEN, CATEGORY, BENCHMARK_ID, and ADAPTER environment variables are required"
+    )
 if not MODEL_NAME:
     raise ValueError("MODEL name is required")
 
@@ -51,19 +54,28 @@ if __name__ == "__main__":
     processed_adapter, processed_base_url = process_adapter_and_url(ADAPTER, BASE_URL)
     
     datasets_ids = get_tasks_from_category(
-        category=CATEGORY_ID, api_host=API_HOST, server_token=SERVER_TOKEN, evaluation_types=EVALUATION_TYPES
+        category=CATEGORY_ID,
+        api_host=API_HOST,
+        server_token=SERVER_TOKEN,
+        evaluation_types=EVALUATION_TYPES,
     )
 
-    datasets: list[LMHDataset] = []
+    datasets: list[LMHDataset | LMHDatasetV2] = []
     for dataset_id in datasets_ids:
         # Download and export each dataset
-        download_dataset_from_gcs(dataset_id=dataset_id, directory=".temp")
-        dataset = LMHDataset(dataset_id, directory=".temp")
+        returned_data = download_dataset_from_gcs(
+            dataset_id=dataset_id, directory=".temp"
+        )
+        dataset = (
+            LMHDataset(dataset_id, directory=".temp")
+            if "json" in returned_data
+            else LMHDatasetV2(dataset_id, directory=".temp")
+        )
         dataset.export()
         datasets.append(dataset)
-        
+
     # Organize datasets by category and task
-    categories: dict[str, dict[str, list[LMHDataset]]] = {}
+    categories: dict[str, dict[str, list[LMHDataset | LMHDatasetV2]]] = {}
     for dataset in datasets:
         if dataset.category_id:
             if categories.get(dataset.category_id) is None:
@@ -71,6 +83,17 @@ if __name__ == "__main__":
             if categories[dataset.category_id].get(str(dataset.task_id)) is None:
                 categories[dataset.category_id][str(dataset.task_id)] = []
             categories[dataset.category_id][dataset.task_id].append(dataset)
+
+    # check if any categories are empty
+    for category in categories:
+        if len(categories[category]) == 0:
+            del categories[category]
+
+    # check if any tasks are empty
+    for category in categories:
+        for task in categories[category]:
+            if len(categories[category][task]) == 0:
+                del categories[category][task]
 
     print(f"Total categories: {len(categories)}")
     print(categories)
@@ -88,7 +111,9 @@ if __name__ == "__main__":
         print(f"Total tasks: {len(datasets)}")
 
         for task, _datasets in tasks.items():
-            job = EvaluatationJob(
+            if len(_datasets) == 0:
+                continue
+            job = EvaluationJob(
                 tasks=[dataset.name for dataset in _datasets],
                 adapter=processed_adapter,  # Use processed adapter
                 model_args=model_args,
@@ -103,3 +128,6 @@ if __name__ == "__main__":
                 llm_judge_provider=LLM_JUDGE_PROVIDER,
             )
             job()
+            
+    result_files = glob.glob(".results/*.json") + glob.glob("*.json")
+    print(f"Generated result files: {result_files}")

@@ -2,11 +2,11 @@
 
 import os
 import json
-import traceback
 from dotenv import load_dotenv
 
 from src.db_operations import submit_model_evaluation
-from src.evaluation import EvaluatationJob
+from src.evaluation import EvaluationJob
+from src.task_v2 import LMHDataset as LMHDatasetV2
 from src.task import LMHDataset
 from src.adapter_utils import process_adapter_and_url
 
@@ -17,6 +17,7 @@ load_dotenv()
 BASE_URL = os.getenv("BASE_URL")
 API_KEY = os.getenv("API_KEY")
 MODEL_NAME = os.getenv("MODEL")
+MAX_TOKENS = os.getenv("MAX_TOKENS")
 ADAPTER = os.getenv("ADAPTER")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN")
 API_HOST = os.getenv("API_HOST")
@@ -60,22 +61,26 @@ if __name__ == "__main__":
         with open(f"./{TASKS_DIR}/{file}", "r", encoding="utf-8") as f:
             content = f.read()
             d = json.loads(content)
+            
+            # TODO: EDIT HERE TO SUPPORT OLD AND NEW TEMPLATE
 
-            # Skip datasets with no metric
-            if d["json"]["metric_list"][0]["metric"] == "":
-                continue
-            
+            # # Skip datasets with no metric
+            if "json" in d:
+                if d["json"]["metric_list"][0]["metric"] == "":
+                    continue
+
             task_mapper[d["name"]] = d["task"]
-            
-            with open(
-                f"./{TEMP_DIR}/{file}", "w", encoding="utf-8"
-            ) as f_out:
-                d["json"]["category"] = d["category"]
-                d["json"]["task"] = d["task"]
-                json.dump(d["json"], f_out, ensure_ascii=False)
-                
+
+            with open(f"./{TEMP_DIR}/{file}", "w", encoding="utf-8") as f_out:
+                if "json" in d:
+                    d["json"]["category"] = d["category"]
+                    d["json"]["task"] = d["task"]
+                    json.dump(d["json"], f_out, ensure_ascii=False)
+                else:    
+                    json.dump(d, f_out, ensure_ascii=False)
+
             # Initialize LMHDataset
-            dataset = LMHDataset(str(file.rsplit(".",1)[0]), TEMP_DIR)
+            dataset = LMHDatasetV2(str(file.rsplit(".", 1)[0]), TEMP_DIR) if "json" not in d else LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)
             dataset.export()
 
             if tasks_temp.get(d["category"]) is None:
@@ -88,9 +93,21 @@ if __name__ == "__main__":
         model_args["base_url"] = processed_base_url
     if API_KEY:
         model_args["api_key"] = API_KEY
+    if MAX_TOKENS:
+        model_args["max_tokens"] = int(MAX_TOKENS)
+    else:
+        # Default max_tokens if not specified
+        model_args["max_tokens"] = 4096
 
     # Initialize a model evaluation
-    if processed_adapter and SERVER_TOKEN and API_HOST and USER_ID and BENCHMARK_ID and tasks_temp:
+    if (
+        ADAPTER
+        and SERVER_TOKEN
+        and API_HOST
+        and USER_ID
+        and BENCHMARK_ID
+        and tasks_temp
+    ):
         submit_results = submit_model_evaluation(
             model_name=MODEL_NAME,
             model_url=processed_base_url,  # Use processed base_url
@@ -105,9 +122,8 @@ if __name__ == "__main__":
         )
         print(submit_results)
         if submit_results["status_code"] != 200:
-            raise Exception(
-                f"[ERROR] Failed to submit evaluation: {submit_results}")
-            
+            raise Exception(f"[ERROR] Failed to submit evaluation: {submit_results}")
+
     else:
         submit_results = {"jobs_ids": {}}
         
@@ -115,7 +131,7 @@ if __name__ == "__main__":
         print("Running evaluation for category:", category)
 
         try:
-            job = EvaluatationJob(
+            job = EvaluationJob(
                 tasks=datasets,
                 adapter=processed_adapter,  # Use processed adapter
                 model_args=model_args,
@@ -131,6 +147,5 @@ if __name__ == "__main__":
             )
             job()
         except Exception as e:
-            print(
-                f"An error occurred while running the job for task {category}: {e}")
+            print(f"An error occurred while running the job for task {category}: {e}")
             continue

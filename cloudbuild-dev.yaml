@@ -1,0 +1,21 @@
+steps:
+  - name: 'gcr.io/kaniko-project/executor:latest'
+    id: 'PREPARING_BUILD'
+    args:
+      - '--destination=gcr.io/${PROJECT_ID}/benchmark-dev:latest'
+      - '--cache=true'
+      - '--single-snapshot'
+      - '--compressed-caching=false'
+      - '--ignore-path=/tmp/'
+      - '--ignore-path=/var/tmp/'
+      - '--ignore-path=/var/cache/apt/'
+      - '--ignore-path=/var/lib/apt/lists/'
+      - '--ignore-path=/.git/'
+      - '--ignore-path=~/.cache/pip/'
+      - '--cache-ttl=72h'
+      - '--cache-repo=gcr.io/${PROJECT_ID}/benchmark-dev-cache'
+
+timeout: 86400s
+options:
+  machineType: 'E2_HIGHCPU_32'
+  logging: CLOUD_LOGGING_ONLY

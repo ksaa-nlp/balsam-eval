@@ -30,6 +30,11 @@ env/
 ENV/
 env.bak/
 venv.bak/
+.venv
+
+# uv specific
+uv.lock
+.python-version
 
 # Testing
 .pytest_cache/

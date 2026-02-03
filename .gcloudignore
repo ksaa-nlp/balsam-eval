@@ -26,6 +26,10 @@ pip-log.txt
 pip-delete-this-directory.txt
 ~/.cache/pip/
 
+# uv specific
+uv.lock
+.python-version
+
 # Testing and coverage
 .pytest_cache/
 .coverage
