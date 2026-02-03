@@ -43,10 +43,15 @@ if not all([API_HOST, SERVER_TOKEN, CATEGORY_ID, ADAPTER, BENCHMARK_ID]):
 if not MODEL_NAME:
     raise ValueError("MODEL name is required")
 
+
 # Collect datasets
 if __name__ == "__main__":
     if not CATEGORY_ID or not API_HOST or not SERVER_TOKEN:
         raise ValueError("CATEGORY, API_HOST, and SERVER_TOKEN must be set.")
+    
+    # Process adapter and base_url using shared utility
+    processed_adapter, processed_base_url = process_adapter_and_url(ADAPTER, BASE_URL)
+    
     datasets_ids = get_tasks_from_category(
         category=CATEGORY_ID,
         api_host=API_HOST,
@@ -92,10 +97,10 @@ if __name__ == "__main__":
     print(f"Total categories: {len(categories)}")
     print(categories)
 
-    # Build model args
+    # Build model args with processed base_url
     model_args = {"model": MODEL_NAME}
-    if BASE_URL:
-        model_args["base_url"] = BASE_URL
+    if processed_base_url:
+        model_args["base_url"] = processed_base_url
     if API_KEY:
         model_args["api_key"] = API_KEY
 
@@ -109,7 +114,7 @@ if __name__ == "__main__":
                 continue
             job = EvaluationJob(
                 tasks=[dataset.name for dataset in _datasets],
-                adapter=ADAPTER,
+                adapter=processed_adapter,  # Use processed adapter
                 model_args=model_args,
                 task_id=task,
                 job_id=JOB_ID,
