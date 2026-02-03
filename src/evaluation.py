@@ -11,6 +11,7 @@ from statistics import mean
 
 import lm_eval.evaluator
 import lm_eval.tasks
+import lm_eval.models  # Register all lm_eval models (openai-chat-completions, etc.)
 import requests
 from tqdm import tqdm
 

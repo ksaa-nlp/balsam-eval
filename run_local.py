@@ -16,6 +16,7 @@ load_dotenv()
 BASE_URL = os.getenv("BASE_URL")
 API_KEY = os.getenv("API_KEY")
 MODEL_NAME = os.getenv("MODEL")
+MAX_TOKENS = os.getenv("MAX_TOKENS")
 ADAPTER = os.getenv("ADAPTER")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN")
 API_HOST = os.getenv("API_HOST")
@@ -88,6 +89,11 @@ if __name__ == "__main__":
         model_args["base_url"] = BASE_URL
     if API_KEY:
         model_args["api_key"] = API_KEY
+    if MAX_TOKENS:
+        model_args["max_tokens"] = int(MAX_TOKENS)
+    else:
+        # Default max_tokens if not specified
+        model_args["max_tokens"] = 4096
 
     # Initialize a model evaluation
     if (
