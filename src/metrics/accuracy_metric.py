@@ -346,7 +346,7 @@ class AccuracyMetric(BaseMetric):
     def get_generation_kwargs(self):
         kwargs = {
             "do_sample": False,
-            "until": ["<|endoftext|>", "\n", ".", "،", "؟", "!", " "],
+            "until": ["\n", ".", "،", "؟", "!"],
             "max_gen_toks": 5,
         }
         logger.debug(f"AccuracyMetric.get_generation_kwargs: {kwargs}")
