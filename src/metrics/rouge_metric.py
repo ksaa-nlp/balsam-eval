@@ -53,7 +53,7 @@ class RougeMetric(BaseMetric):
     def get_doc_to_text(self, original_doc_to_text: str) -> str:
         return original_doc_to_text
     def get_generation_kwargs(self):
-        return {"do_sample": False, "until": ["\n"]}
+        return {"do_sample": False, "until": [".", "،", "؟", "!"]}
 
 config = MetricConfig(
     name="rouge", higher_is_better=True,
