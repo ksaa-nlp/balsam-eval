@@ -16,7 +16,9 @@ import requests
 from tqdm import tqdm
 
 from src.helpers import normalize_string
-from src.llm_as_a_judge import MCQLLMJudge, GenerativeLLMJudge, ModelConfig
+from src.llm_judger.base_llm_judge import ModelConfig
+from src.llm_judger.mcq_llm_judge import MCQLLMJudge
+from src.llm_judger.generative_llm_judge import GenerativeLLMJudge
 from src.db_operations import JobStatus, add_results_to_db, update_status
 from src.gemini_adapter import GeminiLM
 from src.groq_adapter import GroqLM
@@ -101,8 +103,8 @@ class EvaluationJob:
         self.task_id = task_id
 
         # FIX #2: Add eos_string to model_args if not present to avoid EOS warning
-        if 'eos_string' not in self.model_args:
-            self.model_args['eos_string'] = '<|endoftext|>'
+        if "eos_string" not in self.model_args:
+            self.model_args["eos_string"] = "<|endoftext|>"
             logger.info("Added default eos_string='<|endoftext|>' to model_args")
 
         API_KEY = os.getenv("API_KEY")
@@ -133,6 +135,7 @@ class EvaluationJob:
 
             if "API request failed with error message:" in error_str:
                 import re
+
                 json_match = re.search(r"\{(?:[^{}]|{[^{}]*})*\}", error_str)
                 if json_match:
                     try:
@@ -221,18 +224,22 @@ class EvaluationJob:
                 return
 
             # Detect which tasks are MCQ (accuracy) and which are generation
-            mcq_tasks, generation_tasks = self._separate_mcq_and_generation_tasks(results)
-            
+            mcq_tasks, generation_tasks = self._separate_mcq_and_generation_tasks(
+                results
+            )
+
             updated_results = results
 
             # Run LLM judge for generation tasks if needed
             if (
-                generation_tasks 
+                generation_tasks
                 and self.llm_judge_api_key
                 and self.llm_judge_model
                 and self.llm_judge_provider
             ):
-                logger.info(f"Processing {len(generation_tasks)} generation tasks with GenerativeLLMJudge...")
+                logger.info(
+                    f"Processing {len(generation_tasks)} generation tasks with GenerativeLLMJudge..."
+                )
                 llm_judge_generation = GenerativeLLMJudge(
                     model_configs=[
                         ModelConfig(
@@ -249,7 +256,7 @@ class EvaluationJob:
                     results_data=updated_results,
                     llm_judge=llm_judge_generation,
                     is_mcq=False,
-                    task_filter=generation_tasks
+                    task_filter=generation_tasks,
                 )
 
             # Run LLM judge for MCQ tasks if needed
@@ -259,7 +266,9 @@ class EvaluationJob:
                 and self.llm_judge_model
                 and self.llm_judge_provider
             ):
-                logger.info(f"Processing {len(mcq_tasks)} MCQ tasks with MCQLLMJudge...")
+                logger.info(
+                    f"Processing {len(mcq_tasks)} MCQ tasks with MCQLLMJudge..."
+                )
                 llm_judge_mcq = MCQLLMJudge(
                     model_configs=[
                         ModelConfig(
@@ -276,11 +285,13 @@ class EvaluationJob:
                     results_data=updated_results,
                     llm_judge=llm_judge_mcq,
                     is_mcq=True,
-                    task_filter=mcq_tasks
+                    task_filter=mcq_tasks,
                 )
-            
+
             if not generation_tasks and not mcq_tasks:
-                logger.info("No LLM judge processing needed (no judge config or no tasks).")
+                logger.info(
+                    "No LLM judge processing needed (no judge config or no tasks)."
+                )
 
             if (
                 "config" in updated_results
@@ -332,10 +343,10 @@ class EvaluationJob:
     def _add_task_to_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """
         FIX #1: Enhanced task mapping with better fallback logic
-        
+
         Task names follow pattern: "Task_Category_Type_Metric_Hash"
         Example: "Program Execution_Program Execution_generative_rouge_458b3abaf4"
-        
+
         Based on task_v2.py generation code:
         - Task: "Program Execution" (FIRST part) ← This is what we want!
         - Category: "Program Execution" (duplicated)
@@ -353,11 +364,15 @@ class EvaluationJob:
                     # First try: use explicit task_id if provided
                     if self.task_id:
                         task_result["task"] = self.task_id
-                        logger.info(f"Task ID set from explicit task_id: {self.task_id}")
+                        logger.info(
+                            f"Task ID set from explicit task_id: {self.task_id}"
+                        )
                     # Second try: use tasks_mapper if available
                     elif self.tasks_mapper_dict and task_name in self.tasks_mapper_dict:
                         task_result["task"] = self.tasks_mapper_dict[task_name]
-                        logger.info(f"Task ID mapped: {task_name} → {task_result['task']}")
+                        logger.info(
+                            f"Task ID mapped: {task_name} → {task_result['task']}"
+                        )
                     # Third try: parse from task_name (NEW LOGIC - extract first part)
                     else:
                         parts = task_name.split("_")
@@ -365,72 +380,91 @@ class EvaluationJob:
                             # First part is the task name
                             extracted_task = parts[0]
                             task_result["task"] = extracted_task
-                            logger.info(f"Task ID extracted from name: {task_name} → {extracted_task}")
+                            logger.info(
+                                f"Task ID extracted from name: {task_name} → {extracted_task}"
+                            )
                         else:
                             # Fallback: use the task_name as-is
                             task_result["task"] = task_name
-                            logger.warning(f"Task ID fallback to full name: {task_name}")
+                            logger.warning(
+                                f"Task ID fallback to full name: {task_name}"
+                            )
 
         return results
 
-    def _separate_mcq_and_generation_tasks(self, results: Dict[str, Any]) -> tuple[list[str], list[str]]:
+    def _separate_mcq_and_generation_tasks(
+        self, results: Dict[str, Any]
+    ) -> tuple[list[str], list[str]]:
         """
         Separate tasks into MCQ (accuracy metric) and generation tasks.
-        
+
         Returns:
             tuple: (mcq_tasks, generation_tasks) - lists of task names
         """
         mcq_tasks = []
         generation_tasks = []
-        
+
         configs = results.get("configs", {})
-        
+
         for task_name, task_config in configs.items():
             metric_list = task_config.get("metric_list", [])
             if metric_list:
                 # Get the first metric
                 first_metric = metric_list[0]
-                metric_name = first_metric.get("metric") if isinstance(first_metric, dict) else first_metric
-                
+                metric_name = (
+                    first_metric.get("metric")
+                    if isinstance(first_metric, dict)
+                    else first_metric
+                )
+
                 if metric_name == "accuracy":
                     mcq_tasks.append(task_name)
-                    logger.debug(f"Task '{task_name}' identified as MCQ (accuracy metric)")
+                    logger.debug(
+                        f"Task '{task_name}' identified as MCQ (accuracy metric)"
+                    )
                 else:
                     generation_tasks.append(task_name)
-                    logger.debug(f"Task '{task_name}' identified as generation (metric: {metric_name})")
+                    logger.debug(
+                        f"Task '{task_name}' identified as generation (metric: {metric_name})"
+                    )
             else:
                 # No metric specified, default to generation
                 generation_tasks.append(task_name)
-                logger.debug(f"Task '{task_name}' has no metric, defaulting to generation")
-        
-        logger.info(f"Separated tasks: {len(mcq_tasks)} MCQ, {len(generation_tasks)} generation")
+                logger.debug(
+                    f"Task '{task_name}' has no metric, defaulting to generation"
+                )
+
+        logger.info(
+            f"Separated tasks: {len(mcq_tasks)} MCQ, {len(generation_tasks)} generation"
+        )
         return mcq_tasks, generation_tasks
 
     def _normalize_mcq_answer(self, answer: str, mcq_mapping: dict) -> str:
         """
         Normalize MCQ answer to full text using the mapping.
         Converts letter answers (A, B, C, D) to their full text equivalents.
-        
+
         Args:
             answer: The answer to normalize (could be "A", "B", or full text)
             mcq_mapping: Dict mapping letters to full option text (e.g., {"A": "نعم", "B": "لا"})
-            
+
         Returns:
             Normalized answer as full text
         """
         if not answer or not mcq_mapping:
             return answer
-        
+
         answer_stripped = answer.strip()
-        
+
         # Check if it's a single letter
         if len(answer_stripped) == 1 and answer_stripped.upper() in mcq_mapping:
             normalized = mcq_mapping[answer_stripped.upper()]
             logger.debug(f"Converted letter '{answer_stripped}' to '{normalized}'")
             return normalized
-        
+
         # Check for "A)" format
         import re
+
         match = re.match(r"^([A-Za-z])\)", answer_stripped)
         if match:
             letter = match.group(1).upper()
@@ -438,7 +472,7 @@ class EvaluationJob:
                 normalized = mcq_mapping[letter]
                 logger.debug(f"Converted '{letter})' to '{normalized}'")
                 return normalized
-        
+
         # If it's already full text, return as-is
         return answer
 
@@ -464,7 +498,9 @@ class EvaluationJob:
                             if metric_name not in all_scores:
                                 all_scores[metric_name] = []
                             all_scores[metric_name].append(value["rougeLsum"])
-                            logger.debug(f"Task '{task_name}': Added ROUGE rougeLsum={value['rougeLsum']}")
+                            logger.debug(
+                                f"Task '{task_name}': Added ROUGE rougeLsum={value['rougeLsum']}"
+                            )
                     # Handle numeric values (BLEU, accuracy, etc.)
                     elif isinstance(value, (int, float)):
                         metric_name = key.replace(",none", "")
@@ -476,7 +512,9 @@ class EvaluationJob:
         for metric_name, scores in all_scores.items():
             if scores:
                 average_scores[metric_name] = round(mean(scores), 4)
-                logger.info(f"Average {metric_name}: {average_scores[metric_name]} (from {len(scores)} tasks)")
+                logger.info(
+                    f"Average {metric_name}: {average_scores[metric_name]} (from {len(scores)} tasks)"
+                )
 
         return average_scores
 
@@ -542,7 +580,7 @@ class EvaluationJob:
     ) -> Dict[str, Any]:
         """
         Process results with LLM judge.
-        
+
         Args:
             results_data: The evaluation results
             llm_judge: The LLM judge instance (MCQLLMJudge or GenerativeLLMJudge)
@@ -565,7 +603,9 @@ class EvaluationJob:
                 if task_key in task_filter
                 for sample in sample_list
             ]
-            logger.info(f"Filtering to {len(task_filter)} tasks, {len(filtered_samples)} total samples")
+            logger.info(
+                f"Filtering to {len(task_filter)} tasks, {len(filtered_samples)} total samples"
+            )
         else:
             filtered_samples = [
                 (task_key, sample)
@@ -596,18 +636,20 @@ class EvaluationJob:
             if is_mcq and mcq_options:
                 # Create letter-to-text mapping
                 mcq_mapping = {chr(65 + i): opt for i, opt in enumerate(mcq_options)}
-                
+
                 # Normalize both the model's response and the expected output
                 original_response = response
                 original_expected = expected_output
-                
+
                 response = self._normalize_mcq_answer(response, mcq_mapping)
-                expected_output = self._normalize_mcq_answer(expected_output, mcq_mapping)
-                
+                expected_output = self._normalize_mcq_answer(
+                    expected_output, mcq_mapping
+                )
+
                 logger.debug(f"MCQ Normalization:")
                 logger.debug(f"  Response: '{original_response}' → '{response}'")
                 logger.debug(f"  Expected: '{original_expected}' → '{expected_output}'")
-                
+
                 # Now both are text, judge can simply compare them
                 # No need to pass full prompt with options anymore!
 
@@ -643,7 +685,9 @@ class EvaluationJob:
                 except Exception as e:
                     sample[f"{prefix}llm_score"] = None
                     sample[f"{prefix}llm_score_raw"] = None
-                    sample[f"{prefix}llm_explanation"] = f"Error during LLM evaluation: {str(e)}"
+                    sample[f"{prefix}llm_explanation"] = (
+                        f"Error during LLM evaluation: {str(e)}"
+                    )
                     sample[f"{prefix}llm_judge_details"] = {"error": str(e)}
 
         for task_key in taskwise_scores:
@@ -653,10 +697,18 @@ class EvaluationJob:
 
                 processed_data["results"].setdefault(task_key, {"alias": task_key})
 
-                processed_data["results"][task_key][f"{prefix}llm_judge_score,none"] = avg_score
-                processed_data["results"][task_key][f"{prefix}llm_judge_score_stderr,none"] = 0.0
-                processed_data["results"][task_key][f"{prefix}llm_judge_score_raw,none"] = avg_score_raw
-                processed_data["results"][task_key][f"{prefix}llm_judge_score_raw_stderr,none"] = 0.0
+                processed_data["results"][task_key][
+                    f"{prefix}llm_judge_score,none"
+                ] = avg_score
+                processed_data["results"][task_key][
+                    f"{prefix}llm_judge_score_stderr,none"
+                ] = 0.0
+                processed_data["results"][task_key][
+                    f"{prefix}llm_judge_score_raw,none"
+                ] = avg_score_raw
+                processed_data["results"][task_key][
+                    f"{prefix}llm_judge_score_raw_stderr,none"
+                ] = 0.0
                 processed_data["results"][task_key][f"{prefix}llm_as_judge"] = {
                     "average_score": avg_score,
                     "average_score_raw": avg_score_raw,
@@ -673,7 +725,9 @@ class EvaluationJob:
             }
 
         if all_scores_raw:
-            processed_data[f"overall_{prefix}llm_as_judge_raw"] = round(mean(all_scores_raw), 4)
+            processed_data[f"overall_{prefix}llm_as_judge_raw"] = round(
+                mean(all_scores_raw), 4
+            )
             processed_data[f"overall_{prefix}llm_as_judge_raw_stats"] = {
                 "total_samples": len(all_scores_raw),
                 "average_score_raw": round(mean(all_scores_raw), 4),
