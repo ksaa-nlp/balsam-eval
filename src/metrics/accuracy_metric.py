@@ -47,7 +47,9 @@ def extract_first_word_or_line(text: str) -> str:
             extracted = colon_match.group(2).strip()
             logger.debug(f"extract_first_word_or_line: Extracted after colon pattern: '{extracted}'")
             # Remove any trailing punctuation from the extracted answer
-            extracted = re.sub(r'^["\'"()【〔]|["\'"()】〕$', "", extracted)
+            # Match quotes/brackets at start and end separately to avoid character class issues
+            extracted = re.sub(r'^["\'"()【〔]+', "", extracted)
+            extracted = re.sub(r'["\'"()】〕]+$', "", extracted)
             extracted = re.sub(r"[.،؟!]+$", "", extracted)
             return extracted
 
@@ -58,7 +60,9 @@ def extract_first_word_or_line(text: str) -> str:
 
     # Otherwise, extract just the first word
     first_word = first_line.split()[0] if first_line.split() else first_line
-    first_word = re.sub(r'^["\'"()【〔]|["\'"()】〕$', "", first_word)
+    # Match quotes/brackets at start and end separately to avoid character class issues
+    first_word = re.sub(r'^["\'"()【〔]+', "", first_word)
+    first_word = re.sub(r'["\'"()】〕]+$', "", first_word)
     first_word = re.sub(r"[.،؟!]+$", "", first_word)
 
     logger.debug(f"extract_first_word_or_line: Extracted first word: '{first_word}'")
