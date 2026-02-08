@@ -21,26 +21,46 @@ ALL_PUNCTUATIONS += "".join([o for o in others if o not in ALL_PUNCTUATIONS])
 
 # ---------- helpers ----------
 def extract_first_word_or_line(text: str) -> str:
+    """
+    Extract the first word or short line from text.
+    For MCQ answers, this handles cases like "Answer: A" → "A" or "The answer is Paris" → "Paris".
+    """
     if not isinstance(text, str):
         text = str(text)
     text = text.strip()
     if not text:
         logger.debug("extract_first_word_or_line: Empty text after strip")
         return ""
-    
+
     first_line = text.split("\n")[0].strip()
     first_line = re.sub(r"[.،؟!]+$", "", first_line)
-    
+
     logger.debug(f"extract_first_word_or_line: first_line='{first_line}'")
-    
+
+    # Handle common patterns like "Answer: A" or "The answer is: Paris"
+    # Look for patterns with colons that might indicate the answer follows
+    colon_match = re.match(r'^([^:]+):\s*([^\s]+)', first_line, re.IGNORECASE)
+    if colon_match:
+        # If the first part looks like "answer", "response", etc., extract the part after colon
+        prefix = colon_match.group(1).strip().lower()
+        if any(word in prefix for word in ['answer', 'response', 'result', 'choice', 'option', 'الإجابة', 'الجواب']):
+            extracted = colon_match.group(2).strip()
+            logger.debug(f"extract_first_word_or_line: Extracted after colon pattern: '{extracted}'")
+            # Remove any trailing punctuation from the extracted answer
+            extracted = re.sub(r'^["\'"()【〔]|["\'"()】〕$', "", extracted)
+            extracted = re.sub(r"[.،؟!]+$", "", extracted)
+            return extracted
+
+    # If line is short (≤3 words), return it as-is
     if len(first_line.split()) <= 3:
         logger.debug(f"extract_first_word_or_line: Returning short line (≤3 words): '{first_line}'")
         return first_line
-    
+
+    # Otherwise, extract just the first word
     first_word = first_line.split()[0] if first_line.split() else first_line
-    first_word = re.sub(r'^["\'""]|["\'""]$', "", first_word)
+    first_word = re.sub(r'^["\'"()【〔]|["\'"()】〕$', "", first_word)
     first_word = re.sub(r"[.،؟!]+$", "", first_word)
-    
+
     logger.debug(f"extract_first_word_or_line: Extracted first word: '{first_word}'")
     return first_word
 
@@ -108,9 +128,26 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
         
         # If it's already full text, return it normalized
         text_lower = extracted.lower().strip()
+        # Clean text for comparison (remove punctuation and extra whitespace)
+        text_clean = re.sub(r'[()[\]{}"\',.!?،؟!]', '', text_lower).strip()
+
         for letter, option_text in mcq_mapping.items():
-            if text_lower == option_text.lower().strip():
-                logger.info(f"simple_normalize: Matched full text to option '{option_text}'")
+            option_lower = option_text.lower().strip()
+            option_clean = re.sub(r'[()[\]{}"\',.!?،؟!]', '', option_lower).strip()
+
+            # Try exact match first
+            if text_lower == option_lower:
+                logger.info(f"simple_normalize: Matched full text to option '{option_text}' (exact match)")
+                return option_text
+
+            # Try cleaned match (fuzzy - ignores punctuation and extra whitespace)
+            if text_clean == option_clean:
+                logger.info(f"simple_normalize: Matched full text to option '{option_text}' (cleaned match)")
+                return option_text
+
+            # Try substring match for cases where reference is shorter
+            if text_clean in option_clean or option_clean in text_clean:
+                logger.info(f"simple_normalize: Matched full text to option '{option_text}' (substring match)")
                 return option_text
         
         logger.debug(f"simple_normalize: No MCQ match found, returning '{clean_extracted or extracted}'")
@@ -178,30 +215,30 @@ if "accuracy" not in le_registry.AGGREGATION_REGISTRY:
             else:
                 logger.warning(f"accuracy_aggregation: Skipping invalid item at index {idx}: {type(item)}")
                 continue
-            
+
             # Handle empty predictions - count as incorrect
             if pred is None or (isinstance(pred, str) and not pred.strip()):
                 logger.warning(f"accuracy_aggregation [{idx}]: Empty prediction, counting as incorrect")
                 continue
-            
-            logger.debug(f"accuracy_aggregation [{idx}]: ref='{ref}', pred='{pred}'")
-            
+
+            logger.info(f"accuracy_aggregation [{idx}]: Raw ref='{ref}', Raw pred='{pred}', MCQ mapping: {mcq_mapping}")
+
             # Normalize both reference and prediction
             norm_ref = simple_normalize(ref, mcq_mapping=mcq_mapping)
             norm_pred = simple_normalize(pred, mcq_mapping=mcq_mapping)
-            
+
             # If normalization resulted in empty strings, skip
             if not norm_ref or not norm_pred:
                 logger.warning(f"accuracy_aggregation [{idx}]: Normalization resulted in empty string(s), counting as incorrect")
                 continue
-            
-            logger.debug(f"accuracy_aggregation [{idx}]: norm_ref='{norm_ref}', norm_pred='{norm_pred}'")
-            
+
+            logger.info(f"accuracy_aggregation [{idx}]: Normalized ref='{norm_ref}', Normalized pred='{norm_pred}'")
+
             # Clean for comparison
             clean_ref = re.sub(r"[()[\]{}]", "", norm_ref).lower().strip()
             clean_pred = re.sub(r"[()[\]{}]", "", norm_pred).lower().strip()
-            
-            logger.debug(f"accuracy_aggregation [{idx}]: clean_ref='{clean_ref}', clean_pred='{clean_pred}'")
+
+            logger.info(f"accuracy_aggregation [{idx}]: Clean ref='{clean_ref}', Clean pred='{clean_pred}'")
             
             if clean_ref == clean_pred:
                 correct += 1
@@ -251,11 +288,28 @@ def process_results(doc, results):
     logger.debug(f"process_results: Extracted prediction='{pred}'")
     
     ref = doc.get("output", "")
+
+    # Handle different output formats from version 2 datasets
     if isinstance(ref, list) and ref:
         ref = str(ref[0]) if ref[0] is not None else ""
+    elif isinstance(ref, dict):
+        # If output is a dict, try to extract the answer
+        ref = ref.get("answer", ref.get("correct", ref.get("value", str(ref))))
     elif ref is None:
         ref = ""
-    
+    elif isinstance(ref, str) and ref.strip().startswith("{"):
+        # If output is a JSON string, try to parse it
+        try:
+            import json
+            ref_json = json.loads(ref)
+            if isinstance(ref_json, dict):
+                ref = ref_json.get("answer", ref_json.get("correct", ref_json.get("value", ref)))
+            else:
+                ref = str(ref_json)
+        except (json.JSONDecodeError, ValueError):
+            # Not valid JSON, use as-is
+            pass
+
     logger.debug(f"process_results: Reference='{ref}'")
     
     # Create MCQ mapping if MCQ options exist (new template)
@@ -344,10 +398,13 @@ class AccuracyMetric(BaseMetric):
 الإجابة:'''
 
     def get_generation_kwargs(self):
+        # For MCQ questions, we expect short answers (single letter or short phrase)
+        # Don't use 'until' tokens since some models (like Claude) don't support newlines
+        # Instead, rely on max_gen_toks to limit generation length
         kwargs = {
             "do_sample": False,
-            "until": [".", "،", "؟", "!"],
-            "max_gen_toks": 4096,
+            "until": [],  # Empty list - no stop tokens, works across all models
+            "max_gen_toks": 50,  # MCQ answers are short, 50 tokens is plenty
         }
         logger.debug(f"AccuracyMetric.get_generation_kwargs: {kwargs}")
         return kwargs
