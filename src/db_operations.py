@@ -98,18 +98,26 @@ def submit_model_evaluation(
 
 
 def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
+    """
+    Extract scores from result dict for database storage.
+
+    This function handles the score keys as they are stored in the results,
+    without changing their names since the system depends on these names.
+    """
     final_results = {}
-    
+
     print(f"[DEBUG] get_avrage_scores called with result keys: {result.keys()}")
-    
-    # Handle ROUGE metric (returns a dictionary)
+
+    # Handle ROUGE metric (returns a dictionary with multiple ROUGE scores)
     if "rouge,none" in result:
         rouge_result = result["rouge,none"]
         print(f"[DEBUG] Found rouge,none: type={type(rouge_result)}, value={rouge_result}")
         # If rouge_result is a dict, extract rougeLsum; otherwise use the value directly
         if isinstance(rouge_result, dict):
-            final_results["nGramScore"] = rouge_result.get("rougeLsum", 0)
-            print(f"[DEBUG] Extracted rougeLsum: {final_results['nGramScore']}")
+            # Only use rougeLsum as the representative score
+            extracted_value = rouge_result.get("rougeLsum", 0)
+            print(f"[DEBUG] Extracted rougeLsum: {extracted_value}")
+            final_results["nGramScore"] = extracted_value
         else:
             final_results["nGramScore"] = rouge_result
             print(f"[DEBUG] Using rouge_result directly: {final_results['nGramScore']}")
@@ -123,16 +131,35 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
         final_results["mcqScore"] = result["accuracy,none"]
         print(f"[DEBUG] Found accuracy,none: {final_results['mcqScore']}")
 
-    # Handle LLM as judge metrics
+    # Handle LLM as judge metrics (dict format with average_score)
+    # These are set by process_results_with_llm_judge for task-level summaries
     if "llm_as_judge" in result:
         final_results["llmAsJudgeScore"] = result["llm_as_judge"].get(
             "average_score", 0)
         print(f"[DEBUG] Found llm_as_judge: {final_results['llmAsJudgeScore']}")
-        
+
     if "mcq_llm_as_judge" in result:
         final_results["MCQllmAsJudgeScore"] = result["mcq_llm_as_judge"].get(
             "average_score", 0)
         print(f"[DEBUG] Found mcq_llm_as_judge: {final_results['MCQllmAsJudgeScore']}")
+
+    # Handle LLM judge scores in numeric format (set by process_results_with_llm_judge)
+    # These are the actual score values (not dict summaries)
+    if "llm_judge_score,none" in result:
+        value = result["llm_judge_score,none"]
+        if isinstance(value, (int, float)):
+            # Only set if not already set by dict format (prefer dict format if available)
+            if "llmAsJudgeScore" not in final_results:
+                final_results["llmAsJudgeScore"] = float(value)
+                print(f"[DEBUG] Found llm_judge_score,none: {final_results['llmAsJudgeScore']}")
+
+    if "mcq_llm_judge_score,none" in result:
+        value = result["mcq_llm_judge_score,none"]
+        if isinstance(value, (int, float)):
+            # Only set if not already set by dict format (prefer dict format if available)
+            if "MCQllmAsJudgeScore" not in final_results:
+                final_results["MCQllmAsJudgeScore"] = float(value)
+                print(f"[DEBUG] Found mcq_llm_judge_score,none: {final_results['MCQllmAsJudgeScore']}")
 
     print(f"[DEBUG] Final results: {final_results}")
     return final_results

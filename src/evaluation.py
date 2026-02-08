@@ -477,45 +477,73 @@ class EvaluationJob:
         return answer
 
     def _calculate_average_scores(self, results: Dict[str, Any]) -> Dict[str, float]:
-        """Calculate average scores across all tasks."""
+        """
+        Calculate average scores across all tasks.
+
+        Handles:
+        - Numeric scores (BLEU, accuracy, LLM judge scores)
+        - Dictionary scores (ROUGE - extracts rougeLsum)
+        """
         average_scores = {}
         all_scores = {}
 
         if "results" not in results:
+            logger.warning("No 'results' key in results for average calculation")
             return average_scores
+
+        logger.info(f"Calculating averages for {len(results['results'])} tasks")
 
         for task_name, task_result in results["results"].items():
             if not isinstance(task_result, dict):
+                logger.warning(f"Task '{task_name}' has non-dict result, skipping")
                 continue
 
             for key, value in task_result.items():
-                if key.endswith(",none"):
-                    # Handle ROUGE (dictionary with multiple scores)
-                    if isinstance(value, dict):
-                        # For ROUGE, use rougeLsum as the representative score
-                        if "rougeLsum" in value:
-                            metric_name = key.replace(",none", "")
-                            if metric_name not in all_scores:
-                                all_scores[metric_name] = []
-                            all_scores[metric_name].append(value["rougeLsum"])
-                            logger.debug(
-                                f"Task '{task_name}': Added ROUGE rougeLsum={value['rougeLsum']}"
-                            )
-                    # Handle numeric values (BLEU, accuracy, etc.)
-                    elif isinstance(value, (int, float)):
-                        metric_name = key.replace(",none", "")
+                # Only process metric keys ending with ",none"
+                if not key.endswith(",none"):
+                    continue
+
+                metric_name = key.replace(",none", "")
+
+                # Handle dictionary values (ROUGE and potentially others)
+                if isinstance(value, dict):
+                    # For ROUGE, only use rougeLsum as the representative score
+                    if "rougeLsum" in value:
                         if metric_name not in all_scores:
                             all_scores[metric_name] = []
-                        all_scores[metric_name].append(value)
-                        logger.debug(f"Task '{task_name}': Added {metric_name}={value}")
+                        all_scores[metric_name].append(value["rougeLsum"])
+                        logger.debug(
+                            f"Task '{task_name}': Added {metric_name}.rougeLsum={value['rougeLsum']}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Task '{task_name}': Dict value for '{key}' but rougeLsum not found. Keys: {list(value.keys())}"
+                        )
 
+                # Handle numeric values (BLEU, accuracy, LLM judge scores, etc.)
+                elif isinstance(value, (int, float)):
+                    if metric_name not in all_scores:
+                        all_scores[metric_name] = []
+                    all_scores[metric_name].append(float(value))
+                    logger.debug(f"Task '{task_name}': Added {metric_name}={value}")
+
+                else:
+                    logger.warning(
+                        f"Task '{task_name}': Unexpected type for '{key}': {type(value)}"
+                    )
+
+        # Calculate averages
         for metric_name, scores in all_scores.items():
             if scores:
-                average_scores[metric_name] = round(mean(scores), 4)
+                avg = mean(scores)
+                average_scores[metric_name] = round(avg, 4)
                 logger.info(
-                    f"Average {metric_name}: {average_scores[metric_name]} (from {len(scores)} tasks)"
+                    f"Average {metric_name}: {average_scores[metric_name]} (from {len(scores)} tasks, min={min(scores):.4f}, max={max(scores):.4f})"
                 )
+            else:
+                logger.warning(f"No scores found for metric '{metric_name}'")
 
+        logger.info(f"Calculated {len(average_scores)} average metrics: {list(average_scores.keys())}")
         return average_scores
 
     def _export_results(self, results: dict[str, Any]):
@@ -695,7 +723,15 @@ class EvaluationJob:
                 avg_score = round(mean(taskwise_scores[task_key]), 4)
                 avg_score_raw = round(mean(taskwise_scores_raw[task_key]), 4)
 
-                processed_data["results"].setdefault(task_key, {"alias": task_key})
+                # Ensure the task result exists and is a dict, create if needed
+                if task_key not in processed_data["results"]:
+                    processed_data["results"][task_key] = {"alias": task_key}
+                    logger.debug(f"Created new result entry for task '{task_key}'")
+                elif not isinstance(processed_data["results"][task_key], dict):
+                    logger.warning(
+                        f"Task '{task_key}' has non-dict result, converting to dict"
+                    )
+                    processed_data["results"][task_key] = {"alias": task_key}
 
                 processed_data["results"][task_key][
                     f"{prefix}llm_judge_score,none"
@@ -714,6 +750,10 @@ class EvaluationJob:
                     "average_score_raw": avg_score_raw,
                     "num_samples": len(taskwise_scores[task_key]),
                 }
+
+                logger.debug(
+                    f"Task '{task_key}': Added LLM judge scores (avg={avg_score}, avg_raw={avg_score_raw}, samples={len(taskwise_scores[task_key])})"
+                )
 
         if all_scores:
             processed_data[f"overall_{prefix}llm_as_judge"] = round(mean(all_scores), 4)
