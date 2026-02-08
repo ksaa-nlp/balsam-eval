@@ -347,7 +347,7 @@ class AccuracyMetric(BaseMetric):
         kwargs = {
             "do_sample": False,
             "until": [".", "،", "؟", "!"],
-            "max_gen_toks": 5,
+            "max_gen_toks": 4096,
         }
         logger.debug(f"AccuracyMetric.get_generation_kwargs: {kwargs}")
         return kwargs

@@ -31,7 +31,7 @@ class GeminiLM(LM):
         model_name: Optional[str] = None,
         api_key: Optional[str] = None,
         temperature: float = 0.0,
-        max_tokens: int = 256,
+        max_tokens: int = 4096,
         top_p: float = 0.95,
         top_k: int = 40,
         retry_timeout: float = 30.0,

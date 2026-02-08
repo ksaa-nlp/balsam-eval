@@ -8,7 +8,7 @@ from src.db_operations import submit_model_evaluation
 from src.evaluation import EvaluationJob
 from src.task_v2 import LMHDataset as LMHDatasetV2
 from src.task import LMHDataset
-from src.adapter_utils import process_adapter_and_url
+from src.adapter_utils import process_adapter_and_url, get_max_tokens_config
 
 # Load environment variables
 load_dotenv()
@@ -17,7 +17,6 @@ load_dotenv()
 BASE_URL = os.getenv("BASE_URL")
 API_KEY = os.getenv("API_KEY")
 MODEL_NAME = os.getenv("MODEL")
-MAX_TOKENS = os.getenv("MAX_TOKENS")
 ADAPTER = os.getenv("ADAPTER")
 SERVER_TOKEN = os.getenv("SERVER_TOKEN")
 API_HOST = os.getenv("API_HOST")
@@ -93,11 +92,10 @@ if __name__ == "__main__":
         model_args["base_url"] = processed_base_url
     if API_KEY:
         model_args["api_key"] = API_KEY
-    if MAX_TOKENS:
-        model_args["max_tokens"] = int(MAX_TOKENS)
-    else:
-        # Default max_tokens if not specified
-        model_args["max_tokens"] = 4096
+
+    # Use adapter-specific max_tokens config (supports thinking models with max_completion_tokens)
+    max_tokens_config = get_max_tokens_config(processed_adapter, MODEL_NAME)
+    model_args.update(max_tokens_config)
 
     # Initialize a model evaluation
     if (
