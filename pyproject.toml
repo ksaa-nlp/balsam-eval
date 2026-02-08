@@ -12,6 +12,7 @@ dependencies = [
     "deepeval~=3.8.3",
     "python-dotenv~=1.2.1",
     "google-genai~=1.61.0",
+    "groq~=1.0.0",
 ]
 
 [build-system]
