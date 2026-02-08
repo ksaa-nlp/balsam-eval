@@ -102,7 +102,6 @@ class EvaluationJob:
         self.llm_judge_api_key = llm_judge_api_key
         self.task_id = task_id
 
-        # FIX #2: Add eos_string to model_args if not present to avoid EOS warning
         if "eos_string" not in self.model_args:
             self.model_args["eos_string"] = "<|endoftext|>"
             logger.info("Added default eos_string='<|endoftext|>' to model_args")

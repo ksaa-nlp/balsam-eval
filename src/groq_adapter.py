@@ -61,6 +61,11 @@ class GroqLM(LM):
         # Default Groq base URL
         base_url = base_url or os.environ.get("BASE_URL") or "https://api.groq.com"
 
+        # Clean base_url - remove endpoint paths if present
+        # Groq library expects just the base URL (e.g., https://api.groq.com)
+        # and will automatically append the correct endpoint path
+        base_url = self._clean_base_url(base_url)
+
         # Initialize Groq client
         self.client = Groq(
             api_key=api_key,
@@ -85,6 +90,49 @@ class GroqLM(LM):
     @property
     def batch_size(self) -> int:
         return 8
+
+    # ---------------------------------------------------------------------
+    # URL cleaning utilities
+    # ---------------------------------------------------------------------
+
+    @staticmethod
+    def _clean_base_url(base_url: str) -> str:
+        """
+        Clean the base URL by removing endpoint paths.
+
+        The Groq library expects just the base URL (e.g., https://api.groq.com)
+        and will automatically append /openai/v1/chat/completions or other
+        endpoint paths as needed. If the user provides a full URL with the
+        endpoint path, we strip it out.
+
+        Args:
+            base_url: The base URL to clean
+
+        Returns:
+            Cleaned base URL without endpoint paths
+        """
+        # Remove trailing slashes
+        base_url = base_url.rstrip('/')
+
+        # List of common endpoint paths that should be stripped
+        endpoint_patterns = [
+            '/openai/v1/chat/completions',
+            '/v1/chat/completions',
+            '/chat/completions',
+            '/openai/v1',
+            '/v1',
+            '/openai',
+        ]
+
+        # Check if base_url ends with any of these patterns and remove them
+        for pattern in endpoint_patterns:
+            if base_url.endswith(pattern):
+                base_url = base_url[:-len(pattern)]
+                base_url = base_url.rstrip('/')  # Remove any trailing slash after removal
+                logger.info(f"Removed endpoint path '{pattern}' from base_url")
+                break
+
+        return base_url
 
     # ---------------------------------------------------------------------
     # Message cleaning utilities
