@@ -19,6 +19,7 @@ from src.helpers import normalize_string
 from src.llm_as_a_judge import MCQLLMJudge, GenerativeLLMJudge, ModelConfig
 from src.db_operations import JobStatus, add_results_to_db, update_status
 from src.gemini_adapter import GeminiLM
+from src.groq_adapter import GroqLM
 import src.metrics
 
 logger = logging.getLogger(__name__)

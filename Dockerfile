@@ -1,4 +1,4 @@
-FROM python:3.10-slim as build
+FROM python:3.11-slim as build
 
 ENV PYTHONUNBUFFERED=1
 
@@ -23,7 +23,7 @@ RUN uv venv /opt/venv && \
     uv pip install -e .
 
 # Final stage
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
