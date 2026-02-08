@@ -2,6 +2,8 @@
 
 import os
 import json
+import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 
 from src.db_operations import submit_model_evaluation
@@ -26,6 +28,7 @@ EVALUATION_TYPES = os.getenv("EVALUATION_TYPES")
 LLM_JUDGE = os.getenv("JUDGE_MODEL")
 LLM_JUDGE_PROVIDER = os.getenv("JUDGE_PROVIDER")
 LLM_JUDGE_API_KEY = os.getenv("JUDGE_API_KEY")
+PARALLEL_CATEGORIES = os.getenv("PARALLEL_CATEGORIES", "false").lower() in ("true", "1", "yes", "on")
 
 
 # Validation
@@ -124,9 +127,10 @@ if __name__ == "__main__":
 
     else:
         submit_results = {"jobs_ids": {}}
-        
-    for category, datasets in tasks_temp.items():
-        print("Running evaluation for category:", category)
+
+    def run_category(category, datasets):
+        """Run evaluation for a single category."""
+        print(f"Running evaluation for category: {category}")
 
         try:
             job = EvaluationJob(
@@ -144,6 +148,29 @@ if __name__ == "__main__":
                 benchmark_id=BENCHMARK_ID,
             )
             job()
+            return (category, True, None)
         except Exception as e:
             print(f"An error occurred while running the job for task {category}: {e}")
-            continue
+            return (category, False, str(e))
+
+    # Run categories sequentially or in parallel
+    if PARALLEL_CATEGORIES and len(tasks_temp) > 1:
+        print(f"Running {len(tasks_temp)} categories in parallel...")
+        with ThreadPoolExecutor(max_workers=min(len(tasks_temp), os.cpu_count() or 4)) as executor:
+            # Submit all category jobs
+            future_to_category = {
+                executor.submit(run_category, category, datasets): category
+                for category, datasets in tasks_temp.items()
+            }
+
+            # Process completed jobs
+            for future in as_completed(future_to_category):
+                category, success, error = future.result()
+                if success:
+                    print(f"Category '{category}' completed successfully")
+                else:
+                    print(f"Category '{category}' failed with error: {error}")
+    else:
+        # Sequential execution (default behavior)
+        for category, datasets in tasks_temp.items():
+            run_category(category, datasets)
