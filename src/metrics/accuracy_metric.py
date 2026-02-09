@@ -33,7 +33,8 @@ def extract_first_word_or_line(text: str) -> str:
         return ""
 
     first_line = text.split("\n")[0].strip()
-    first_line = re.sub(r"[.،؟!]+$", "", first_line)
+    # Remove all non-alphanumeric characters from the end
+    first_line = re.sub(r"[^\w\s]+$", "", first_line, flags=re.UNICODE)
 
     logger.debug(f"extract_first_word_or_line: first_line='{first_line}'")
 
@@ -46,11 +47,8 @@ def extract_first_word_or_line(text: str) -> str:
         if any(word in prefix for word in ['answer', 'response', 'result', 'choice', 'option', 'الإجابة', 'الجواب']):
             extracted = colon_match.group(2).strip()
             logger.debug(f"extract_first_word_or_line: Extracted after colon pattern: '{extracted}'")
-            # Remove any trailing punctuation from the extracted answer
-            # Match quotes/brackets at start and end separately to avoid character class issues
-            extracted = re.sub(r'^["\'"()【〔]+', "", extracted)
-            extracted = re.sub(r'["\'"()】〕]+$', "", extracted)
-            extracted = re.sub(r"[.،؟!]+$", "", extracted)
+            # Remove all non-alphanumeric characters from the extracted answer
+            extracted = re.sub(r"[^\w\s]", "", extracted, flags=re.UNICODE).strip()
             return extracted
 
     # If line is short (≤3 words), return it as-is
@@ -60,10 +58,8 @@ def extract_first_word_or_line(text: str) -> str:
 
     # Otherwise, extract just the first word
     first_word = first_line.split()[0] if first_line.split() else first_line
-    # Match quotes/brackets at start and end separately to avoid character class issues
-    first_word = re.sub(r'^["\'"()【〔]+', "", first_word)
-    first_word = re.sub(r'["\'"()】〕]+$', "", first_word)
-    first_word = re.sub(r"[.،؟!]+$", "", first_word)
+    # Remove all non-alphanumeric characters
+    first_word = re.sub(r"[^\w\s]", "", first_word, flags=re.UNICODE).strip()
 
     logger.debug(f"extract_first_word_or_line: Extracted first word: '{first_word}'")
     return first_word
@@ -103,7 +99,8 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
         return ""
     
     extracted = extract_first_word_or_line(text)
-    clean_extracted = re.sub(r"[()[\]{}]", "", extracted).strip()
+    # Remove all non-alphanumeric characters except spaces (keep letters, numbers, and spaces only)
+    clean_extracted = re.sub(r"[^\w\s]", "", extracted, flags=re.UNICODE).strip()
     logger.debug(f"simple_normalize: extracted='{extracted}', clean_extracted='{clean_extracted}'")
 
     # If we have an MCQ mapping (new template), handle letter-to-text conversion
@@ -132,12 +129,13 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
         
         # If it's already full text, return it normalized
         text_lower = extracted.lower().strip()
-        # Clean text for comparison (remove punctuation and extra whitespace)
-        text_clean = re.sub(r'[()[\]{}"\',.!?،؟!]', '', text_lower).strip()
+        # Remove all non-alphanumeric characters except spaces
+        text_clean = re.sub(r"[^\w\s]", "", text_lower, flags=re.UNICODE).strip()
 
         for letter, option_text in mcq_mapping.items():
             option_lower = option_text.lower().strip()
-            option_clean = re.sub(r'[()[\]{}"\',.!?،؟!]', '', option_lower).strip()
+            # Remove all non-alphanumeric characters except spaces
+            option_clean = re.sub(r"[^\w\s]", "", option_lower, flags=re.UNICODE).strip()
 
             # Try exact match first
             if text_lower == option_lower:
@@ -189,7 +187,8 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
             ):
                 logger.info(f"simple_normalize: Prefix match to option '{option}'")
                 return option
-            clean_opt = re.sub(r"[()[\]{}]", "", opt_low)
+            # Remove all non-alphanumeric characters except spaces
+            clean_opt = re.sub(r"[^\w\s]", "", opt_low, flags=re.UNICODE)
             if clean_opt in clean_lower or clean_lower in clean_opt:
                 logger.info(f"simple_normalize: Fuzzy match to option '{option}'")
                 return option
@@ -238,9 +237,9 @@ if "accuracy" not in le_registry.AGGREGATION_REGISTRY:
 
             logger.info(f"accuracy_aggregation [{idx}]: Normalized ref='{norm_ref}', Normalized pred='{norm_pred}'")
 
-            # Clean for comparison
-            clean_ref = re.sub(r"[()[\]{}]", "", norm_ref).lower().strip()
-            clean_pred = re.sub(r"[()[\]{}]", "", norm_pred).lower().strip()
+            # Clean for comparison - remove all non-alphanumeric characters except spaces
+            clean_ref = re.sub(r"[^\w\s]", "", norm_ref.lower(), flags=re.UNICODE).strip()
+            clean_pred = re.sub(r"[^\w\s]", "", norm_pred.lower(), flags=re.UNICODE).strip()
 
             logger.info(f"accuracy_aggregation [{idx}]: Clean ref='{clean_ref}', Clean pred='{clean_pred}'")
             
