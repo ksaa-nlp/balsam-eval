@@ -1,6 +1,7 @@
 """Utility functions for adapter and URL processing."""
 
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +12,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
 
     For thinking/reasoning models, different adapters use different parameter names:
     - OpenAI (o1, o3, GPT-5 series): max_completion_tokens
-    - DeepSeek (R1): max_completion_tokens  
+    - DeepSeek (R1): max_completion_tokens
     - Gemini (2.0 Flash Thinking): max_tokens (standard)
     - Anthropic (extended thinking): max_tokens (standard)
 
@@ -23,6 +24,19 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         Dict with the appropriate parameter name and value
         Example: {"max_tokens": 4096} or {"max_completion_tokens": 8192}
     """
+    # Check if IS_REASONING environment variable is set to 1
+    is_reasoning_env = os.getenv("IS_REASONING", "0").strip() == "1"
+
+    # If IS_REASONING=1, use MAX_TOKENS if exists, otherwise default to 8192
+    if is_reasoning_env:
+        max_tokens = int(os.getenv("MAX_TOKENS", "8192"))
+        # For OpenAI reasoning models, use max_completion_tokens
+        if adapter in ["openai-chat-completions"]:
+            return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
+        else:
+            return {"max_tokens": max_tokens}
+
+    # Otherwise, use the current logic (IS_REASONING=0 or not set)
     model_lower = model_name.lower()
     
     # Detect thinking/reasoning models by adapter and model name
