@@ -408,7 +408,7 @@ class AccuracyMetric(BaseMetric):
         kwargs = {
             "do_sample": False,
             "until": ["<|endoftext|>"],  # Empty list - no stop tokens, works across all models
-            "max_gen_toks": 50,  # MCQ answers are short, 50 tokens is plenty
+            "max_gen_toks": 4096,  # MCQ answers are short, 50 tokens is plenty
         }
         logger.debug(f"AccuracyMetric.get_generation_kwargs: {kwargs}")
         return kwargs
