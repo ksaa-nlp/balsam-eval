@@ -15,6 +15,7 @@ import lm_eval.models  # Register all lm_eval models (openai-chat-completions, e
 import requests
 from tqdm import tqdm
 
+from src.adapter_utils import get_max_tokens_config
 from src.helpers import normalize_string
 from src.llm_judger.base_llm_judge import ModelConfig
 from src.llm_judger.mcq_llm_judge import MCQLLMJudge
@@ -203,6 +204,7 @@ class EvaluationJob:
                 apply_chat_template=True,
                 task_manager=lm_eval.tasks.TaskManager(include_path=str(temp_dir)),
                 batch_size=1,
+                gen_kwargs=get_max_tokens_config(self.adapter, self.model_args["model"]),
             )
 
             logger.info("✅ simple_evaluate completed successfully")

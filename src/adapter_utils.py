@@ -9,23 +9,81 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
     """
     Get adapter-specific max_tokens config based on adapter type and model.
 
-    For thinking models (o1, o3-series), OpenAI uses max_completion_tokens.
-    Other adapters use max_tokens.
+    For thinking/reasoning models, different adapters use different parameter names:
+    - OpenAI (o1, o3, GPT-5 series): max_completion_tokens
+    - DeepSeek (R1): max_completion_tokens  
+    - Gemini (2.0 Flash Thinking): max_tokens (standard)
+    - Anthropic (extended thinking): max_tokens (standard)
 
     Args:
-        adapter: The adapter type (e.g., "gemini", "groq", "local-chat-completions", etc.)
-        model_name: The model name (to detect thinking models)
+        adapter: The adapter type (e.g., "gemini", "groq", "openai-chat-completions", etc.)
+        model_name: The model name (to detect thinking/reasoning models)
 
     Returns:
         Dict with the appropriate parameter name and value
-        Example: {"max_tokens": 4096} or {"max_completion_tokens": 200000}
+        Example: {"max_tokens": 4096} or {"max_completion_tokens": 8192}
     """
-    # Detect thinking models (o1, o3, or anything with "thinking" in the name)
-    is_thinking_model = "o" in model_name.lower() or "5" in model_name.lower()
-
-    if adapter in ["openai-chat-completions"] and is_thinking_model:
-        return {"max_completion_tokens": 8192, "max_tokens": 8192}
-
+    model_lower = model_name.lower()
+    
+    # Detect thinking/reasoning models by adapter and model name
+    thinking_model_patterns = {
+        "openai-chat-completions": [
+            "o1-", "o3-", "o4-",  # o-series models (with dash to avoid false matches)
+            "gpt-5",              # Matches gpt-5, gpt-5.1, gpt-5.2, gpt-5-turbo, etc.
+            "gpt5",               # Matches gpt5 variants without dash
+        ],
+        "local-chat-completions": [
+            "deepseek-r1", "deepseek-reasoner", "r1", 
+            "qwq", 
+            "skywork-o1",
+            "marco-o1",
+        ],
+        "gemini": ["thinking", "2.0-flash-thinking"],
+        "anthropic-chat-completions": ["extended-thinking"],
+    }
+    
+    # Check if this is a thinking model for the current adapter
+    is_thinking_model = False
+    if adapter in thinking_model_patterns:
+        is_thinking_model = any(
+            pattern in model_lower 
+            for pattern in thinking_model_patterns[adapter]
+        )
+    
+    # Handle thinking models with model-specific token limits
+    if is_thinking_model:
+        if adapter in ["openai-chat-completions"]:
+            # Determine max tokens based on specific model
+            max_tokens = 8192  # Default for most reasoning models
+            
+            # GPT-5.2 supports up to 128,000 output tokens
+            if "gpt-5.2" in model_lower or "gpt5.2" in model_lower:
+                max_tokens = 128000
+            # GPT-5.1 and GPT-5 base
+            elif "gpt-5" in model_lower or "gpt5" in model_lower:
+                max_tokens = 8192
+            # o-series models
+            elif any(x in model_lower for x in ["o1", "o3", "o4"]):
+                max_tokens = 8192
+                
+            return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
+            
+        elif adapter in ["local-chat-completions"]:
+            # DeepSeek R1, QwQ, Skywork-o1, etc.
+            if any(pattern in model_lower for pattern in ["deepseek", "r1"]):
+                return {"max_completion_tokens": 8192, "max_tokens": 8192}
+            else:
+                # Fallback for other reasoning models
+                return {"max_tokens": 8192}
+                
+        elif adapter in ["gemini"]:
+            # Gemini thinking models use standard max_tokens
+            return {"max_tokens": 8192}
+            
+        elif adapter in ["anthropic-chat-completions"]:
+            # Anthropic extended thinking uses standard max_tokens
+            return {"max_tokens": 8192}
+    
     # Adapter-specific defaults for non-thinking models
     adapter_defaults = {
         "gemini": 4096,

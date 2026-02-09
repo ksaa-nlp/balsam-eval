@@ -10,7 +10,7 @@ from src.db_operations import submit_model_evaluation
 from src.evaluation import EvaluationJob
 from src.task_v2 import LMHDataset as LMHDatasetV2
 from src.task import LMHDataset
-from src.adapter_utils import process_adapter_and_url, get_max_tokens_config
+from src.adapter_utils import process_adapter_and_url
 
 # Load environment variables
 load_dotenv()
@@ -64,8 +64,6 @@ if __name__ == "__main__":
             content = f.read()
             d = json.loads(content)
             
-            # TODO: EDIT HERE TO SUPPORT OLD AND NEW TEMPLATE
-
             # # Skip datasets with no metric
             if "json" in d:
                 if d["json"]["metric_list"][0]["metric"] == "":
@@ -96,9 +94,6 @@ if __name__ == "__main__":
     if API_KEY:
         model_args["api_key"] = API_KEY
 
-    # Use adapter-specific max_tokens config (supports thinking models with max_completion_tokens)
-    max_tokens_config = get_max_tokens_config(processed_adapter, MODEL_NAME)
-    model_args.update(max_tokens_config)
 
     # Initialize a model evaluation
     if (

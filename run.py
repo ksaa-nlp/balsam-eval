@@ -4,7 +4,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from src.adapter_utils import process_adapter_and_url, get_max_tokens_config
+from src.adapter_utils import process_adapter_and_url
 from src.db_operations import get_tasks_from_category
 from src.evaluation import EvaluationJob
 from src.helpers import download_dataset_from_gcs
@@ -103,10 +103,6 @@ if __name__ == "__main__":
         model_args["base_url"] = processed_base_url
     if API_KEY:
         model_args["api_key"] = API_KEY
-
-    # Use adapter-specific max_tokens config (supports thinking models with max_completion_tokens)
-    max_tokens_config = get_max_tokens_config(processed_adapter, MODEL_NAME)
-    model_args.update(max_tokens_config)
 
     # Run evaluation job per task
     for category, tasks in categories.items():

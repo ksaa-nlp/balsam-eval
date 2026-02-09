@@ -60,9 +60,7 @@ class BleuMetric(BaseMetric):
     def get_doc_to_text(self, original_doc_to_text: str) -> str:
         return original_doc_to_text
     def get_generation_kwargs(self):
-        # BLEU is for text generation - remove 'until' tokens for Claude compatibility
-        # Use higher max_gen_toks since we expect longer text responses
-        return {"do_sample": False, "until": ["<|endoftext|>"], "max_gen_toks": 4096}
+        return {"do_sample": False, "until": ["<|endoftext|>"]}
 
 config = MetricConfig(
     name="bleu", higher_is_better=True,

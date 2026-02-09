@@ -11,8 +11,7 @@ logger = logging.getLogger(__name__)
 
 # ---------- punctuation setup ----------
 PUNCT_TABLE = dict.fromkeys(
-    i for i in range(sys.maxunicode)
-    if unicodedata.category(chr(i)).startswith("P")
+    i for i in range(sys.maxunicode) if unicodedata.category(chr(i)).startswith("P")
 )
 ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
 others = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ"""
@@ -40,20 +39,35 @@ def extract_first_word_or_line(text: str) -> str:
 
     # Handle common patterns like "Answer: A" or "The answer is: Paris"
     # Look for patterns with colons that might indicate the answer follows
-    colon_match = re.match(r'^([^:]+):\s*([^\s]+)', first_line, re.IGNORECASE)
+    colon_match = re.match(r"^([^:]+):\s*([^\s]+)", first_line, re.IGNORECASE)
     if colon_match:
         # If the first part looks like "answer", "response", etc., extract the part after colon
         prefix = colon_match.group(1).strip().lower()
-        if any(word in prefix for word in ['answer', 'response', 'result', 'choice', 'option', 'الإجابة', 'الجواب']):
+        if any(
+            word in prefix
+            for word in [
+                "answer",
+                "response",
+                "result",
+                "choice",
+                "option",
+                "الإجابة",
+                "الجواب",
+            ]
+        ):
             extracted = colon_match.group(2).strip()
-            logger.debug(f"extract_first_word_or_line: Extracted after colon pattern: '{extracted}'")
+            logger.debug(
+                f"extract_first_word_or_line: Extracted after colon pattern: '{extracted}'"
+            )
             # Remove all non-alphanumeric characters from the extracted answer
             extracted = re.sub(r"[^\w\s]", "", extracted, flags=re.UNICODE).strip()
             return extracted
 
     # If line is short (≤3 words), return it as-is
     if len(first_line.split()) <= 3:
-        logger.debug(f"extract_first_word_or_line: Returning short line (≤3 words): '{first_line}'")
+        logger.debug(
+            f"extract_first_word_or_line: Returning short line (≤3 words): '{first_line}'"
+        )
         return first_line
 
     # Otherwise, extract just the first word
@@ -68,45 +82,49 @@ def extract_first_word_or_line(text: str) -> str:
 def simple_normalize(text, reference_options=None, mcq_mapping=None):
     """
     Normalize text for comparison, with special handling for MCQ answers.
-    
+
     Args:
         text: The text to normalize (could be a letter or full answer text)
         reference_options: List of MCQ options (for old template compatibility)
         mcq_mapping: Dict mapping letters to full option text (e.g., {"A": "Paris", "B": "Lyon"})
-    
+
     Returns:
         Normalized text or empty string if text is empty/None
     """
-    logger.debug(f"simple_normalize called with text='{text}', mcq_mapping={mcq_mapping}")
-    
+    logger.debug(
+        f"simple_normalize called with text='{text}', mcq_mapping={mcq_mapping}"
+    )
+
     # Handle None or empty cases first
     if text is None or text == "":
         logger.debug("simple_normalize: Received None or empty string")
         return ""
-    
+
     if isinstance(text, bool):
         result = "نعم" if text else "لا"
         logger.debug(f"simple_normalize: Boolean converted to '{result}'")
         return result
-    
+
     if not isinstance(text, str):
         text = str(text)
         logger.debug(f"simple_normalize: Converted to string: '{text}'")
-    
+
     # Check again after conversion
     if not text.strip():
         logger.debug("simple_normalize: Empty string after strip")
         return ""
-    
+
     extracted = extract_first_word_or_line(text)
     # Remove all non-alphanumeric characters except spaces (keep letters, numbers, and spaces only)
     clean_extracted = re.sub(r"[^\w\s]", "", extracted, flags=re.UNICODE).strip()
-    logger.debug(f"simple_normalize: extracted='{extracted}', clean_extracted='{clean_extracted}'")
+    logger.debug(
+        f"simple_normalize: extracted='{extracted}', clean_extracted='{clean_extracted}'"
+    )
 
     # If we have an MCQ mapping (new template), handle letter-to-text conversion
     if mcq_mapping:
         logger.debug("simple_normalize: Using MCQ mapping")
-        
+
         # Check if the extracted text is a single letter (A, B, C, D, etc.)
         if len(extracted.strip()) == 1 and extracted.strip().upper().isalpha():
             letter = extracted.strip().upper()
@@ -114,19 +132,25 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
             # Convert letter to full text using mapping
             if letter in mcq_mapping:
                 result = mcq_mapping[letter]
-                logger.info(f"simple_normalize: Mapped letter '{letter}' to option '{result}'")
+                logger.info(
+                    f"simple_normalize: Mapped letter '{letter}' to option '{result}'"
+                )
                 return result
-        
+
         # Check for "A)" format
         mc_match = re.match(r"^([A-Za-z])\)", extracted.strip())
         if mc_match:
             letter = mc_match.group(1).upper()
-            logger.debug(f"simple_normalize: Detected letter with parenthesis: '{letter})'")
+            logger.debug(
+                f"simple_normalize: Detected letter with parenthesis: '{letter})'"
+            )
             if letter in mcq_mapping:
                 result = mcq_mapping[letter]
-                logger.info(f"simple_normalize: Mapped '{letter})' to option '{result}'")
+                logger.info(
+                    f"simple_normalize: Mapped '{letter})' to option '{result}'"
+                )
                 return result
-        
+
         # If it's already full text, return it normalized
         text_lower = extracted.lower().strip()
         # Remove all non-alphanumeric characters except spaces
@@ -135,29 +159,39 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
         for letter, option_text in mcq_mapping.items():
             option_lower = option_text.lower().strip()
             # Remove all non-alphanumeric characters except spaces
-            option_clean = re.sub(r"[^\w\s]", "", option_lower, flags=re.UNICODE).strip()
+            option_clean = re.sub(
+                r"[^\w\s]", "", option_lower, flags=re.UNICODE
+            ).strip()
 
             # Try exact match first
             if text_lower == option_lower:
-                logger.info(f"simple_normalize: Matched full text to option '{option_text}' (exact match)")
+                logger.info(
+                    f"simple_normalize: Matched full text to option '{option_text}' (exact match)"
+                )
                 return option_text
 
             # Try cleaned match (fuzzy - ignores punctuation and extra whitespace)
             if text_clean == option_clean:
-                logger.info(f"simple_normalize: Matched full text to option '{option_text}' (cleaned match)")
+                logger.info(
+                    f"simple_normalize: Matched full text to option '{option_text}' (cleaned match)"
+                )
                 return option_text
 
             # Try substring match for cases where reference is shorter
             if text_clean in option_clean or option_clean in text_clean:
-                logger.info(f"simple_normalize: Matched full text to option '{option_text}' (substring match)")
+                logger.info(
+                    f"simple_normalize: Matched full text to option '{option_text}' (substring match)"
+                )
                 return option_text
-        
-        logger.debug(f"simple_normalize: No MCQ match found, returning '{clean_extracted or extracted}'")
+
+        logger.debug(
+            f"simple_normalize: No MCQ match found, returning '{clean_extracted or extracted}'"
+        )
         return clean_extracted or extracted
 
     # Old template compatibility (reference_options provided)
     logger.debug("simple_normalize: Using old template (reference_options)")
-    
+
     mc_match = re.match(r"^([A-Za-z])\)", extracted.strip())
     if mc_match:
         letter = mc_match.group(1)
@@ -165,14 +199,16 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
         if reference_options:
             for option in reference_options:
                 if option.strip().upper() == letter.upper():
-                    logger.info(f"simple_normalize: Matched letter '{letter}' to option '{option}'")
+                    logger.info(
+                        f"simple_normalize: Matched letter '{letter}' to option '{option}'"
+                    )
                     return option
         return letter
-    
+
     if len(extracted.strip()) == 1 and extracted.strip().isalpha():
         logger.debug(f"simple_normalize: Single letter answer: '{extracted.strip()}'")
         return extracted.strip()
-    
+
     if reference_options:
         extracted_lower = extracted.lower().strip()
         clean_lower = clean_extracted.lower().strip()
@@ -181,9 +217,8 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
             if extracted_lower == opt_low or clean_lower == opt_low:
                 logger.info(f"simple_normalize: Exact match to option '{option}'")
                 return option
-            if (
-                len(option.strip()) == 1
-                and extracted.strip().upper().startswith(option.strip().upper())
+            if len(option.strip()) == 1 and extracted.strip().upper().startswith(
+                option.strip().upper()
             ):
                 logger.info(f"simple_normalize: Prefix match to option '{option}'")
                 return option
@@ -192,7 +227,7 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
             if clean_opt in clean_lower or clean_lower in clean_opt:
                 logger.info(f"simple_normalize: Fuzzy match to option '{option}'")
                 return option
-    
+
     result = clean_extracted or extracted
     logger.debug(f"simple_normalize: Returning default '{result}'")
     return result
@@ -200,12 +235,13 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
 
 # ---------- aggregation (register if missing) ----------
 if "accuracy" not in le_registry.AGGREGATION_REGISTRY:
+
     @register_aggregation("accuracy")
     def accuracy_aggregation(items):
         logger.info(f"accuracy_aggregation: Processing {len(items)} items")
         correct = 0
         total = len(items)
-        
+
         for idx, item in enumerate(items):
             if isinstance(item, dict):
                 ref = item.get("ref", "")
@@ -216,15 +252,21 @@ if "accuracy" not in le_registry.AGGREGATION_REGISTRY:
                 pred = item[1]
                 mcq_mapping = item[2] if len(item) >= 3 else None
             else:
-                logger.warning(f"accuracy_aggregation: Skipping invalid item at index {idx}: {type(item)}")
+                logger.warning(
+                    f"accuracy_aggregation: Skipping invalid item at index {idx}: {type(item)}"
+                )
                 continue
 
             # Handle empty predictions - count as incorrect
             if pred is None or (isinstance(pred, str) and not pred.strip()):
-                logger.warning(f"accuracy_aggregation [{idx}]: Empty prediction, counting as incorrect")
+                logger.warning(
+                    f"accuracy_aggregation [{idx}]: Empty prediction, counting as incorrect"
+                )
                 continue
 
-            logger.info(f"accuracy_aggregation [{idx}]: Raw ref='{ref}', Raw pred='{pred}', MCQ mapping: {mcq_mapping}")
+            logger.info(
+                f"accuracy_aggregation [{idx}]: Raw ref='{ref}', Raw pred='{pred}', MCQ mapping: {mcq_mapping}"
+            )
 
             # Normalize both reference and prediction
             norm_ref = simple_normalize(ref, mcq_mapping=mcq_mapping)
@@ -232,30 +274,45 @@ if "accuracy" not in le_registry.AGGREGATION_REGISTRY:
 
             # If normalization resulted in empty strings, skip
             if not norm_ref or not norm_pred:
-                logger.warning(f"accuracy_aggregation [{idx}]: Normalization resulted in empty string(s), counting as incorrect")
+                logger.warning(
+                    f"accuracy_aggregation [{idx}]: Normalization resulted in empty string(s), counting as incorrect"
+                )
                 continue
 
-            logger.info(f"accuracy_aggregation [{idx}]: Normalized ref='{norm_ref}', Normalized pred='{norm_pred}'")
+            logger.info(
+                f"accuracy_aggregation [{idx}]: Normalized ref='{norm_ref}', Normalized pred='{norm_pred}'"
+            )
 
             # Clean for comparison - remove all non-alphanumeric characters except spaces
-            clean_ref = re.sub(r"[^\w\s]", "", norm_ref.lower(), flags=re.UNICODE).strip()
-            clean_pred = re.sub(r"[^\w\s]", "", norm_pred.lower(), flags=re.UNICODE).strip()
+            clean_ref = re.sub(
+                r"[^\w\s]", "", norm_ref.lower(), flags=re.UNICODE
+            ).strip()
+            clean_pred = re.sub(
+                r"[^\w\s]", "", norm_pred.lower(), flags=re.UNICODE
+            ).strip()
 
-            logger.info(f"accuracy_aggregation [{idx}]: Clean ref='{clean_ref}', Clean pred='{clean_pred}'")
-            
+            logger.info(
+                f"accuracy_aggregation [{idx}]: Clean ref='{clean_ref}', Clean pred='{clean_pred}'"
+            )
+
             if clean_ref == clean_pred:
                 correct += 1
                 logger.info(f"accuracy_aggregation [{idx}]: CORRECT ✓")
             else:
-                logger.info(f"accuracy_aggregation [{idx}]: INCORRECT ✗ (expected '{clean_ref}', got '{clean_pred}')")
-        
+                logger.info(
+                    f"accuracy_aggregation [{idx}]: INCORRECT ✗ (expected '{clean_ref}', got '{clean_pred}')"
+                )
+
         accuracy = correct / total if total else 0.0
-        logger.info(f"accuracy_aggregation: Final accuracy = {correct}/{total} = {accuracy:.4f}")
+        logger.info(
+            f"accuracy_aggregation: Final accuracy = {correct}/{total} = {accuracy:.4f}"
+        )
         return accuracy
 
 
 # ---------- metric (register if missing) ----------
 if "accuracy" not in le_registry.METRIC_REGISTRY:
+
     @register_metric(
         metric="accuracy",
         higher_is_better=True,
@@ -263,7 +320,9 @@ if "accuracy" not in le_registry.METRIC_REGISTRY:
         aggregation="accuracy",
     )
     def accuracy_fn(items):
-        logger.debug(f"accuracy_fn: Received {len(items) if isinstance(items, list) else 1} items")
+        logger.debug(
+            f"accuracy_fn: Received {len(items) if isinstance(items, list) else 1} items"
+        )
         return items
 
 
@@ -271,25 +330,29 @@ def process_results(doc, results):
     """
     Process results and create MCQ mapping if available.
     """
-    logger.debug(f"process_results: doc keys={list(doc.keys())}, results type={type(results)}")
-    
+    logger.debug(
+        f"process_results: doc keys={list(doc.keys())}, results type={type(results)}"
+    )
+
     # Extract prediction with better empty handling
     if isinstance(results, str):
         pred = results.strip()
     elif isinstance(results, list) and results:
         pred = str(results[0]).strip() if results[0] is not None else ""
     elif isinstance(results, dict):
-        raw_pred = results.get("text", results.get("generated_text", results.get("prediction", "")))
+        raw_pred = results.get(
+            "text", results.get("generated_text", results.get("prediction", ""))
+        )
         pred = str(raw_pred).strip() if raw_pred is not None else ""
     else:
         pred = str(results).strip() if results is not None else ""
-    
+
     # Ensure pred is not None
     if pred is None:
         pred = ""
-    
+
     logger.debug(f"process_results: Extracted prediction='{pred}'")
-    
+
     ref = doc.get("output", "")
 
     # Handle different output formats from version 2 datasets
@@ -304,9 +367,12 @@ def process_results(doc, results):
         # If output is a JSON string, try to parse it
         try:
             import json
+
             ref_json = json.loads(ref)
             if isinstance(ref_json, dict):
-                ref = ref_json.get("answer", ref_json.get("correct", ref_json.get("value", ref)))
+                ref = ref_json.get(
+                    "answer", ref_json.get("correct", ref_json.get("value", ref))
+                )
             else:
                 ref = str(ref_json)
         except (json.JSONDecodeError, ValueError):
@@ -314,7 +380,7 @@ def process_results(doc, results):
             pass
 
     logger.debug(f"process_results: Reference='{ref}'")
-    
+
     # Create MCQ mapping if MCQ options exist (new template)
     mcq_mapping = None
     if "mcq" in doc and isinstance(doc.get("mcq"), list):
@@ -322,10 +388,14 @@ def process_results(doc, results):
         # Create letter-to-text mapping (A, B, C, D, etc.)
         letters = [chr(65 + i) for i in range(len(mcq_options))]
         mcq_mapping = {letter: option for letter, option in zip(letters, mcq_options)}
-        logger.info(f"process_results: Created MCQ mapping with {len(mcq_mapping)} options: {mcq_mapping}")
+        logger.info(
+            f"process_results: Created MCQ mapping with {len(mcq_mapping)} options: {mcq_mapping}"
+        )
     else:
-        logger.debug("process_results: No MCQ options found (old template or non-MCQ question)")
-    
+        logger.debug(
+            "process_results: No MCQ options found (old template or non-MCQ question)"
+        )
+
     result = {"accuracy": [ref, pred, mcq_mapping]}
     logger.debug(f"process_results: Returning {result}")
     return result
@@ -346,24 +416,24 @@ def is_new_template(doc: dict) -> bool:
 def format_mcq_options(mcq_options: list) -> str:
     """
     Format MCQ options with letter prefixes (A, B, C, D, etc.)
-    
+
     Args:
         mcq_options: List of option texts
-        
+
     Returns:
         Formatted string with options labeled A, B, C, etc.
     """
     if not mcq_options:
         logger.debug("format_mcq_options: No options provided")
         return ""
-    
+
     # Use uppercase letters A, B, C, D, etc.
     letters = [chr(65 + i) for i in range(len(mcq_options))]
     formatted_options = []
-    
+
     for letter, option in zip(letters, mcq_options):
         formatted_options.append(f"{letter} - {option}")
-    
+
     result = "\n".join(formatted_options)
     logger.debug(f"format_mcq_options: Formatted {len(mcq_options)} options")
     return result
@@ -379,7 +449,7 @@ class AccuracyMetric(BaseMetric):
         logger.debug("AccuracyMetric.get_doc_to_text: Returning Jinja2 template")
         # Return a template that will be processed by Jinja2
         # Use double quotes to avoid YAML escaping issues with single quotes
-        return '''{{ instruction }}
+        return """{{ instruction }}
 {% if input is string %}
 {{ input }}
 {% else %}
@@ -398,17 +468,10 @@ class AccuracyMetric(BaseMetric):
 - أجب بحرف الخيار فقط (A,B,C,D) إن وُجد.
 - أو بكلمة واحدة من الخيارات.
 {% endif %}
-الإجابة:'''
+الإجابة:"""
 
     def get_generation_kwargs(self):
-        # For MCQ questions, we expect short answers (single letter or short phrase)
-        # Don't use 'until' tokens since some models (like Claude) don't support newlines
-        # Instead, rely on max_gen_toks to limit generation length
-        kwargs = {
-            "do_sample": False,
-            "until": ["<|endoftext|>"],  # Empty list - no stop tokens, works across all models
-            "max_gen_toks": 4096,  # MCQ answers are short, 50 tokens is plenty
-        }
+        kwargs = {"do_sample": False, "until": ["<|endoftext|>"]}
         logger.debug(f"AccuracyMetric.get_generation_kwargs: {kwargs}")
         return kwargs
 
