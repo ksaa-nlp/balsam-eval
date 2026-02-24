@@ -37,6 +37,19 @@ if not MODEL_NAME:
 if not ADAPTER:
     raise ValueError("Adapter is required")
 
+# Set API key environment variables based on adapter type
+if API_KEY:
+    if ADAPTER == "openai-chat-completions" or ADAPTER == "local-chat-completions":
+        os.environ["OPENAI_API_KEY"] = API_KEY
+    elif ADAPTER == "anthropic-chat-completions":
+        os.environ["ANTHROPIC_API_KEY"] = API_KEY
+    elif ADAPTER == "gemini":
+        os.environ["GOOGLE_API_KEY"] = API_KEY
+    elif ADAPTER == "groq":
+        os.environ["GROQ_API_KEY"] = API_KEY
+    elif ADAPTER == "humain":
+        os.environ["HUMAIN_API_KEY"] = API_KEY
+
 # Directories
 TEMP_DIR = ".temp"
 TASKS_DIR = ".tasks"
