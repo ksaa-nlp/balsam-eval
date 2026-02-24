@@ -46,6 +46,16 @@ class HumainLM(LM):
     ):
         super().__init__()
 
+        # Debug: Log initialization parameters
+        logger.info(f"=== HumainLM __init__ ===")
+        logger.info(f"model: {model}")
+        logger.info(f"model_name: {model_name}")
+        logger.info(f"api_key provided: {'YES' if api_key else 'NO'}")
+        logger.info(f"base_url: {base_url}")
+        logger.info(f"temperature: {temperature}")
+        logger.info(f"max_tokens: {max_tokens}")
+        logger.info(f"kwargs: {kwargs}")
+
         # Support both 'model' and 'model_name' parameters
         self.model_name = model or model_name or os.environ.get("MODEL", "allam-2-34b-prod")
         self.temperature = temperature
@@ -78,6 +88,8 @@ class HumainLM(LM):
                 base_url += "v1/chat/completions"
 
         self.base_url = base_url
+        self._last_request_time = 0
+        self._min_request_interval = 1.0  # Minimum seconds between requests
 
         logger.info(f"✅ Initialized HumainLM with model '{self.model_name}' at {self.base_url}")
 
@@ -169,6 +181,15 @@ class HumainLM(LM):
             try:
                 logger.debug(f"API call attempt {attempt + 1}/{self.max_retries}")
 
+                # Rate limiting: ensure minimum time between requests
+                current_time = time.time()
+                time_since_last_request = current_time - self._last_request_time
+                if time_since_last_request < self._min_request_interval:
+                    sleep_time = self._min_request_interval - time_since_last_request
+                    logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s")
+                    time.sleep(sleep_time)
+                self._last_request_time = time.time()
+
                 # Prepare request payload
                 payload = {
                     "model": self.model_name,
@@ -180,12 +201,13 @@ class HumainLM(LM):
                 if stop:
                     payload["stop"] = stop[:4]  # Limit to 4 stop sequences
 
-                # Prepare headers - try multiple authentication formats
+                # Prepare headers - use 'apikey' header (lowercase) as required by Humain
+                # User-Agent mimics curl to avoid WAF blocking python-requests
                 headers = {
                     "Content-Type": "application/json",
-                    # Try multiple auth headers in case the API expects a specific one
-                    "Authorization": f"Bearer {self.api_key}",
-                    "x-api-key": self.api_key,
+                    "apikey": self.api_key,  # lowercase 'apikey' header, no Bearer prefix
+                    "User-Agent": "curl/7.88.1",
+                    "Accept": "*/*",
                 }
 
                 logger.debug(f"Request payload: {payload}")
@@ -201,11 +223,51 @@ class HumainLM(LM):
                 logger.info(f"Response status: {response.status_code}")
                 logger.info(f"Response text (first 500 chars): {response.text[:500]}")
 
+                # Check if response is HTML (WAF rejection)
+                content_type = response.headers.get("content-type", "")
+                if "text/html" in content_type:
+                    logger.error(f"❌ Request blocked by WAF/Security layer")
+                    logger.error(f"Response is HTML instead of JSON: {response.text[:200]}")
+                    # Check for common WAF rejection patterns
+                    if "Request Rejected" in response.text or "support ID" in response.text.lower():
+                        logger.error(f"This appears to be a WAF rejection.")
+                        logger.error(f"Possible causes:")
+                        logger.error(f"  - Rate limiting (too many requests)")
+                        logger.error(f"  - IP blocked or not whitelisted")
+                        logger.error(f"  - Invalid or expired API key")
+                        logger.error(f"  - Missing required security headers")
+                        logger.error(f"  - Geographic restrictions")
+                    if attempt < self.max_retries - 1:
+                        wait_time = self.retry_timeout * (attempt + 2)  # Longer wait for WAF issues
+                        logger.warning(f"Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error("All retries failed - WAF is blocking requests")
+                        return ""
+
                 # Check for errors
                 if response.status_code != 200:
                     logger.warning(
-                        f"API returned status {response.status_code}: {response.text}"
+                        f"API returned status {response.status_code}: {response.text[:500]}"
                     )
+
+                    # Specific guidance for 401 errors
+                    if response.status_code == 401 and "No API key found" in response.text:
+                        logger.error(f"\n{'='*60}")
+                        logger.error(f"AUTHENTICATION ERROR: The Humain API is not recognizing your API key.")
+                        logger.error(f"\nThis typically means:")
+                        logger.error(f"  1. Your API key has not been activated in the Humain dashboard")
+                        logger.error(f"  2. Your IP address needs to be whitelisted")
+                        logger.error(f"  3. You're using an incorrect API key for this endpoint")
+                        logger.error(f"  4. API access requires approval from Humain support")
+                        logger.error(f"\nNext steps:")
+                        logger.error(f"  - Log in to your Humain account at iq.humain.com")
+                        logger.error(f"  - Check API settings and enable API access")
+                        logger.error(f"  - Look for IP whitelisting options")
+                        logger.error(f"  - Contact Humain support with the request_id from the error")
+                        logger.error(f"{'='*60}\n")
+
                     if attempt < self.max_retries - 1:
                         time.sleep(self.retry_timeout * (attempt + 1))
                         continue
@@ -213,8 +275,21 @@ class HumainLM(LM):
                         logger.error(f"All retries failed with status {response.status_code}")
                         return ""
 
-                # Parse response
-                response_data = response.json()
+                # Parse response - check if it's valid JSON first
+                try:
+                    response_data = response.json()
+                except ValueError as json_err:
+                    logger.error(f"Failed to parse JSON response: {json_err}")
+                    logger.error(f"Response content-type: {content_type}")
+                    logger.error(f"Response body: {response.text[:1000]}")
+
+                    if attempt < self.max_retries - 1:
+                        logger.warning("Retrying due to invalid JSON response...")
+                        time.sleep(self.retry_timeout * (attempt + 1))
+                        continue
+                    else:
+                        logger.error("All retries failed with invalid JSON response")
+                        return ""
 
                 # Extract content from response
                 if "choices" in response_data and len(response_data["choices"]) > 0:
