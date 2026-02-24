@@ -35,7 +35,7 @@ class GeminiLM(LM):
         top_p: float = 0.95,
         top_k: int = 40,
         retry_timeout: float = 30.0,
-        max_retries: int = 5,
+        max_retries: int = 3,
         **kwargs,
     ):
         super().__init__()
