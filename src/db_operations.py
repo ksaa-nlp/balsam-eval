@@ -26,25 +26,6 @@ def _make_request_with_retry(
     initial_timeout: int = 30,
     max_timeout: int = 120,
 ) -> requests.Response:
-    """
-    Make an HTTP request with retry logic and exponential backoff.
-
-    Args:
-        method: HTTP method (GET, POST, etc.)
-        url: Request URL
-        headers: Request headers
-        json_data: JSON payload for POST requests
-        params: Query parameters
-        max_retries: Maximum number of retry attempts
-        initial_timeout: Initial timeout in seconds
-        max_timeout: Maximum timeout in seconds
-
-    Returns:
-        Response object
-
-    Raises:
-        requests.RequestException: If all retries fail
-    """
     last_exception = None
     timeout = initial_timeout
 
@@ -63,26 +44,24 @@ def _make_request_with_retry(
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             last_exception = e
             if attempt < max_retries - 1:
-                # Exponential backoff: wait longer between retries
-                wait_time = min(2 ** attempt, 30)  # Cap at 30 seconds
-                timeout = min(timeout * 1.5, max_timeout)  # Increase timeout for next attempt
+                wait_time = min(2**attempt, 30)
+                timeout = min(timeout * 1.5, max_timeout)
                 print(
                     f"⚠️  Connection failed (attempt {attempt + 1}/{max_retries}). "
-                    f"Retrying in {wait_time:.1f}s with timeout={timeout}s..."
+                    f"Retrying in {wait_time}s with timeout={timeout:.1f}s..."
                 )
                 time.sleep(wait_time)
-            else:
-                print(f"❌ All {max_retries} retry attempts failed.")
+            # On last attempt, loop ends and falls through to raise below
 
-        except requests.RequestException as e:
-            # For other request exceptions, don't retry
-            raise
+        except requests.RequestException:
+            raise  # Non-retryable errors bubble up immediately
 
-    # If we get here, all retries failed
+    print(f"❌ All {max_retries} retry attempts failed.")
     raise requests.RequestException(
         f"Failed to connect to {url} after {max_retries} attempts. "
         f"Last error: {last_exception}"
     ) from last_exception
+    
 
 
 def map_alias_to_task(task_alias: str, is_sanitized: bool = False) -> str:
@@ -105,7 +84,7 @@ def submit_model_evaluation(
     api_host: str,
     user_id: str,
     benchmark_id: str,
-    evaluation_types: List[str] = []
+    evaluation_types: List[str] = [],
 ) -> Dict[str, Any]:
     headers = {
         "Content-Type": "application/json",
@@ -140,7 +119,7 @@ def submit_model_evaluation(
         result = {
             "status_code": response.status_code,
             "success": response.status_code == 200,
-            "raw_response": response.text
+            "raw_response": response.text,
         }
 
         try:
@@ -149,8 +128,7 @@ def submit_model_evaluation(
 
             if result["success"] and json_data.get("code") == "OK":
                 result["model_id"] = json_data.get("data", {}).get("modelId")
-                result["evaluation_id"] = json_data.get(
-                    "data", {}).get("evaluationId")
+                result["evaluation_id"] = json_data.get("data", {}).get("evaluationId")
                 result["jobs_ids"] = json_data.get("data", {}).get("jobsIds")
                 result["message"] = json_data.get("data", {}).get("message")
 
@@ -167,7 +145,7 @@ def submit_model_evaluation(
             "success": False,
             "error": str(e),
             "raw_response": None,
-            "data": None
+            "data": None,
         }
 
 
@@ -185,7 +163,9 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
     # Handle ROUGE metric (returns a dictionary with multiple ROUGE scores)
     if "rouge,none" in result:
         rouge_result = result["rouge,none"]
-        print(f"[DEBUG] Found rouge,none: type={type(rouge_result)}, value={rouge_result}")
+        print(
+            f"[DEBUG] Found rouge,none: type={type(rouge_result)}, value={rouge_result}"
+        )
         # If rouge_result is a dict, extract rougeLsum; otherwise use the value directly
         if isinstance(rouge_result, dict):
             # Only use rougeLsum as the representative score
@@ -209,12 +189,14 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
     # These are set by process_results_with_llm_judge for task-level summaries
     if "llm_as_judge" in result:
         final_results["llmAsJudgeScore"] = result["llm_as_judge"].get(
-            "average_score", 0)
+            "average_score", 0
+        )
         print(f"[DEBUG] Found llm_as_judge: {final_results['llmAsJudgeScore']}")
 
     if "mcq_llm_as_judge" in result:
         final_results["MCQllmAsJudgeScore"] = result["mcq_llm_as_judge"].get(
-            "average_score", 0)
+            "average_score", 0
+        )
         print(f"[DEBUG] Found mcq_llm_as_judge: {final_results['MCQllmAsJudgeScore']}")
 
     # Handle LLM judge scores in numeric format (set by process_results_with_llm_judge)
@@ -225,7 +207,9 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             # Only set if not already set by dict format (prefer dict format if available)
             if "llmAsJudgeScore" not in final_results:
                 final_results["llmAsJudgeScore"] = float(value)
-                print(f"[DEBUG] Found llm_judge_score,none: {final_results['llmAsJudgeScore']}")
+                print(
+                    f"[DEBUG] Found llm_judge_score,none: {final_results['llmAsJudgeScore']}"
+                )
 
     if "mcq_llm_judge_score,none" in result:
         value = result["mcq_llm_judge_score,none"]
@@ -233,7 +217,9 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             # Only set if not already set by dict format (prefer dict format if available)
             if "MCQllmAsJudgeScore" not in final_results:
                 final_results["MCQllmAsJudgeScore"] = float(value)
-                print(f"[DEBUG] Found mcq_llm_judge_score,none: {final_results['MCQllmAsJudgeScore']}")
+                print(
+                    f"[DEBUG] Found mcq_llm_judge_score,none: {final_results['MCQllmAsJudgeScore']}"
+                )
 
     print(f"[DEBUG] Final results: {final_results}")
     return final_results
@@ -260,7 +246,7 @@ def add_results_to_db(
         "status": JobStatus.COMPLETED.value,
         "scores": json.dumps(final_scores, ensure_ascii=False),
         "categoryName": category_name,
-        "benchmarkId": benchmark_id
+        "benchmarkId": benchmark_id,
     }
 
     webhook_url = f"{api_host}/api/webhook/job"
@@ -279,8 +265,7 @@ def add_results_to_db(
         )
         response.raise_for_status()
     except requests.RequestException as e:
-        print(
-            f"❌ Failed to post job results (job: {job_id}, task: {task_id}): {e}")
+        print(f"❌ Failed to post job results (job: {job_id}, task: {task_id}): {e}")
         raise RuntimeError(f"Failed to post job results: {e}") from e
 
 
@@ -289,7 +274,7 @@ def update_status(
     job_id: str,
     server_token: str,
     status: JobStatus,
-    error_message: Optional[str] = None
+    error_message: Optional[str] = None,
 ) -> None:
     if not api_host:
         return
@@ -320,13 +305,18 @@ def update_status(
         raise RuntimeError(f"Failed to update job status: {e}") from e
 
 
-def get_tasks_from_category(category: str, api_host: str, server_token: str, evaluation_types: Optional[str] = None) -> list[str]:
+def get_tasks_from_category(
+    category: str,
+    api_host: str,
+    server_token: str,
+    evaluation_types: Optional[str] = None,
+) -> list[str]:
     if not category:
         raise ValueError("Category is required, terminating the process.")
 
     webhook_url = f"{api_host}/api/tasks/{category}"
     if evaluation_types:
-        types_param = "&types=".join(evaluation_types.split(','))
+        types_param = "&types=".join(evaluation_types.split(","))
         webhook_url += f"?types={types_param}"
     else:
         webhook_url += "?types=generation"
