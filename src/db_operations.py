@@ -1,5 +1,6 @@
 from enum import Enum
 import json
+import time
 from typing import Any, Dict, List, Optional
 import requests
 
@@ -13,6 +14,75 @@ class JobStatus(Enum):
 
 def sanitize_text(text: str) -> str:
     return text.strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def _make_request_with_retry(
+    method: str,
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    json_data: Optional[Dict[str, Any]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    max_retries: int = 3,
+    initial_timeout: int = 30,
+    max_timeout: int = 120,
+) -> requests.Response:
+    """
+    Make an HTTP request with retry logic and exponential backoff.
+
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        url: Request URL
+        headers: Request headers
+        json_data: JSON payload for POST requests
+        params: Query parameters
+        max_retries: Maximum number of retry attempts
+        initial_timeout: Initial timeout in seconds
+        max_timeout: Maximum timeout in seconds
+
+    Returns:
+        Response object
+
+    Raises:
+        requests.RequestException: If all retries fail
+    """
+    last_exception = None
+    timeout = initial_timeout
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                json=json_data,
+                params=params,
+                timeout=timeout,
+            )
+            return response
+
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_exception = e
+            if attempt < max_retries - 1:
+                # Exponential backoff: wait longer between retries
+                wait_time = min(2 ** attempt, 30)  # Cap at 30 seconds
+                timeout = min(timeout * 1.5, max_timeout)  # Increase timeout for next attempt
+                print(
+                    f"⚠️  Connection failed (attempt {attempt + 1}/{max_retries}). "
+                    f"Retrying in {wait_time:.1f}s with timeout={timeout}s..."
+                )
+                time.sleep(wait_time)
+            else:
+                print(f"❌ All {max_retries} retry attempts failed.")
+
+        except requests.RequestException as e:
+            # For other request exceptions, don't retry
+            raise
+
+    # If we get here, all retries failed
+    raise requests.RequestException(
+        f"Failed to connect to {url} after {max_retries} attempts. "
+        f"Last error: {last_exception}"
+    ) from last_exception
 
 
 def map_alias_to_task(task_alias: str, is_sanitized: bool = False) -> str:
@@ -57,10 +127,14 @@ def submit_model_evaluation(
         data["evaluationTypeValues"] = evaluation_types
 
     try:
-        response = requests.post(
-            f"{api_host}/api/local/evulation/submit",
+        response = _make_request_with_retry(
+            method="POST",
+            url=f"{api_host}/api/local/evulation/submit",
             headers=headers,
-            json=data
+            json_data=data,
+            max_retries=3,
+            initial_timeout=30,
+            max_timeout=120,
         )
 
         result = {
@@ -191,14 +265,17 @@ def add_results_to_db(
 
     webhook_url = f"{api_host}/api/webhook/job"
     try:
-        response = requests.post(
-            webhook_url,
-            json=payload,
+        response = _make_request_with_retry(
+            method="POST",
+            url=webhook_url,
             headers={
                 "Content-Type": "application/json",
                 "x-server-token": server_token,
             },
-            timeout=20,
+            json_data=payload,
+            max_retries=3,
+            initial_timeout=30,
+            max_timeout=120,
         )
         response.raise_for_status()
     except requests.RequestException as e:
@@ -225,14 +302,17 @@ def update_status(
 
     webhook_url = f"{api_host}/api/webhook/job"
     try:
-        response = requests.post(
-            webhook_url,
-            json=payload,
+        response = _make_request_with_retry(
+            method="POST",
+            url=webhook_url,
             headers={
                 "Content-Type": "application/json",
                 "x-server-token": server_token,
             },
-            timeout=20,
+            json_data=payload,
+            max_retries=3,
+            initial_timeout=30,
+            max_timeout=120,
         )
         response.raise_for_status()
     except requests.RequestException as e:
@@ -250,13 +330,17 @@ def get_tasks_from_category(category: str, api_host: str, server_token: str, eva
         webhook_url += f"?types={types_param}"
     else:
         webhook_url += "?types=generation"
-    response = requests.get(
-        webhook_url,
+
+    response = _make_request_with_retry(
+        method="GET",
+        url=webhook_url,
         headers={
             "Content-Type": "application/json",
             "x-server-token": server_token,
         },
-        timeout=20,
+        max_retries=3,
+        initial_timeout=30,
+        max_timeout=120,
     )
     response.raise_for_status()
 
