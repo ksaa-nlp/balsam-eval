@@ -23,6 +23,7 @@ from src.llm_judger.generative_llm_judge import GenerativeLLMJudge
 from src.db_operations import JobStatus, add_results_to_db, update_status
 from src.gemini_adapter import GeminiLM
 from src.groq_adapter import GroqLM
+from src.humain_adapter import HumainLM
 import src.metrics
 
 logger = logging.getLogger(__name__)
