@@ -2,6 +2,8 @@
 
 import logging
 import os
+import json
+import shutil
 
 from dotenv import load_dotenv
 from src.adapter_utils import process_adapter_and_url
@@ -43,6 +45,45 @@ if not all([API_HOST, SERVER_TOKEN, CATEGORY_ID, ADAPTER, BENCHMARK_ID]):
 if not MODEL_NAME:
     raise ValueError("MODEL name is required")
 
+# Ensure .temp directory exists and copy multimodal_utils.py
+os.makedirs(".temp", exist_ok=True)
+multimodal_utils_src = "src/multimodal_utils.py"
+multimodal_utils_dst = ".temp/multimodal_utils.py"
+if os.path.exists(multimodal_utils_src):
+    shutil.copy2(multimodal_utils_src, multimodal_utils_dst)
+    logger.info(f"Copied multimodal_utils.py to {multimodal_utils_dst}")
+else:
+    logger.warning(f"{multimodal_utils_src} not found")
+
+# Helper function to copy images if needed
+def copy_images_to_temp(json_file_path: str, temp_dir: str):
+    """Copy images referenced in JSON file to temp directory."""
+    from pathlib import Path
+
+    image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'}
+
+    with open(json_file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    images_dir = os.path.join(temp_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+
+    for item in data:
+        if 'images' in item and isinstance(item['images'], list):
+            for img_path in item['images']:
+                if os.path.exists(img_path):
+                    img_name = os.path.basename(img_path)
+                    dst_path = os.path.join(images_dir, img_name)
+                    if not os.path.exists(dst_path):
+                        shutil.copy2(img_path, dst_path)
+                        logger.info(f"Copied image: {img_name} -> {dst_path}")
+                    # Update path in item to relative path
+                    item['images'] = [dst_path if p == img_path else p for p in item['images']]
+
+    # Write back updated JSON
+    with open(json_file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 # Collect datasets
 if __name__ == "__main__":
@@ -71,6 +112,13 @@ if __name__ == "__main__":
             else LMHDatasetV2(dataset_id, directory=".temp")
         )
         dataset.export()
+
+        # Copy images to .temp directory if dataset contains images
+        for split in ["test", "dev"]:
+            json_file = f".temp/{dataset.file_name}_{split}.json"
+            if os.path.exists(json_file):
+                copy_images_to_temp(json_file, ".temp")
+
         datasets.append(dataset)
 
     # Organize datasets by category and task
