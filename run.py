@@ -4,6 +4,7 @@ import logging
 import os
 import json
 import shutil
+import time
 
 from dotenv import load_dotenv
 from src.adapter_utils import process_adapter_and_url
@@ -87,6 +88,15 @@ def copy_images_to_temp(json_file_path: str, temp_dir: str):
 
 # Collect datasets
 if __name__ == "__main__":
+    logger.info(f"{'='*80}")
+    logger.info(f"EVALUATION JOB STARTED")
+    logger.info(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"Job ID: {JOB_ID}")
+    logger.info(f"Category: {CATEGORY_ID}")
+    logger.info(f"Adapter: {ADAPTER}")
+    logger.info(f"Model: {MODEL_NAME}")
+    logger.info(f"{'='*80}\n")
+
     if not CATEGORY_ID or not API_HOST or not SERVER_TOKEN:
         raise ValueError("CATEGORY, API_HOST, and SERVER_TOKEN must be set.")
     
@@ -159,22 +169,46 @@ if __name__ == "__main__":
 
         for task, _datasets in tasks.items():
             if len(_datasets) == 0:
+                logger.warning(f"Skipping task '{task}' - no datasets found")
                 continue
-            job = EvaluationJob(
-                tasks=[dataset.name for dataset in _datasets],
-                adapter=processed_adapter,  # Use processed adapter
-                model_args=model_args,
-                task_id=task,
-                job_id=JOB_ID,
-                api_host=API_HOST,
-                server_token=SERVER_TOKEN,
-                category_name=category,
-                benchmark_id=BENCHMARK_ID,
-                llm_judge_api_key=LLM_JUDGE_API_KEY,
-                llm_judge_model=LLM_JUDGE,
-                llm_judge_provider=LLM_JUDGE_PROVIDER,
-            )
-            job()
-            
+
+            logger.info(f"\n{'='*80}")
+            logger.info(f"Starting evaluation for task: {task}")
+            logger.info(f"Category: {category}")
+            logger.info(f"Number of datasets: {len(_datasets)}")
+            logger.info(f"Dataset names: {[dataset.name for dataset in _datasets]}")
+            logger.info(f"Adapter: {processed_adapter}")
+            logger.info(f"Model: {MODEL_NAME}")
+            logger.info(f"{'='*80}\n")
+
+            try:
+                job = EvaluationJob(
+                    tasks=[dataset.name for dataset in _datasets],
+                    adapter=processed_adapter,  # Use processed adapter
+                    model_args=model_args,
+                    task_id=task,
+                    job_id=JOB_ID,
+                    api_host=API_HOST,
+                    server_token=SERVER_TOKEN,
+                    category_name=category,
+                    benchmark_id=BENCHMARK_ID,
+                    llm_judge_api_key=LLM_JUDGE_API_KEY,
+                    llm_judge_model=LLM_JUDGE,
+                    llm_judge_provider=LLM_JUDGE_PROVIDER,
+                )
+                job()
+                logger.info(f"✅ Task '{task}' completed successfully")
+            except Exception as e:
+                logger.error(f"❌ Task '{task}' failed with error: {e}")
+                import traceback
+                logger.error(f"Error traceback:\n{traceback.format_exc()}")
+                import sys
+                sys.exit(1)
+
+    logger.info(f"\n{'='*80}")
+    logger.info(f"EVALUATION JOB COMPLETED")
+    logger.info(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"{'='*80}\n")
+
     result_files = glob.glob(".results/*.json") + glob.glob("*.json")
-    print(f"Generated result files: {result_files}")
+    logger.info(f"Generated result files: {result_files}")

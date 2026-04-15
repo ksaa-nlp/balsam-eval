@@ -453,10 +453,27 @@ class EvaluationJob:
         Returns:
             Normalized answer as full text
         """
-        if not answer or not mcq_mapping:
+        logger.debug(f"_normalize_mcq_answer called with:")
+        logger.debug(f"  answer type: {type(answer)}")
+        logger.debug(f"  answer value: {repr(answer)}")
+        logger.debug(f"  mcq_mapping: {mcq_mapping}")
+
+        # Handle None values explicitly
+        if answer is None:
+            logger.warning("Answer is None, returning empty string")
+            return ""
+
+        if not mcq_mapping:
+            logger.debug("No mcq_mapping provided, returning answer as-is")
             return answer
 
+        # Convert to string if not already
+        if not isinstance(answer, str):
+            logger.warning(f"Answer is not a string, converting to string. Type: {type(answer)}")
+            answer = str(answer)
+
         answer_stripped = answer.strip()
+        logger.debug(f"Answer stripped: '{answer_stripped}'")
 
         # Check if it's a single letter
         if len(answer_stripped) == 1 and answer_stripped.upper() in mcq_mapping:
@@ -476,7 +493,8 @@ class EvaluationJob:
                 return normalized
 
         # If it's already full text, return as-is
-        return answer
+        logger.debug(f"Answer already full text, returning as-is: '{answer_stripped}'")
+        return answer_stripped
 
     def _calculate_average_scores(self, results: Dict[str, Any]) -> Dict[str, float]:
         """
@@ -649,34 +667,50 @@ class EvaluationJob:
         prefix = "mcq_" if is_mcq else ""
         pbar_desc = "Evaluating (MCQ)" if is_mcq else "Evaluating (Gen)"
         for sample_key, sample in tqdm(filtered_samples, desc=pbar_desc, unit="sample"):
+            logger.debug(f"Processing sample: {sample_key}")
             if not isinstance(sample, dict):
+                logger.warning(f"Sample {sample_key} is not a dict, skipping. Type: {type(sample)}")
                 continue
 
             responses = sample.get("filtered_resps", [])
+            logger.debug(f"Sample {sample_key}: Found {len(responses)} filtered responses")
             if not responses:
+                logger.warning(f"Sample {sample_key}: No filtered responses found, skipping")
                 continue
 
             response = responses[0]
             expected_output = sample.get("doc", {}).get("output", "")
             question = sample.get("doc", {}).get("input", "")
 
+            logger.debug(f"Sample {sample_key}:")
+            logger.debug(f"  Question length: {len(question)} chars")
+            logger.debug(f"  Expected output length: {len(expected_output)} chars")
+            logger.debug(f"  Response type: {type(response)}")
+            logger.debug(f"  Response value: {repr(response) if len(str(response)) < 200 else repr(str(response)[:200])}")
+
             # For MCQ tasks, normalize answers to text BEFORE sending to judge
             # This way the judge just compares text to text (e.g., "لا" vs "لا" instead of "B" vs "لا")
             mcq_options = sample.get("doc", {}).get("mcq", [])
+            logger.debug(f"Sample {sample_key}: MCQ options: {mcq_options}")
+
             if is_mcq and mcq_options:
                 # Create letter-to-text mapping
                 mcq_mapping = {chr(65 + i): opt for i, opt in enumerate(mcq_options)}
+                logger.debug(f"Sample {sample_key}: MCQ mapping: {mcq_mapping}")
 
                 # Normalize both the model's response and the expected output
                 original_response = response
                 original_expected = expected_output
+
+                logger.debug(f"Sample {sample_key}: Before normalization - Response type: {type(response)}, Expected type: {type(expected_output)}")
+                logger.debug(f"Sample {sample_key}: Before normalization - Response: {repr(original_response)}, Expected: {repr(original_expected)}")
 
                 response = self._normalize_mcq_answer(response, mcq_mapping)
                 expected_output = self._normalize_mcq_answer(
                     expected_output, mcq_mapping
                 )
 
-                logger.debug(f"MCQ Normalization:")
+                logger.debug(f"Sample {sample_key}: MCQ Normalization:")
                 logger.debug(f"  Response: '{original_response}' → '{response}'")
                 logger.debug(f"  Expected: '{original_expected}' → '{expected_output}'")
 
@@ -685,6 +719,11 @@ class EvaluationJob:
 
             if expected_output and response:
                 try:
+                    logger.debug(f"Sample {sample_key}: Calling LLM judge...")
+                    logger.debug(f"  Question length: {len(question)}")
+                    logger.debug(f"  Reference answer length: {len(expected_output)}")
+                    logger.debug(f"  Given answer length: {len(response)}")
+
                     evaluation_result = llm_judge.evaluate_answer(
                         question=question,
                         reference_answer=expected_output,
@@ -694,9 +733,13 @@ class EvaluationJob:
                         metadata={"task": sample_key},
                     )
 
+                    logger.debug(f"Sample {sample_key}: LLM judge result keys: {list(evaluation_result.keys())}")
+
                     normalized_score = evaluation_result["overall_score"]
                     raw_score = evaluation_result["overall_raw_score"]
                     explanation = evaluation_result["aggregated_explanation"]
+
+                    logger.debug(f"Sample {sample_key}: Scores - Normalized: {normalized_score}, Raw: {raw_score}")
 
                     sample[f"{prefix}llm_score"] = normalized_score
                     sample[f"{prefix}llm_score_raw"] = raw_score
@@ -713,12 +756,25 @@ class EvaluationJob:
                     taskwise_scores_raw.setdefault(sample_key, []).append(raw_score)
 
                 except Exception as e:
+                    logger.error(f"Sample {sample_key}: ❌ LLM evaluation failed")
+                    logger.error(f"  Error type: {type(e).__name__}")
+                    logger.error(f"  Error message: {str(e)}")
+                    logger.error(f"  Question length: {len(question)}")
+                    logger.error(f"  Expected output type: {type(expected_output)}, value: {repr(expected_output)[:100]}")
+                    logger.error(f"  Response type: {type(response)}, value: {repr(response)[:100]}")
+                    import traceback
+                    logger.error(f"  Traceback: {traceback.format_exc()}")
+
                     sample[f"{prefix}llm_score"] = None
                     sample[f"{prefix}llm_score_raw"] = None
                     sample[f"{prefix}llm_explanation"] = (
                         f"Error during LLM evaluation: {str(e)}"
                     )
                     sample[f"{prefix}llm_judge_details"] = {"error": str(e)}
+            else:
+                logger.warning(f"Sample {sample_key}: Missing expected_output or response")
+                logger.warning(f"  expected_output: {repr(expected_output)[:50] if expected_output else 'MISSING'}")
+                logger.warning(f"  response: {repr(response)[:50] if response else 'MISSING'}")
 
         for task_key in taskwise_scores:
             if taskwise_scores[task_key]:
