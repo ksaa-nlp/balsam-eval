@@ -65,7 +65,10 @@ class GeminiLM(LM):
                 "No API key provided and GOOGLE_API_KEY environment variable not set."
             )
 
-        self.client = genai.Client(api_key=api_key)
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options={"timeout": 120_000},
+        )
 
         logger.info(f"Initialized GeminiLM with model {self.model_name}")
 
