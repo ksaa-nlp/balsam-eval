@@ -137,6 +137,9 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                 response_text = model_response.content
             else:
                 response_text = str(model_response)
+                
+            if not response_text:
+                raise ValueError("Model response is empty")
             
             # Parse the response
             try:
