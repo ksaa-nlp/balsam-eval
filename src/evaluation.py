@@ -9,6 +9,10 @@ from typing import Any, Dict, List, Literal, Optional
 
 import lmms_eval.evaluator
 import lmms_eval.models  # Register all lmms_eval models
+
+# Import custom metrics package to auto-register all metrics
+import src.metrics  # Registers all metrics in src.metrics.impl.*
+
 import requests
 
 from src.adapter_utils import get_max_tokens_config

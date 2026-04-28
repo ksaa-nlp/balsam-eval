@@ -226,3 +226,4 @@ __marimo__/
 .temp
 .DS_Store
 .deepeval
+.results
