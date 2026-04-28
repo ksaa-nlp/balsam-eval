@@ -1,11 +1,16 @@
-from enum import Enum
+"""Database operations and API interactions."""
+
 import json
 import time
+from enum import Enum
 from typing import Any, Dict, List, Optional
+
 import requests
 
 
 class JobStatus(Enum):
+    """Job status enumeration."""
+
     STARTING = "starting"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -13,6 +18,14 @@ class JobStatus(Enum):
 
 
 def sanitize_text(text: str) -> str:
+    """Sanitize text for use as an identifier.
+
+    Args:
+        text: Text to sanitize
+
+    Returns:
+        Sanitized text
+    """
     return text.strip().lower().replace(" ", "_").replace("-", "_")
 
 

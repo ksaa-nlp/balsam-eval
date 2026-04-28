@@ -1,13 +1,17 @@
-from typing import Optional, Tuple, Union, Dict
-from pydantic import BaseModel
+"""Local model wrapper for OpenAI-compatible APIs."""
 
-from openai import OpenAI, AsyncOpenAI
-from openai.types.chat import ChatCompletion
-from deepeval.models.llms.utils import trim_and_load_json
+from typing import Optional, Tuple, Union
+
 from deepeval.models import DeepEvalBaseLLM
+from deepeval.models.llms.utils import trim_and_load_json
+from openai import AsyncOpenAI, OpenAI
+from openai.types.chat import ChatCompletion
+from pydantic import BaseModel
 
 
 class LocalModelEdited(DeepEvalBaseLLM):
+    """Wrapper for OpenAI-compatible local models."""
+
     def __init__(
         self,
         temperature: float = 0,
@@ -18,26 +22,44 @@ class LocalModelEdited(DeepEvalBaseLLM):
         *args,
         **kwargs,
     ):
+        """Initialize local model wrapper.
+
+        Args:
+            temperature: Sampling temperature
+            model_name: Name of the model
+            local_model_api_key: API key for the model
+            base_url: Base URL for the API
+            model_cost: Cost per token (for cost tracking)
+            *args: Additional positional arguments
+            **kwargs: Additional keyword arguments
+        """
+        if temperature < 0:
+            raise ValueError("Temperature must be >= 0.")
+
         self.model_name = model_name
         self.local_model_api_key = local_model_api_key
         self.base_url = base_url
-        if temperature < 0:
-            raise ValueError("Temperature must be >= 0.")
         self.temperature = temperature
+        self.model_cost = model_cost
+        self.evaluation_cost = 0.0
         self.args = args
         self.kwargs = kwargs
-        self.evaluation_cost = 0.0
-        self.model_cost = model_cost
-        super().__init__(model_name)
 
-    ###############################################
-    # Other generate functions
-    ###############################################
+        super().__init__(model_name)
 
     def generate(
         self, prompt: str, schema: Optional[BaseModel] = None
-    ) -> Tuple[Union[str, Dict], float]:
-        client = self.load_model(async_mode=False)
+    ) -> Tuple[Union[str, dict], float]:
+        """Generate a response from the model.
+
+        Args:
+            prompt: Input prompt
+            schema: Optional Pydantic schema for structured output
+
+        Returns:
+            Tuple of (response, cost)
+        """
+        client = self._load_model(async_mode=False)
         response: ChatCompletion = client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
@@ -53,8 +75,17 @@ class LocalModelEdited(DeepEvalBaseLLM):
 
     async def a_generate(
         self, prompt: str, schema: Optional[BaseModel] = None
-    ) -> Tuple[Union[str, Dict], float]:
-        client = self.load_model(async_mode=True)
+    ) -> Tuple[Union[str, dict], float]:
+        """Async generate a response from the model.
+
+        Args:
+            prompt: Input prompt
+            schema: Optional Pydantic schema for structured output
+
+        Returns:
+            Tuple of (response, cost)
+        """
+        client = self._load_model(async_mode=True)
         response: ChatCompletion = await client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
@@ -68,8 +99,19 @@ class LocalModelEdited(DeepEvalBaseLLM):
         else:
             return res_content, 0.0
 
-    async def a_generate_raw_response(self, prompt: str, top_logprobs: int = 5) -> Tuple[ChatCompletion, float]:
-        client = self.load_model(async_mode=True)
+    async def a_generate_raw_response(
+        self, prompt: str, top_logprobs: int = 5
+    ) -> Tuple[ChatCompletion, float]:
+        """Generate a raw response from the model.
+
+        Args:
+            prompt: Input prompt
+            top_logprobs: Number of top log probabilities to return
+
+        Returns:
+            Tuple of (response, cost)
+        """
+        client = self._load_model(async_mode=True)
         response = await client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
@@ -83,25 +125,27 @@ class LocalModelEdited(DeepEvalBaseLLM):
 
         return response, 0.0
 
-    ###############################################
-    # Model
-    ###############################################
+    def get_model_name(self) -> str:
+        """Get the model name.
 
-    def get_model_name(self):
+        Returns:
+            Model name
+        """
         return self.model_name
 
-    def load_model(self, async_mode: bool = False):
-        if not async_mode:
-            return OpenAI(
-                api_key=self.local_model_api_key,
-                base_url=self.base_url,
-                *self.args,
-                **self.kwargs,
-            )
-        else:
-            return AsyncOpenAI(
-                api_key=self.local_model_api_key,
-                base_url=self.base_url,
-                *self.args,
-                **self.kwargs,
-            )
+    def _load_model(self, async_mode: bool = False) -> Union[OpenAI, AsyncOpenAI]:
+        """Load the OpenAI client.
+
+        Args:
+            async_mode: Whether to load async client
+
+        Returns:
+            OpenAI or AsyncOpenAI client
+        """
+        client_class = AsyncOpenAI if async_mode else OpenAI
+        return client_class(
+            api_key=self.local_model_api_key,
+            base_url=self.base_url,
+            *self.args,
+            **self.kwargs,
+        )

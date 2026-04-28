@@ -1,6 +1,6 @@
 """
 Utilities for multimodal datasets in Balsam Eval.
-Provides doc_to_image function for lm_eval compatibility.
+Provides doc_to_visual function for lmms-eval compatibility.
 """
 
 from pathlib import Path
@@ -8,9 +8,9 @@ from typing import List, Dict, Any
 from PIL import Image
 
 
-def doc_to_image(doc: Dict[str, Any]) -> List[Image.Image]:
+def doc_to_visual(doc: Dict[str, Any]) -> List[Image.Image]:
     """
-    Extract PIL Images from a document for lm_eval multimodal processing.
+    Extract PIL Images from a document for lmms-eval multimodal processing.
 
     Args:
         doc: Document dict that may have an 'images' field with image paths
@@ -20,7 +20,7 @@ def doc_to_image(doc: Dict[str, Any]) -> List[Image.Image]:
 
     Example:
         >>> doc = {"images": ["/path/to/image1.png", "/path/to/image2.jpg"]}
-        >>> images = doc_to_image(doc)
+        >>> images = doc_to_visual(doc)
         >>> len(images)
         2
     """

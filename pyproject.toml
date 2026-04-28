@@ -14,8 +14,14 @@ dependencies = [
     "google-genai~=1.61.0",
     "groq~=1.0.0",
     "absl-py~=2.4.0",
-    "rouge-score~=0.1.2"
+    "rouge-score~=0.1.2",
     "pillow~=12.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy~=1.20.0",
+    "pylint[spelling]~=4.0.5",
 ]
 
 [build-system]

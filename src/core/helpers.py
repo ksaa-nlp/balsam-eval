@@ -1,16 +1,22 @@
-# A function to normalize strings to id like format (normalized and sanitized to be used as a file name too)
-import unicodedata
-
-"""A module for working with tasks and datasets."""
+"""Helper utilities for dataset operations and GCS interactions."""
 
 import json
 import os
+import unicodedata
 from typing import Any
-
 
 from google.cloud import storage
 
+
 def normalize_string(text: str) -> str:
+    """Normalize a string for use as an ID or filename.
+
+    Args:
+        text: Input text to normalize
+
+    Returns:
+        Normalized string suitable for IDs/filenames
+    """
     return (
         unicodedata.normalize("NFKC", text)
         .lower()

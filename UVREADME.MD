@@ -13,6 +13,7 @@ pip install uv
 ```bash
 # Create and activate virtual environment
 uv venv
+uv venv --python 3.12.8
 source .venv/bin/activate  # Linux/macOS
 
 # Install dependencies
