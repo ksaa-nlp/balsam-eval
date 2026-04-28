@@ -13,7 +13,8 @@ pip install uv
 ```bash
 # Create and activate virtual environment
 uv venv
-uv venv --python 3.12.8
+uv venv --python 3.12.8 # if need spicify python version
+
 source .venv/bin/activate  # Linux/macOS
 
 # Install dependencies
@@ -26,15 +27,12 @@ uv sync
 uv add package-name              # Add dependency
 uv remove package-name           # Remove dependency  
 uv add "package>=1.0.0,<2.0.0"   # Add with version constraint
+uv pip install -e .               # install without lock file
 uv sync --upgrade                 # Update all dependencies
 uv run python script.py           # Run command in locked environment
 uv lock                          # Generate/update lock file
 ```
 
-**Install project dependencies:**
-```bash
-uv pip install -e .
-```
 
 ## Tips
 
