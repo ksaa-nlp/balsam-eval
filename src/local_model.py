@@ -1,12 +1,10 @@
 """Local model wrapper for OpenAI-compatible APIs."""
 
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple
 
 from deepeval.models import DeepEvalBaseLLM
-from deepeval.models.llms.utils import trim_and_load_json
 from openai import AsyncOpenAI, OpenAI
 from openai.types.chat import ChatCompletion
-from pydantic import BaseModel
 
 
 class LocalModelEdited(DeepEvalBaseLLM):
@@ -14,6 +12,7 @@ class LocalModelEdited(DeepEvalBaseLLM):
 
     def __init__(
         self,
+        model: Optional[str] = None,
         temperature: float = 0,
         model_name: Optional[str] = None,
         local_model_api_key: Optional[str] = None,
@@ -25,6 +24,7 @@ class LocalModelEdited(DeepEvalBaseLLM):
         """Initialize local model wrapper.
 
         Args:
+            model: Name of the model (for parent class)
             temperature: Sampling temperature
             model_name: Name of the model
             local_model_api_key: API key for the model
@@ -36,7 +36,7 @@ class LocalModelEdited(DeepEvalBaseLLM):
         if temperature < 0:
             raise ValueError("Temperature must be >= 0.")
 
-        self.model_name = model_name
+        self.model_name = model_name or model
         self.local_model_api_key = local_model_api_key
         self.base_url = base_url
         self.temperature = temperature
@@ -45,59 +45,52 @@ class LocalModelEdited(DeepEvalBaseLLM):
         self.args = args
         self.kwargs = kwargs
 
-        super().__init__(model_name)
+        super().__init__(self.model_name)
 
-    def generate(
-        self, prompt: str, schema: Optional[BaseModel] = None
-    ) -> Tuple[Union[str, dict], float]:
+    def generate(self, prompt: str, *args, **kwargs) -> str:
         """Generate a response from the model.
 
         Args:
             prompt: Input prompt
-            schema: Optional Pydantic schema for structured output
+            *args: Additional positional arguments
+            **kwargs: Additional keyword arguments
 
         Returns:
-            Tuple of (response, cost)
+            Generated response as string
         """
-        client = self._load_model(async_mode=False)
+        client = self.load_model()
         response: ChatCompletion = client.chat.completions.create(
-            model=self.model_name,
+            model=self.model_name or "gpt-4",  # type: ignore[arg-type]
             messages=[{"role": "user", "content": prompt}],
             temperature=self.temperature,
         )
         res_content = response.choices[0].message.content
+        return res_content or ""
 
-        if schema:
-            json_output = trim_and_load_json(res_content)
-            return schema.model_validate(json_output), 0.0
-        else:
-            return res_content, 0.0
-
-    async def a_generate(
-        self, prompt: str, schema: Optional[BaseModel] = None
-    ) -> Tuple[Union[str, dict], float]:
+    async def a_generate(self, prompt: str, *args, **kwargs) -> str:
         """Async generate a response from the model.
 
         Args:
             prompt: Input prompt
-            schema: Optional Pydantic schema for structured output
+            *args: Additional positional arguments
+            **kwargs: Additional keyword arguments
 
         Returns:
-            Tuple of (response, cost)
+            Generated response as string
         """
-        client = self._load_model(async_mode=True)
+        client = AsyncOpenAI(
+            api_key=self.local_model_api_key,
+            base_url=self.base_url,
+            *self.args,
+            **self.kwargs,
+        )
         response: ChatCompletion = await client.chat.completions.create(
-            model=self.model_name,
+            model=self.model_name or "gpt-4",  # type: ignore[arg-type]
             messages=[{"role": "user", "content": prompt}],
             temperature=self.temperature,
         )
         res_content = response.choices[0].message.content
-
-        if schema:
-            json_output = trim_and_load_json(res_content)
-            return schema.model_validate(json_output), 0.0
-        else:
-            return res_content, 0.0
+        return res_content or ""
 
     async def a_generate_raw_response(
         self, prompt: str, top_logprobs: int = 5
@@ -111,9 +104,14 @@ class LocalModelEdited(DeepEvalBaseLLM):
         Returns:
             Tuple of (response, cost)
         """
-        client = self._load_model(async_mode=True)
+        client = AsyncOpenAI(
+            api_key=self.local_model_api_key,
+            base_url=self.base_url,
+            *self.args,
+            **self.kwargs,
+        )
         response = await client.chat.completions.create(
-            model=self.model_name,
+            model=self.model_name or "gpt-4",  # type: ignore[arg-type]
             messages=[{"role": "user", "content": prompt}],
             temperature=self.temperature,
             logprobs=False,
@@ -131,19 +129,15 @@ class LocalModelEdited(DeepEvalBaseLLM):
         Returns:
             Model name
         """
-        return self.model_name
+        return self.model_name or ""
 
-    def _load_model(self, async_mode: bool = False) -> Union[OpenAI, AsyncOpenAI]:
+    def load_model(self, *args: Any, **kwargs: Any) -> OpenAI:  # type: ignore[override]
         """Load the OpenAI client.
 
-        Args:
-            async_mode: Whether to load async client
-
         Returns:
-            OpenAI or AsyncOpenAI client
+            OpenAI client instance
         """
-        client_class = AsyncOpenAI if async_mode else OpenAI
-        return client_class(
+        return OpenAI(
             api_key=self.local_model_api_key,
             base_url=self.base_url,
             *self.args,

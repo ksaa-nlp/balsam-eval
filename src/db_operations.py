@@ -36,11 +36,11 @@ def _make_request_with_retry(
     json_data: Optional[Dict[str, Any]] = None,
     params: Optional[Dict[str, Any]] = None,
     max_retries: int = 3,
-    initial_timeout: int = 30,
-    max_timeout: int = 120,
+    initial_timeout: float = 30.0,
+    max_timeout: float = 120.0,
 ) -> requests.Response:
     last_exception = None
-    timeout = initial_timeout
+    timeout: float = initial_timeout
 
     for attempt in range(max_retries):
         try:

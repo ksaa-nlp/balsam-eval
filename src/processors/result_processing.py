@@ -51,8 +51,8 @@ class ResultProcessor:
         Returns:
             Dictionary of metric name to average score
         """
-        average_scores = {}
-        all_scores = {}
+        average_scores: dict[str, float] = {}
+        all_scores: dict[str, list[float]] = {}
 
         if "results" not in results:
             logger.warning("No 'results' key in results for average calculation")

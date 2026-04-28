@@ -67,7 +67,7 @@ def copy_images_to_temp(json_file_path: str, temp_dir: str) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def setup_environment() -> dict[str, str]:
+def setup_environment() -> dict[str, str | None]:
     """Load and return environment variables.
 
     Returns:

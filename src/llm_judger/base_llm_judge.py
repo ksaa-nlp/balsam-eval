@@ -347,11 +347,19 @@ class BaseLLMJudge(ABC):
 
         for tc in iterator:
             # Convert to standard format
+            question: str
+            reference_answer: str
+            given_answer: str
+            context: str | None = None
+            test_id: str | None = None
+            metadata: Dict[str, Any] | None = None
+
             if isinstance(tc, LLMTestCase):
-                question = tc.input
-                reference_answer = tc.expected_output
-                given_answer = tc.actual_output
-                context = tc.context
+                question = tc.input or ""
+                reference_answer = tc.expected_output or ""
+                given_answer = tc.actual_output or ""
+                context_list = tc.context
+                context = "\n".join(context_list) if context_list else None
                 test_id = getattr(tc, "id", None)
                 metadata = getattr(tc, "metadata", None)
             elif isinstance(tc, dict):
@@ -372,9 +380,9 @@ class BaseLLMJudge(ABC):
                 raise TypeError(f"Unsupported test case type: {type(tc)}")
 
             result = self.evaluate_answer(
-                question=question,
-                reference_answer=reference_answer,
-                given_answer=given_answer,
+                question=question or "",
+                reference_answer=reference_answer or "",
+                given_answer=given_answer or "",
                 context=context,
                 test_id=test_id,
                 metadata=metadata

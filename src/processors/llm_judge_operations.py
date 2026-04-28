@@ -3,13 +3,16 @@
 import json
 import logging
 from statistics import mean
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from tqdm import tqdm
 
 from src.llm_judger.base_llm_judge import ModelConfig
 from src.llm_judger.generative_llm_judge import GenerativeLLMJudge
 from src.llm_judger.mcq_llm_judge import MCQLLMJudge
+
+if TYPE_CHECKING:
+    from src.processors.task_operations import TaskOperations
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +77,8 @@ class LLMJudgeProcessor:
         samples = processed_data.get("samples", {})
         processed_data.setdefault("results", {})
 
-        all_scores = []
-        all_scores_raw = []
+        all_scores: list[float] = []
+        all_scores_raw: list[float] = []
 
         # Filter samples if task_filter is provided
         if task_filter:
@@ -86,7 +89,9 @@ class LLMJudgeProcessor:
                 for sample in sample_list
             ]
             logger.info(
-                f"Filtering to {len(task_filter)} tasks, {len(filtered_samples)} total samples"
+                "Filtering to %s tasks, %s total samples",
+                len(task_filter),
+                len(filtered_samples),
             )
         else:
             filtered_samples = [
@@ -95,8 +100,8 @@ class LLMJudgeProcessor:
                 for sample in sample_list
             ]
 
-        taskwise_scores = {}
-        taskwise_scores_raw = {}
+        taskwise_scores: dict[str, list[float]] = {}
+        taskwise_scores_raw: dict[str, list[float]] = {}
 
         prefix = "mcq_" if is_mcq else ""
         pbar_desc = "Evaluating (MCQ)" if is_mcq else "Evaluating (Gen)"
@@ -301,13 +306,13 @@ class LLMJudgeProcessor:
             logger.info("No generation tasks or LLM judge config, skipping.")
             return results_data
 
-        logger.info(f"Processing {len(generation_tasks)} generation tasks with GenerativeLLMJudge...")
+        logger.info("Processing %s generation tasks with GenerativeLLMJudge...", len(generation_tasks))
 
         llm_judge_generation = GenerativeLLMJudge(
             model_configs=[
                 ModelConfig(
-                    name=self.llm_judge_model,
-                    provider=self.llm_judge_provider,
+                    name=self.llm_judge_model or "gpt-4",
+                    provider=self.llm_judge_provider or "openai",  # type: ignore[arg-type]
                     api_key=self.llm_judge_api_key,
                 )
             ],
@@ -339,13 +344,13 @@ class LLMJudgeProcessor:
             logger.info("No MCQ tasks or LLM judge config, skipping.")
             return results_data
 
-        logger.info(f"Processing {len(mcq_tasks)} MCQ tasks with MCQLLMJudge...")
+        logger.info("Processing %s MCQ tasks with MCQLLMJudge...", len(mcq_tasks))
 
         llm_judge_mcq = MCQLLMJudge(
             model_configs=[
                 ModelConfig(
-                    name=self.llm_judge_model,
-                    provider=self.llm_judge_provider,
+                    name=self.llm_judge_model or "gpt-4",
+                    provider=self.llm_judge_provider or "openai",  # type: ignore[arg-type]
                     api_key=self.llm_judge_api_key,
                 )
             ],

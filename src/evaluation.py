@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-import sys
 import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -41,7 +40,7 @@ def _safe_relative_to(self, *args, **kwargs):
         raise e
 
 
-Path.relative_to = _safe_relative_to
+Path.relative_to = _safe_relative_to  # type: ignore[method-assign]
 
 # Increase default timeout for requests.post
 requests.post = lambda url, timeout=5000, **kwargs: requests.request(
@@ -122,13 +121,13 @@ class EvaluationJob:
             logger.info("Added default eos_string='' to model_args")
 
         # Set API key environment variables
-        API_KEY = os.getenv("API_KEY")
-        if API_KEY and self.adapter in ["openai-chat-completions", "local-chat-completions"]:
-            os.environ["OPENAI_API_KEY"] = API_KEY
-        if API_KEY and self.adapter == "anthropic-chat-completions":
-            os.environ["ANTHROPIC_API_KEY"] = API_KEY
-        if API_KEY and self.adapter == "gemini":
-            os.environ["GOOGLE_API_KEY"] = API_KEY
+        api_key = os.getenv("API_KEY")
+        if api_key and self.adapter in ["openai-chat-completions", "local-chat-completions"]:
+            os.environ["OPENAI_API_KEY"] = api_key
+        if api_key and self.adapter == "anthropic-chat-completions":
+            os.environ["ANTHROPIC_API_KEY"] = api_key
+        if api_key and self.adapter == "gemini":
+            os.environ["GOOGLE_API_KEY"] = api_key
 
     def __call__(self) -> None:
         """Run the evaluation job."""
@@ -149,10 +148,10 @@ class EvaluationJob:
     def _run_evaluation(self) -> None:
         """Execute the evaluation workflow."""
         logger.info("=" * 80)
-        logger.info(f"Starting evaluation job for category: {self.category_name}")
-        logger.info(f"Tasks: {self.tasks}")
-        logger.info(f"Adapter: {self.adapter}")
-        logger.info(f"Model args: {self.model_args}")
+        logger.info("Starting evaluation job for category: %s", self.category_name)
+        logger.info("Tasks: %s", self.tasks)
+        logger.info("Adapter: %s", self.adapter)
+        logger.info("Model args: %s", self.model_args)
         logger.info("=" * 80)
 
         # Run lmms_eval evaluation

@@ -10,7 +10,7 @@ import os
 import xml.etree.ElementTree as ET
 import yaml
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from src.core.helpers import sanitize_config_name
 from src.metrics_registry import get_metrics_registry
@@ -59,14 +59,14 @@ class LMHDataset:
     }
 
     def __init__(
-        self, file_name: str = "dataset-n", directory: str | None = None, dev_size: int = 5
+        self, file_name: str = "dataset-n", directory: str | None = None, _dev_size: int = 5
     ) -> None:
         """Initialize LM Harness dataset.
 
         Args:
             file_name: Name of the file (extension is optional)
             directory: Path to the directory containing the file
-            dev_size: Number of items from the end for 'dev' split
+            _dev_size: Number of items from the end for 'dev' split (unused)
         """
         self.directory = directory or "."
         os.makedirs(self.directory, exist_ok=True)
@@ -154,7 +154,8 @@ class LMHDataset:
             Task dictionary
         """
         with open(path, "r", encoding="utf8") as fp:
-            return json.load(fp)
+            task: dict[str, Any] = json.load(fp)
+            return task
 
     def _load_csv(self, path: str) -> Dict[str, Any]:
         """Load CSV file.
@@ -209,7 +210,7 @@ class LMHDataset:
                 item["mcq"] = mcq
             data_rows.append(item)
 
-        task["data"] = data_rows
+        task["data"] = data_rows  # type: ignore[assignment]
         return task
 
     def _load_xml(self, path: str) -> Dict[str, Any]:
@@ -233,7 +234,7 @@ class LMHDataset:
         data_node = root.find("data")
         if data_node is not None:
             for item_node in data_node.findall("item"):
-                item = {}
+                item: dict[str, Any] = {}
                 for child in item_node:
                     if child.tag == "experimental_prompts":
                         item["Experimental prompts"] = [
@@ -250,7 +251,7 @@ class LMHDataset:
                     else:
                         item[child.tag] = child.text
                 data_rows.append(item)
-        task["data"] = data_rows
+        task["data"] = data_rows  # type: ignore[assignment]
         return task
 
     def _escape_newline(self, task: Any) -> Any:
@@ -283,7 +284,7 @@ class LMHDataset:
             return items
 
         # Collect all unique keys
-        all_keys = set()
+        all_keys: set[str] = set()
         for item in items:
             all_keys.update(item.keys())
 
@@ -317,7 +318,7 @@ class LMHDataset:
 
         # Normalize each item
         normalized = []
-        for idx, item in enumerate(items):
+        for _, item in enumerate(items):
             normalized_item = {}
 
             for field, default_value in standard_schema.items():
@@ -332,7 +333,7 @@ class LMHDataset:
 
             normalized.append(normalized_item)
 
-        logger.info(f"Normalized {len(normalized)} items to consistent schema")
+        logger.info("Normalized %s items to consistent schema", len(normalized))
         return normalized
 
     def _export_data(self, split: str) -> None:
@@ -388,7 +389,7 @@ class LMHDataset:
                 # Store image paths for doc_to_visual
                 if image_paths:
                     it["images"] = image_paths
-                    logger.info(f"Item {it.get('id')} contains {len(image_paths)} image(s)")
+                    logger.info("Item %s contains %s image(s)", it.get("id"), len(image_paths))
 
             # Ensure output is a single string
             if isinstance(it.get("output"), list) and it["output"]:
@@ -402,7 +403,7 @@ class LMHDataset:
         with open(out_path, "w", encoding="utf8") as f:
             json.dump(processed, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"Exported {len(processed)} items to {out_path}")
+        logger.info("Exported %s items to %s", len(processed), out_path)
 
     def validate(self) -> None:
         """Validate dataset has data."""
@@ -434,7 +435,7 @@ class LMHDataset:
                 metric_obj = registry.get(detected_metric)
                 if metric_obj:
                     final_yaml = metric_obj.get_yaml_config(base_yaml)
-                    logger.info(f"Using custom metric: {detected_metric}")
+                    logger.info("Using custom metric: %s", detected_metric)
                 else:
                     logger.warning(
                         f"Metric '{detected_metric}' detected but couldn't retrieve object."

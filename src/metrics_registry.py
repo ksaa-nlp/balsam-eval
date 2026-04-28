@@ -14,7 +14,7 @@ class MetricConfig:
     higher_is_better: bool = True
     output_type: str = "generate_until"
     generation_kwargs: Optional[Dict[str, Any]] = None
-    process_results: Optional[Callable[[Any], Any]] = None
+    process_results: Optional[Callable[[Any, Any], Any]] = None
 
 
 class BaseMetric(ABC):

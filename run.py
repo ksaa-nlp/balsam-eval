@@ -7,6 +7,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any
 
 from src.adapter_utils import process_adapter_and_url
 from src.core.common import (
@@ -21,21 +22,6 @@ from src.evaluation import EvaluationJob
 from src.core.helpers import download_dataset_from_gcs
 from src.task import LMHDataset
 from src.task_v2 import LMHDataset as LMHDatasetV2
-
-
-def initialize_metrics():
-    """Initialize and register custom metrics.
-
-    This function must be called before any evaluation to ensure
-    metrics are registered in lmms_eval's registry.
-    """
-    # Import metrics to trigger registration
-    # These imports register the metrics via decorators
-    try:
-        from src.metrics.impl import accuracy_metric, bleu_metric, rouge_metric
-        logger.info("Custom metrics registered successfully")
-    except ImportError as e:
-        logger.warning(f"Could not import custom metrics: {e}")
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -152,6 +138,13 @@ def load_remote_datasets(config: EvalConfig) -> list[LMHDataset | LMHDatasetV2]:
     Returns:
         List of datasets
     """
+    if not config.category_id:
+        raise ValueError("category_id is required for remote evaluation")
+    if not config.api_host:
+        raise ValueError("api_host is required for remote evaluation")
+    if not config.server_token:
+        raise ValueError("server_token is required for remote evaluation")
+
     datasets_ids = get_tasks_from_category(
         category=config.category_id,
         api_host=config.api_host,
@@ -237,7 +230,7 @@ def run_local_evaluation(config: EvalConfig) -> None:
     model_args = config.get_model_args(processed_base_url)
 
     # Submit evaluation if configured
-    submit_results = {"jobs_ids": {}}
+    submit_results: dict[str, Any] = {"jobs_ids": {}}
     if all(
         [
             config.adapter,
@@ -248,16 +241,21 @@ def run_local_evaluation(config: EvalConfig) -> None:
             tasks_temp,
         ]
     ):
+        if not processed_base_url:
+            raise ValueError("model_url is required for submitting evaluation")
+        if not config.api_key:
+            raise ValueError("api_key is required for submitting evaluation")
+
         submit_results = submit_model_evaluation(
             model_name=config.model_name,
             model_url=processed_base_url,
             adapter=processed_adapter,
             api_key=config.api_key,
             categories=list(tasks_temp.keys()),
-            server_token=config.server_token,
-            api_host=config.api_host,
-            user_id=config.user_id,
-            benchmark_id=config.benchmark_id,
+            server_token=config.server_token or "",  # type: ignore[arg-type]
+            api_host=config.api_host or "",  # type: ignore[arg-type]
+            user_id=config.user_id or "",  # type: ignore[arg-type]
+            benchmark_id=config.benchmark_id or "",  # type: ignore[arg-type]
             evaluation_types=config.get_evaluation_types_list(),
         )
         logger.info(submit_results)
@@ -278,7 +276,7 @@ def run_local_evaluation(config: EvalConfig) -> None:
         try:
             job = EvaluationJob(
                 tasks=datasets,
-                adapter=processed_adapter,
+                adapter=processed_adapter,  # type: ignore[arg-type]
                 model_args=model_args,
                 tasks_mapper_dict=task_mapper,
                 category_name=category,
@@ -371,7 +369,7 @@ def run_remote_evaluation(config: EvalConfig) -> None:
             try:
                 job = EvaluationJob(
                     tasks=[dataset.name for dataset in _datasets],
-                    adapter=processed_adapter,
+                    adapter=processed_adapter,  # type: ignore[arg-type]
                     model_args=model_args,
                     task_id=task,
                     job_id=config.job_id,
@@ -401,9 +399,6 @@ def run_remote_evaluation(config: EvalConfig) -> None:
 
 def main() -> None:
     """Main entry point."""
-    # Initialize metrics first (before any evaluation)
-    initialize_metrics()
-
     # Setup directories
     setup_directories(TEMP_DIR, RESULTS_DIR)
 

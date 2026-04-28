@@ -4,11 +4,12 @@ Provides doc_to_visual function for lmms-eval compatibility.
 """
 
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Sequence
+
 from PIL import Image
 
 
-def doc_to_visual(doc: Dict[str, Any]) -> List[Image.Image]:
+def doc_to_visual(doc: Dict[str, Any]) -> Sequence[Image.Image]:
     """
     Extract PIL Images from a document for lmms-eval multimodal processing.
 
@@ -16,7 +17,7 @@ def doc_to_visual(doc: Dict[str, Any]) -> List[Image.Image]:
         doc: Document dict that may have an 'images' field with image paths
 
     Returns:
-        List of PIL.Image objects
+        Sequence of PIL.Image objects
 
     Example:
         >>> doc = {"images": ["/path/to/image1.png", "/path/to/image2.jpg"]}
@@ -25,7 +26,7 @@ def doc_to_visual(doc: Dict[str, Any]) -> List[Image.Image]:
         2
     """
     image_paths = doc.get("images", [])
-    images = []
+    images: list[Image.Image] = []
 
     for path in image_paths:
         try:
