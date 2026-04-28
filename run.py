@@ -21,7 +21,6 @@ from src.db_operations import get_tasks_from_category, submit_model_evaluation
 from src.evaluation import EvaluationJob
 from src.core.helpers import download_dataset_from_gcs
 from src.task import LMHDataset
-from src.task_v2 import LMHDataset as LMHDatasetV2
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -108,12 +107,7 @@ def load_local_tasks() -> tuple[dict[str, list[str]], dict[str, str]]:
                 else:
                     json.dump(d, f_out, ensure_ascii=False)
 
-            # Initialize LMHDataset
-            dataset = (
-                LMHDatasetV2(str(file.rsplit(".", 1)[0]), TEMP_DIR)
-                if "json" not in d
-                else LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)
-            )
+            dataset = LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)
             dataset.export()
 
             # Copy images to .temp directory if dataset contains images
@@ -129,7 +123,7 @@ def load_local_tasks() -> tuple[dict[str, list[str]], dict[str, str]]:
     return tasks_temp, task_mapper
 
 
-def load_remote_datasets(config: EvalConfig) -> list[LMHDataset | LMHDatasetV2]:
+def load_remote_datasets(config: EvalConfig) -> list[LMHDataset]:
     """Load datasets from remote GCS storage.
 
     Args:
@@ -152,17 +146,13 @@ def load_remote_datasets(config: EvalConfig) -> list[LMHDataset | LMHDatasetV2]:
         evaluation_types=config.evaluation_types,
     )
 
-    datasets: list[LMHDataset | LMHDatasetV2] = []
+    datasets: list[LMHDataset] = []
     for dataset_id in datasets_ids:
         # Download and export each dataset
         returned_data = download_dataset_from_gcs(
             dataset_id=dataset_id, directory=TEMP_DIR
         )
-        dataset = (
-            LMHDataset(dataset_id, directory=TEMP_DIR)
-            if "json" in returned_data
-            else LMHDatasetV2(dataset_id, directory=TEMP_DIR)
-        )
+        dataset = LMHDataset(dataset_id, directory=TEMP_DIR)
         dataset.export()
 
         # Copy images to .temp directory if dataset contains images
@@ -177,8 +167,8 @@ def load_remote_datasets(config: EvalConfig) -> list[LMHDataset | LMHDatasetV2]:
 
 
 def organize_remote_datasets(
-    datasets: list[LMHDataset | LMHDatasetV2],
-) -> dict[str, dict[str, list[LMHDataset | LMHDatasetV2]]]:
+    datasets: list[LMHDataset],
+) -> dict[str, dict[str, list[LMHDataset]]]:
     """Organize remote datasets by category and task.
 
     Args:
@@ -187,7 +177,7 @@ def organize_remote_datasets(
     Returns:
         Nested dict: {category: {task: [datasets]}}
     """
-    categories: dict[str, dict[str, list[LMHDataset | LMHDatasetV2]]] = {}
+    categories: dict[str, dict[str, list[LMHDataset]]] = {}
 
     for dataset in datasets:
         if dataset.category_id:
