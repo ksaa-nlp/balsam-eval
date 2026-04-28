@@ -61,3 +61,4 @@ groq_models.json
 .results_temp
 
 .tasks_images
+.mypy_cache
