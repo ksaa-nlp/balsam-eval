@@ -1,10 +1,10 @@
 """
 Blank metric template for balsam-eval.
-Fully wired into lm_eval + metrics_registry.
+Fully wired into lmms_eval + metrics_registry.
 """
 
-from lm_eval.api.registry import register_metric, register_aggregation
-from lm_eval.api import registry as le_registry
+from lmms_eval.api.registry import register_metric, register_aggregation
+from lmms_eval.api import registry as le_registry
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 
 

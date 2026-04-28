@@ -2,8 +2,8 @@ import re
 import unicodedata
 import sys
 import logging
-from lm_eval.api.registry import register_aggregation, register_metric
-from lm_eval.api import registry as le_registry
+from lmms_eval.api.registry import register_aggregation, register_metric
+from lmms_eval.api import registry as le_registry
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 
 # ---------- logging setup ----------

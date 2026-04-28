@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any, List, Literal, Optional, Dict
 from statistics import mean
 
-import lm_eval.evaluator
-import lm_eval.tasks
-import lm_eval.models  # Register all lm_eval models (openai-chat-completions, etc.)
+import lmms_eval.evaluator
+import lmms_eval.tasks
+import lmms_eval.models  # Register all lmms_eval models (openai-chat-completions, etc.)
 import requests
 from tqdm import tqdm
 
@@ -21,9 +21,6 @@ from src.llm_judger.base_llm_judge import ModelConfig
 from src.llm_judger.mcq_llm_judge import MCQLLMJudge
 from src.llm_judger.generative_llm_judge import GenerativeLLMJudge
 from src.db_operations import JobStatus, add_results_to_db, update_status
-from src.gemini_adapter import GeminiLM
-from src.groq_adapter import GroqLM
-from src.humain_adapter import HumainLM
 import src.metrics
 
 logger = logging.getLogger(__name__)
@@ -197,15 +194,32 @@ class EvaluationJob:
 
             temp_dir = Path(".temp").resolve()
 
-            logger.info("Calling lm_eval.evaluator.simple_evaluate...")
-            results = lm_eval.evaluator.simple_evaluate(
-                model=self.adapter,
-                model_args=self.model_args,
+            logger.info("Calling lmms_eval.evaluator.simple_evaluate...")
+            # Convert gen_kwargs dict to string format for lmms_eval
+            gen_kwargs_dict = get_max_tokens_config(self.adapter, self.model_args["model"])
+            gen_kwargs_str = ",".join(f"{k}={v}" for k, v in gen_kwargs_dict.items())
+
+            # Convert model_args dict to string format for lmms_eval
+            model_args_str = ",".join(f"{k}={v}" for k, v in self.model_args.items())
+
+            # Map old adapter names to new lmms_eval model names
+            model_mapping = {
+                "openai-chat-completions": "openai",
+                "local-chat-completions": "openai_compatible",
+                "gemini": "gemini_api",
+                "anthropic-chat-completions": "claude",
+                "groq": "openai_compatible",  # Groq uses OpenAI-compatible API
+            }
+            model = model_mapping.get(self.adapter, self.adapter)
+
+            results = lmms_eval.evaluator.simple_evaluate(
+                model=model,
+                model_args=model_args_str,
                 tasks=self.tasks,
-                apply_chat_template=True,
-                task_manager=lm_eval.tasks.TaskManager(include_path=str(temp_dir)),
+                apply_chat_template=False,  # OpenAI-compatible models don't support this
+                task_manager=lmms_eval.tasks.TaskManager(include_path=str(temp_dir), include_defaults=False),
                 batch_size=1,
-                gen_kwargs=get_max_tokens_config(self.adapter, self.model_args["model"]),
+                gen_kwargs=gen_kwargs_str,
             )
 
             logger.info("✅ simple_evaluate completed successfully")
@@ -298,6 +312,7 @@ class EvaluationJob:
             if (
                 "config" in updated_results
                 and "model_args" in updated_results["config"]
+                and isinstance(updated_results["config"]["model_args"], dict)
                 and "api_key" in updated_results["config"]["model_args"]
             ):
                 updated_results["config"]["model_args"].pop("api_key")

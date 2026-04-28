@@ -2,7 +2,6 @@
 .python-version
 
 # uv
-uv.lock
 .venv/
 
 # Installer logs
@@ -60,3 +59,5 @@ xx.py
 temp.py
 groq_models.json
 .results_temp
+
+.tasks_images
