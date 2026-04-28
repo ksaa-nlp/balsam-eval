@@ -3,6 +3,7 @@
 import os
 import json
 import argparse
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 
@@ -57,6 +58,44 @@ RESULTS_DIR = ".results"
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
+# Copy multimodal_utils.py to .temp directory for lm_eval to find it
+multimodal_utils_src = "src/multimodal_utils.py"
+multimodal_utils_dst = os.path.join(TEMP_DIR, "multimodal_utils.py")
+if os.path.exists(multimodal_utils_src):
+    shutil.copy2(multimodal_utils_src, multimodal_utils_dst)
+    print(f"Copied multimodal_utils.py to {multimodal_utils_dst}")
+else:
+    print(f"Warning: {multimodal_utils_src} not found")
+
+# Helper function to copy images if needed
+def copy_images_to_temp(json_file_path: str, temp_dir: str):
+    """Copy images referenced in JSON file to temp directory."""
+    from pathlib import Path
+
+    image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'}
+
+    with open(json_file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    images_dir = os.path.join(temp_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+
+    for item in data:
+        if 'images' in item and isinstance(item['images'], list):
+            for img_path in item['images']:
+                if os.path.exists(img_path):
+                    img_name = os.path.basename(img_path)
+                    dst_path = os.path.join(images_dir, img_name)
+                    if not os.path.exists(dst_path):
+                        shutil.copy2(img_path, dst_path)
+                        print(f"Copied image: {img_name} -> {dst_path}")
+                    # Update path in item to relative path
+                    item['images'] = [dst_path if p == img_path else p for p in item['images']]
+
+    # Write back updated JSON
+    with open(json_file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 if __name__ == "__main__":
     os.environ["ENV"] = "local"  # setup local env for logging to stdout
@@ -95,6 +134,12 @@ if __name__ == "__main__":
             # Initialize LMHDataset
             dataset = LMHDatasetV2(str(file.rsplit(".", 1)[0]), TEMP_DIR) if "json" not in d else LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)
             dataset.export()
+
+            # Copy images to .temp directory if dataset contains images
+            for split in ["test", "dev"]:
+                json_file = os.path.join(TEMP_DIR, f"{dataset.file_name}_{split}.json")
+                if os.path.exists(json_file):
+                    copy_images_to_temp(json_file, TEMP_DIR)
 
             if tasks_temp.get(d["category"]) is None:
                 tasks_temp[d["category"]] = []

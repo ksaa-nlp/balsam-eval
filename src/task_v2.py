@@ -18,6 +18,9 @@ from .metrics_registry import get_metrics_registry
 
 logger = logging.getLogger(__name__)
 
+def _is_image_file(filename: str) -> bool:
+    """Check if a filename has an image extension."""
+    return Path(filename).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 
 class LMHDataset:
     """
@@ -62,6 +65,10 @@ class LMHDataset:
         self.path, self.extension = self._resolve_file_path(self.directory, file_name)
         self.file_name = Path(self.path).stem
 
+        # Store the original source directory for image path resolution
+        # This ensures image paths always point to the original location, not export location
+        self.source_directory = str(Path(self.path).parent)
+
         # 2. Load and normalize based on format
         if self.extension == ".json":
             task_dict = self._load_json(self.path)
@@ -75,7 +82,7 @@ class LMHDataset:
         # 3. Escape newlines to prevent YAML formatting issues
         task_dict = self._escape_newline(task_dict)
         self.metadata = {}
-        
+
         task_part = task_dict.get("task", "Unknown_Task")
         category_part = task_dict.get("category", "Unknown_Category")
         type_part = task_dict.get("Type of result", "")
@@ -83,7 +90,7 @@ class LMHDataset:
 
         unique_suffix = os.urandom(5).hex()
         self.name = f"{sanitize_config_name(task_part)}_{sanitize_config_name(category_part)}_{sanitize_config_name(type_part)}_{sanitize_config_name(metric_part)}_{unique_suffix}"
-        
+
         for key in ("version", "author", "organization", "category", "task", "source"):
             if key in task_dict:
                 self.metadata[key] = task_dict[key]
@@ -290,12 +297,63 @@ class LMHDataset:
         if not items:
             return
 
+        # Use the original source directory for image path resolution
+        # This ensures image paths always point to where images actually are
+        source_dir = self.source_directory
+
         processed = []
         for item in items:
             it = item.copy()
-            # Join input list to single string for Jinja templates
+            # Handle input list - check for images
             if isinstance(it.get("input"), list):
-                it["input"] = "\n".join(str(x) for x in it["input"])
+                # Separate text and images
+                text_parts = []
+                image_paths = []
+
+                for input_item in it["input"]:
+                    if _is_image_file(str(input_item)):
+                        # Store absolute path for lm_eval's doc_to_image
+                        # Try multiple locations for the image
+                        possible_paths = [
+                            os.path.abspath(
+                                os.path.join(source_dir, str(input_item))
+                            ),  # Export directory
+                            os.path.abspath(
+                                os.path.join(".tasks", str(input_item))
+                            ),  # Original tasks directory
+                            os.path.abspath(str(input_item)),  # Already absolute path
+                        ]
+
+                        abs_path = None
+                        for path in possible_paths:
+                            if os.path.exists(path):
+                                abs_path = path
+                                break
+
+                        if abs_path:
+                            image_paths.append(abs_path)
+                        else:
+                            # If not found, use the source_dir path (will fail later but at least we tried)
+                            image_paths.append(
+                                os.path.abspath(
+                                    os.path.join(source_dir, str(input_item))
+                                )
+                            )
+
+                        text_parts.append(f"<image>")
+                    else:
+                        text_parts.append(str(input_item))
+
+                # Join text with newlines
+                it["input"] = "\n".join(text_parts)
+
+                # Store image paths for doc_to_image
+                if image_paths:
+                    it["images"] = image_paths
+                    logger.info(
+                        f"Item {it.get('id')} contains {len(image_paths)} image(s)"
+                    )
+
             # Ensure output is a single string
             if isinstance(it.get("output"), list) and it["output"]:
                 it["output"] = it["output"][0]
@@ -394,8 +452,17 @@ class LMHDataset:
             if self.data.get(k)
         }
 
-        # Final dictionary for YAML
-        return {
+        # Check if dataset contains images (check original input lists)
+        has_images = any(
+            _is_image_file(str(input_item))
+            for items in self.data.values()
+            for item in items
+            if isinstance(item.get("input"), list)
+            for input_item in item["input"]
+        )
+
+        # Build base YAML
+        yaml_config = {
             "task": self.name,
             "dataset_path": "json",
             "dataset_name": sanitize_config_name(self.name),
@@ -409,10 +476,25 @@ class LMHDataset:
             "metadata": self.metadata,
             **self.task_kwargs,
         }
+        # Add doc_to_image if dataset contains images
+        if has_images:
+            # Use the multimodal utils function (in same directory as YAML)
+            yaml_config["doc_to_image"] = "!function multimodal_utils.doc_to_image"
+            logger.info(f"Dataset contains images - adding doc_to_image function")
+
+        return yaml_config
 
     def _write_yaml(self, data: Dict[str, Any]) -> None:
         """Writes dictionary to YAML file with proper string formatting."""
         out_path = Path(self.directory) / f"{self.file_name}.yaml"
+
+        # Extract doc_to_image if it's a function tag to handle it specially
+        doc_to_image_value = data.pop("doc_to_image", None)
+        is_function_tag = (
+            doc_to_image_value
+            and isinstance(doc_to_image_value, str)
+            and doc_to_image_value.startswith("!function")
+        )
 
         # Custom representer for multiline strings to use literal style (|)
         def str_representer(dumper, data):
@@ -431,3 +513,7 @@ class LMHDataset:
                 default_flow_style=False,
                 width=1000,
             )
+
+            # Add doc_to_image without quotes if it's a function tag
+            if is_function_tag:
+                f.write(f"doc_to_image: {doc_to_image_value}\n")

@@ -15,6 +15,7 @@ dependencies = [
     "groq~=1.0.0",
     "absl-py~=2.4.0",
     "rouge-score~=0.1.2"
+    "pillow~=12.2.0",
 ]
 
 [build-system]
