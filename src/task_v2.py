@@ -27,7 +27,14 @@ def _is_image_file(filename: str) -> bool:
     Returns:
         True if file has an image extension
     """
-    return Path(filename).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+    return Path(filename).suffix.lower() in {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".webp",
+    }
 
 
 class LMHDataset:
@@ -59,14 +66,14 @@ class LMHDataset:
     }
 
     def __init__(
-        self, file_name: str = "dataset-n", directory: str | None = None, _dev_size: int = 5
+        self, file_name: str = "dataset-n", directory: str | None = None
     ) -> None:
         """Initialize LM Harness dataset.
 
         Args:
             file_name: Name of the file (extension is optional)
             directory: Path to the directory containing the file
-            _dev_size: Number of items from the end for 'dev' split (unused)
+            dev_size: Number of items from the end for 'dev' split (unused)
         """
         self.directory = directory or "."
         os.makedirs(self.directory, exist_ok=True)
@@ -99,7 +106,13 @@ class LMHDataset:
         metric_part = task_dict.get("metric", "")
 
         unique_suffix = os.urandom(5).hex()
-        self.name = f"{sanitize_config_name(task_part)}_{sanitize_config_name(category_part)}_{sanitize_config_name(type_part)}_{sanitize_config_name(metric_part)}_{unique_suffix}"
+        self.name = (
+            f"{sanitize_config_name(task_part)}_"
+            f"{sanitize_config_name(category_part)}_"
+            f"{sanitize_config_name(type_part)}_"
+            f"{sanitize_config_name(metric_part)}_"
+            f"{unique_suffix}"
+        )
 
         # Store metadata
         for key in ("version", "author", "organization", "category", "task", "source"):
@@ -289,7 +302,10 @@ class LMHDataset:
             all_keys.update(item.keys())
 
         logger.info(
-            f"Found {len(all_keys)} unique keys across {len(items)} items: {sorted(all_keys)}"
+            "Found %d unique keys across %d items: %s",
+            len(all_keys),
+            len(items),
+            sorted(all_keys),
         )
 
         # Define standard schema
@@ -313,7 +329,9 @@ class LMHDataset:
         # Add unexpected keys
         for key in all_keys:
             if key not in standard_schema:
-                logger.warning(f"Found unexpected field '{key}' in data, adding to schema")
+                logger.warning(
+                    "Found unexpected field '%s' in data, adding to schema", key
+                )
                 standard_schema[key] = ""
 
         # Normalize each item
@@ -326,7 +344,10 @@ class LMHDataset:
                     normalized_item[field] = item[field]
                 else:
                     # Don't add empty list fields
-                    if field in ["mcq", "Experimental prompts"] and default_value is None:
+                    if (
+                        field in ["mcq", "Experimental prompts"]
+                        and default_value is None
+                    ):
                         continue
                     else:
                         normalized_item[field] = default_value
@@ -376,7 +397,9 @@ class LMHDataset:
                             image_paths.append(abs_path)
                         else:
                             image_paths.append(
-                                os.path.abspath(os.path.join(source_dir, str(input_item)))
+                                os.path.abspath(
+                                    os.path.join(source_dir, str(input_item))
+                                )
                             )
 
                         text_parts.append("<image>")
@@ -389,7 +412,9 @@ class LMHDataset:
                 # Store image paths for doc_to_visual
                 if image_paths:
                     it["images"] = image_paths
-                    logger.info("Item %s contains %s image(s)", it.get("id"), len(image_paths))
+                    logger.info(
+                        "Item %s contains %s image(s)", it.get("id"), len(image_paths)
+                    )
 
             # Ensure output is a single string
             if isinstance(it.get("output"), list) and it["output"]:
@@ -438,7 +463,8 @@ class LMHDataset:
                     logger.info("Using custom metric: %s", detected_metric)
                 else:
                     logger.warning(
-                        f"Metric '{detected_metric}' detected but couldn't retrieve object."
+                        "Metric '%s' detected but couldn't retrieve object.",
+                        detected_metric,
                     )
                     final_yaml = base_yaml.copy()
                     final_yaml["metric_list"] = [
@@ -450,8 +476,9 @@ class LMHDataset:
                     ]
             else:
                 logger.info(
-                    f"Metric '{m_name}' not found in custom registry. "
-                    f"Assuming it's a built-in LM Harness metric."
+                    "Metric '%s' not found in custom registry. "
+                    "Assuming it's a built-in LM Harness metric.",
+                    m_name,
                 )
                 final_yaml = base_yaml.copy()
                 final_yaml["metric_list"] = [

@@ -115,7 +115,7 @@ class MetricsRegistry:
             Registered metric name if found, None otherwise
         """
         metric_name_lower = metric_name.lower()
-        for registered in self._metrics.keys():
+        for registered in self._metrics:
             if registered in metric_name_lower:
                 return registered
         return None

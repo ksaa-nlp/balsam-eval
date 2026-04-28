@@ -54,22 +54,22 @@ def log_job_start(config: EvalConfig) -> None:
     Args:
         config: Evaluation configuration
     """
-    logger.info(f"{'='*80}")
-    logger.info(f"EVALUATION JOB STARTED")
-    logger.info(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"Job ID: {config.job_id}")
-    logger.info(f"Category: {config.category_id}")
-    logger.info(f"Adapter: {config.adapter}")
-    logger.info(f"Model: {config.model_name}")
-    logger.info(f"{'='*80}\n")
+    logger.info("="*80)
+    logger.info("EVALUATION JOB STARTED")
+    logger.info("Timestamp: %s", time.strftime("%Y-%m-%d %H:%M:%S"))
+    logger.info("Job ID: %s", config.job_id)
+    logger.info("Category: %s", config.category_id)
+    logger.info("Adapter: %s", config.adapter)
+    logger.info("Model: %s", config.model_name)
+    logger.info("\n%s", "=" * 80)
 
 
 def log_job_end() -> None:
     """Log job completion information."""
-    logger.info(f"\n{'='*80}")
-    logger.info(f"EVALUATION JOB COMPLETED")
-    logger.info(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"{'='*80}\n")
+    logger.info("\n%s", "=" * 80)
+    logger.info("EVALUATION JOB COMPLETED")
+    logger.info("Timestamp: %s", time.strftime("%Y-%m-%d %H:%M:%S"))
+    logger.info("\n%s", "=" * 80)
 
 
 def load_local_tasks() -> tuple[dict[str, list[str]], dict[str, str]]:
@@ -83,7 +83,7 @@ def load_local_tasks() -> tuple[dict[str, list[str]], dict[str, str]]:
     tasks_temp: dict[str, list[str]] = {}
     task_mapper: dict[str, str] = {}
 
-    logger.info(f"Reading tasks from directory '{TASKS_DIR}'")
+    logger.info("Reading tasks from directory '%s'", TASKS_DIR)
 
     for file in os.listdir(f"./{TASKS_DIR}"):
         if not file.endswith("json"):
@@ -261,9 +261,7 @@ def run_local_evaluation(config: EvalConfig) -> None:
         logger.info(submit_results)
 
         if submit_results["status_code"] != 200:
-            raise Exception(
-                f"[ERROR] Failed to submit evaluation: {submit_results}"
-            )
+            raise RuntimeError(f"[ERROR] Failed to submit evaluation: {submit_results}")
 
     def run_category(category: str, datasets: list[str]) -> tuple[str, bool, str | None]:
         """Run evaluation for a single category.
@@ -271,7 +269,7 @@ def run_local_evaluation(config: EvalConfig) -> None:
         Returns:
             Tuple of (category, success, error_message)
         """
-        logger.info(f"Running evaluation for category: {category}")
+        logger.info("Running evaluation for category: %s", category)
 
         try:
             job = EvaluationJob(
@@ -290,15 +288,16 @@ def run_local_evaluation(config: EvalConfig) -> None:
             )
             job()
             return (category, True, None)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(
-                f"An error occurred while running the job for task {category}: {e}"
+                "An error occurred while running the job for task %s: %s",
+                category, e
             )
             return (category, False, str(e))
 
     # Run categories sequentially or in parallel
     if config.parallel_categories and len(tasks_temp) > 1:
-        logger.info(f"Running {len(tasks_temp)} categories in parallel...")
+        logger.info("Running %d categories in parallel...", len(tasks_temp))
         with ThreadPoolExecutor(
             max_workers=min(len(tasks_temp), os.cpu_count() or 4)
         ) as executor:
@@ -312,9 +311,9 @@ def run_local_evaluation(config: EvalConfig) -> None:
             for future in as_completed(future_to_category):
                 category, success, error = future.result()
                 if success:
-                    logger.info(f"Category '{category}' completed successfully")
+                    logger.info("Category '%s' completed successfully", category)
                 else:
-                    logger.error(f"Category '{category}' failed with error: {error}")
+                    logger.error("Category '%s' failed with error: %s", category, error)
     else:
         # Sequential execution (default behavior)
         for category, datasets in tasks_temp.items():
@@ -341,7 +340,7 @@ def run_remote_evaluation(config: EvalConfig) -> None:
     # Organize datasets by category and task
     categories = organize_remote_datasets(datasets)
 
-    logger.info(f"Total categories: {len(categories)}")
+    logger.info("Total categories: %d", len(categories))
     logger.info(str(categories))
 
     # Build model arguments
@@ -349,26 +348,26 @@ def run_remote_evaluation(config: EvalConfig) -> None:
 
     # Run evaluation job per task
     for category, tasks in categories.items():
-        logger.info(f"Running evaluation for category: {category}")
-        logger.info(f"Total tasks: {len(datasets)}")
+        logger.info("Running evaluation for category: %s", category)
+        logger.info("Total tasks: %d", len(tasks))
 
-        for task, _datasets in tasks.items():
-            if len(_datasets) == 0:
-                logger.warning(f"Skipping task '{task}' - no datasets found")
+        for task, task_datasets in tasks.items():
+            if len(task_datasets) == 0:
+                logger.warning("Skipping task '%s' - no datasets found", task)
                 continue
 
-            logger.info(f"\n{'='*80}")
-            logger.info(f"Starting evaluation for task: {task}")
-            logger.info(f"Category: {category}")
-            logger.info(f"Number of datasets: {len(_datasets)}")
-            logger.info(f"Dataset names: {[dataset.name for dataset in _datasets]}")
-            logger.info(f"Adapter: {processed_adapter}")
-            logger.info(f"Model: {config.model_name}")
-            logger.info(f"{'='*80}\n")
+            logger.info("\n%s", "=" * 80)
+            logger.info("Starting evaluation for task: %s", task)
+            logger.info("Category: %s", category)
+            logger.info("Number of datasets: %d", len(task_datasets))
+            logger.info("Dataset names: %s", [dataset.name for dataset in task_datasets])
+            logger.info("Adapter: %s", processed_adapter)
+            logger.info("Model: %s", config.model_name)
+            logger.info("\n%s", "=" * 80)
 
             try:
                 job = EvaluationJob(
-                    tasks=[dataset.name for dataset in _datasets],
+                    tasks=[dataset.name for dataset in task_datasets],
                     adapter=processed_adapter,  # type: ignore[arg-type]
                     model_args=model_args,
                     task_id=task,
@@ -382,19 +381,19 @@ def run_remote_evaluation(config: EvalConfig) -> None:
                     llm_judge_provider=config.llm_judge_provider,
                 )
                 job()
-                logger.info(f"✅ Task '{task}' completed successfully")
-            except Exception as e:
-                logger.error(f"❌ Task '{task}' failed with error: {e}")
+                logger.info("✅ Task '%s' completed successfully", task)
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error("❌ Task '%s' failed with error: %s", task, e)
                 import traceback
 
-                logger.error(f"Error traceback:\n{traceback.format_exc()}")
+                logger.error("Error traceback:\n%s", traceback.format_exc())
                 sys.exit(1)
 
     log_job_end()
 
     # Log result files
     result_files = list(Path(RESULTS_DIR).glob("*.json")) + list(Path(".").glob("*.json"))
-    logger.info(f"Generated result files: {result_files}")
+    logger.info("Generated result files: %s", result_files)
 
 
 def main() -> None:

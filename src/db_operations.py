@@ -32,6 +32,7 @@ def sanitize_text(text: str) -> str:
 def _make_request_with_retry(
     method: str,
     url: str,
+    *,
     headers: Optional[Dict[str, str]] = None,
     json_data: Optional[Dict[str, Any]] = None,
     params: Optional[Dict[str, Any]] = None,
@@ -66,7 +67,7 @@ def _make_request_with_retry(
                 time.sleep(wait_time)
             # On last attempt, loop ends and falls through to raise below
 
-        except requests.RequestException:
+        except requests.RequestException:  # pylint: disable=try-except-raise
             raise  # Non-retryable errors bubble up immediately
 
     print(f"❌ All {max_retries} retry attempts failed.")
@@ -74,7 +75,6 @@ def _make_request_with_retry(
         f"Failed to connect to {url} after {max_retries} attempts. "
         f"Last error: {last_exception}"
     ) from last_exception
-    
 
 
 def map_alias_to_task(task_alias: str, is_sanitized: bool = False) -> str:
@@ -93,12 +93,15 @@ def submit_model_evaluation(
     adapter: str,
     api_key: str,
     categories: List[str],
+    *,
     server_token: str,
     api_host: str,
     user_id: str,
     benchmark_id: str,
-    evaluation_types: List[str] = [],
+    evaluation_types: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
+    if evaluation_types is None:
+        evaluation_types = []
     headers = {
         "Content-Type": "application/json",
         "x-server-token": server_token,
@@ -187,16 +190,16 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             final_results["nGramScore"] = extracted_value
         else:
             final_results["nGramScore"] = rouge_result
-            print(f"[DEBUG] Using rouge_result directly: {final_results['nGramScore']}")
+            print(f"[DEBUG] Using rouge_result directly: {final_results["nGramScore"]}")
     # Handle BLEU metric (returns a float)
     elif "bleu,none" in result:
         final_results["nGramScore"] = result["bleu,none"]
-        print(f"[DEBUG] Found bleu,none: {final_results['nGramScore']}")
+        print(f"[DEBUG] Found bleu,none: {final_results["nGramScore"]}")
 
     # Handle accuracy metric
     if "accuracy,none" in result:
         final_results["mcqScore"] = result["accuracy,none"]
-        print(f"[DEBUG] Found accuracy,none: {final_results['mcqScore']}")
+        print(f"[DEBUG] Found accuracy,none: {final_results["mcqScore"]}")
 
     # Handle LLM as judge metrics (dict format with average_score)
     # These are set by process_results_with_llm_judge for task-level summaries
@@ -204,13 +207,13 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
         final_results["llmAsJudgeScore"] = result["llm_as_judge"].get(
             "average_score", 0
         )
-        print(f"[DEBUG] Found llm_as_judge: {final_results['llmAsJudgeScore']}")
+        print(f"[DEBUG] Found llm_as_judge: {final_results["llmAsJudgeScore"]}")
 
     if "mcq_llm_as_judge" in result:
         final_results["MCQllmAsJudgeScore"] = result["mcq_llm_as_judge"].get(
             "average_score", 0
         )
-        print(f"[DEBUG] Found mcq_llm_as_judge: {final_results['MCQllmAsJudgeScore']}")
+        print(f"[DEBUG] Found mcq_llm_as_judge: {final_results["MCQllmAsJudgeScore"]}")
 
     # Handle LLM judge scores in numeric format (set by process_results_with_llm_judge)
     # These are the actual score values (not dict summaries)
@@ -221,7 +224,7 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             if "llmAsJudgeScore" not in final_results:
                 final_results["llmAsJudgeScore"] = float(value)
                 print(
-                    f"[DEBUG] Found llm_judge_score,none: {final_results['llmAsJudgeScore']}"
+                    f"[DEBUG] Found llm_judge_score,none: {final_results["llmAsJudgeScore"]}"
                 )
 
     if "mcq_llm_judge_score,none" in result:
@@ -231,7 +234,7 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             if "MCQllmAsJudgeScore" not in final_results:
                 final_results["MCQllmAsJudgeScore"] = float(value)
                 print(
-                    f"[DEBUG] Found mcq_llm_judge_score,none: {final_results['MCQllmAsJudgeScore']}"
+                    f"[DEBUG] Found mcq_llm_judge_score,none: {final_results["MCQllmAsJudgeScore"]}"
                 )
 
     print(f"[DEBUG] Final results: {final_results}")
@@ -244,6 +247,7 @@ def add_results_to_db(
     task_id: str,
     server_token: str,
     result: dict[str, Any],
+    *,
     category_name: str,
     benchmark_id: str,
 ) -> None:

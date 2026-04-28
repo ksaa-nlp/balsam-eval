@@ -12,19 +12,17 @@ class LocalModelEdited(DeepEvalBaseLLM):
 
     def __init__(
         self,
-        model: Optional[str] = None,
+        *args,
         temperature: float = 0,
         model_name: Optional[str] = None,
         local_model_api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model_cost: float = 0.0,
-        *args,
         **kwargs,
     ):
         """Initialize local model wrapper.
 
         Args:
-            model: Name of the model (for parent class)
             temperature: Sampling temperature
             model_name: Name of the model
             local_model_api_key: API key for the model
@@ -36,7 +34,7 @@ class LocalModelEdited(DeepEvalBaseLLM):
         if temperature < 0:
             raise ValueError("Temperature must be >= 0.")
 
-        self.model_name = model_name or model
+        self.model_name = model_name
         self.local_model_api_key = local_model_api_key
         self.base_url = base_url
         self.temperature = temperature

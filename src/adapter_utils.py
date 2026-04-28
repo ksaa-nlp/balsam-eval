@@ -173,7 +173,8 @@ def process_adapter_and_url(
         >>> process_adapter_and_url("anthropic-chat-completions", None, verbose=False)
         ('local-chat-completions', 'https://api.anthropic.com/v1/chat/completions')
 
-        >>> process_adapter_and_url("openai-chat-completions", "https://api.openai.com", verbose=False)
+        >>> process_adapter_and_url("openai-chat-completions", "https://api.openai.com",
+        ...                         verbose=False)
         ('openai-chat-completions', 'https://api.openai.com')
     """
     if adapter == "anthropic-chat-completions":

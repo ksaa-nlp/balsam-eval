@@ -56,6 +56,7 @@ class EvaluationJob:
         tasks: List[str],
         model_args: dict[str, Any],
         category_name: str,
+        *,
         tasks_mapper_dict: Optional[dict] = None,
         adapter: Literal[
             "local-chat-completions",
@@ -142,7 +143,7 @@ class EvaluationJob:
 
         try:
             self._run_evaluation()
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self._handle_error(e)
 
     def _run_evaluation(self) -> None:
@@ -276,7 +277,7 @@ class EvaluationJob:
         Args:
             exception: The exception that occurred
         """
-        logger.error(f"❌ Error in evaluation job: {exception}")
+        logger.error("❌ Error in evaluation job: %s", exception)
         logger.error(traceback.format_exc())
 
         api_error_data = self._extract_api_error_message(exception)
@@ -294,7 +295,7 @@ class EvaluationJob:
             if isinstance(api_error_data, dict)
             else str(api_error_data)
         )
-        raise Exception(error_message) from exception
+        raise RuntimeError(error_message) from exception
 
     def _extract_api_error_message(self, exception: Exception) -> Dict[str, Any]:
         """Extract the full API error object from various exception types.
@@ -353,8 +354,8 @@ class EvaluationJob:
                 }
             }
 
-        except Exception as e:
-            logger.error(f"Error while extracting API error message: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Error while extracting API error message: %s", e)
             return {
                 "error": {
                     "message": str(exception),
