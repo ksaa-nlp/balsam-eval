@@ -8,9 +8,10 @@ import json
 import logging
 import os
 import xml.etree.ElementTree as ET
-import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+import yaml
 
 from src.core.helpers import sanitize_config_name
 from src.metrics_registry import get_metrics_registry
@@ -278,9 +279,9 @@ class LMHDataset:
         """
         if isinstance(task, dict):
             return {k: self._escape_newline(v) for k, v in task.items()}
-        elif isinstance(task, list):
+        if isinstance(task, list):
             return [self._escape_newline(i) for i in task]
-        elif isinstance(task, str):
+        if isinstance(task, str):
             return task.replace("\n", "\\n")
         return task
 
@@ -349,8 +350,7 @@ class LMHDataset:
                         and default_value is None
                     ):
                         continue
-                    else:
-                        normalized_item[field] = default_value
+                    normalized_item[field] = default_value
 
             normalized.append(normalized_item)
 

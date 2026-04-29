@@ -45,7 +45,9 @@ class EvalConfig:
             category_id=os.getenv("CATEGORY"),
             job_id=os.getenv("JOB_ID"),
             temperature=os.getenv("TEMPERATURE"),
-            parallel_categories=os.getenv("PARALLEL_CATEGORIES", "false").lower() in ("true", "1", "yes", "on"),
+            parallel_categories=os.getenv("PARALLEL_CATEGORIES", "false").lower() in (
+                "true", "1", "yes", "on"
+            ),
         )
 
     def validate_local(self) -> None:

@@ -28,7 +28,7 @@ def compute_bleu_score(
     Returns:
         Average BLEU score
     """
-    try:
+    try:  # pylint: disable=import-outside-toplevel
         import evaluate
 
         bleu = evaluate.load("bleu")

@@ -223,6 +223,8 @@ __marimo__/
 .vscode
 .history
 .tasks
+.tasks_temp
+.tasks_images
 .temp
 .DS_Store
 .deepeval

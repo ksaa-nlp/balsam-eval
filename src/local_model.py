@@ -45,13 +45,11 @@ class LocalModelEdited(DeepEvalBaseLLM):
 
         super().__init__(self.model_name)
 
-    def generate(self, prompt: str, *args, **kwargs) -> str:
+    def generate(self, prompt: str) -> str:
         """Generate a response from the model.
 
         Args:
             prompt: Input prompt
-            *args: Additional positional arguments
-            **kwargs: Additional keyword arguments
 
         Returns:
             Generated response as string
@@ -65,13 +63,11 @@ class LocalModelEdited(DeepEvalBaseLLM):
         res_content = response.choices[0].message.content
         return res_content or ""
 
-    async def a_generate(self, prompt: str, *args, **kwargs) -> str:
+    async def a_generate(self, prompt: str) -> str:
         """Async generate a response from the model.
 
         Args:
             prompt: Input prompt
-            *args: Additional positional arguments
-            **kwargs: Additional keyword arguments
 
         Returns:
             Generated response as string
@@ -121,7 +117,7 @@ class LocalModelEdited(DeepEvalBaseLLM):
 
         return response, 0.0
 
-    def get_model_name(self) -> str:
+    def get_model_name(self, *args, **kwargs) -> str:
         """Get the model name.
 
         Returns:

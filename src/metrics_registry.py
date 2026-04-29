@@ -26,12 +26,10 @@ class BaseMetric(ABC):
     @abstractmethod
     def get_doc_to_text(self, original_doc_to_text: str) -> str:
         """Get the doc_to_text template for this metric."""
-        pass
 
     @abstractmethod
     def get_generation_kwargs(self) -> Dict[str, Any]:
         """Get generation kwargs for this metric."""
-        pass
 
     def get_yaml_config(self, base_yaml: Dict[str, Any]) -> Dict[str, Any]:
         """Merge base YAML with metric-specific configuration.
@@ -122,7 +120,7 @@ class MetricsRegistry:
 
 
 # Global singleton
-_registry: Optional[MetricsRegistry] = None
+REGISTRY: Optional[MetricsRegistry] = None
 
 
 def get_metrics_registry() -> MetricsRegistry:
@@ -131,7 +129,7 @@ def get_metrics_registry() -> MetricsRegistry:
     Returns:
         MetricsRegistry instance
     """
-    global _registry
-    if _registry is None:
-        _registry = MetricsRegistry()
-    return _registry
+    global REGISTRY
+    if REGISTRY is None:
+        REGISTRY = MetricsRegistry()
+    return REGISTRY

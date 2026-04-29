@@ -39,7 +39,7 @@ def compute_new_metric_aggregation(items: List[Any]) -> float:  # pylint: disabl
         ...             count += 1
         ...     return total / count if count > 0 else 0.0
     """
-    # TODO: Implement aggregation logic
+    # TODO: Implement aggregation logic  # pylint: disable=fixme
     return 0.0
 
 
@@ -77,7 +77,7 @@ def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[Any]]:
         ...     golds = doc["output"]
         ...     return {"new_metric": [golds, preds]}
     """
-    # TODO: Implement extraction logic
+    # TODO: Implement extraction logic  # pylint: disable=fixme
     preds = results[0] if isinstance(results, list) else results
     golds = doc.get("output", "")
     return {"new_metric": [golds, preds]}
@@ -110,7 +110,7 @@ class NewMetric(BaseMetric):
             ...     # Add special instructions for your metric
             ...     return f"{original_doc_to_text}\\nPlease respond in JSON format."
         """
-        # TODO: Optionally modify doc prompt
+        # TODO: Optionally modify doc prompt  # pylint: disable=fixme
         return original_doc_to_text
 
     def get_generation_kwargs(self) -> Dict[str, Any]:
@@ -131,7 +131,7 @@ class NewMetric(BaseMetric):
             ...         "max_new_tokens": 100,
             ...     }
         """
-        # TODO: Adjust generation parameters
+        # TODO: Adjust generation parameters  # pylint: disable=fixme
         return {"do_sample": False, "until": [""]}
 
 

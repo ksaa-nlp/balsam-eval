@@ -32,8 +32,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         # For OpenAI reasoning models, use max_completion_tokens
         if adapter in ["openai-chat-completions"]:
             return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
-        else:
-            return {"max_tokens": max_tokens}
+        return {"max_tokens": max_tokens}
 
     # Otherwise, use the current logic (IS_REASONING=0 or not set)
     model_lower = model_name.lower()
@@ -84,17 +83,16 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
 
             return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
 
-        elif adapter in ["local-chat-completions"]:
+        if adapter in ["local-chat-completions"]:
             # DeepSeek R1, QwQ, Skywork-o1, etc.
             if any(pattern in model_lower for pattern in ["deepseek", "r1"]):
                 return {"max_completion_tokens": 8192, "max_tokens": 8192}
-            else:
-                return {"max_tokens": 8192}
-
-        elif adapter in ["gemini"]:
             return {"max_tokens": 8192}
 
-        elif adapter in ["anthropic-chat-completions"]:
+        if adapter in ["gemini"]:
+            return {"max_tokens": 8192}
+
+        if adapter in ["anthropic-chat-completions"]:
             return {"max_tokens": 8192}
 
     # Adapter-specific defaults for non-thinking models

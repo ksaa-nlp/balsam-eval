@@ -3,8 +3,6 @@
 import json
 import os
 import shutil
-from pathlib import Path
-from typing import Any
 
 
 def setup_directories(*dirs: str) -> None:
@@ -30,9 +28,8 @@ def copy_multimodal_utils_to_temp(temp_dir: str = ".temp") -> str | None:
         shutil.copy2(multimodal_utils_src, multimodal_utils_dst)
         print(f"Copied multimodal_utils.py to {multimodal_utils_dst}")
         return multimodal_utils_dst
-    else:
-        print(f"Warning: {multimodal_utils_src} not found")
-        return None
+    print(f"Warning: {multimodal_utils_src} not found")
+    return None
 
 
 def copy_images_to_temp(json_file_path: str, temp_dir: str) -> None:
@@ -42,8 +39,6 @@ def copy_images_to_temp(json_file_path: str, temp_dir: str) -> None:
         json_file_path: Path to JSON file containing image references
         temp_dir: Directory to copy images to
     """
-    image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'}
-
     with open(json_file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 

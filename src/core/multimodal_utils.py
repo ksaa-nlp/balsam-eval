@@ -3,8 +3,7 @@ Utilities for multimodal datasets in Balsam Eval.
 Provides doc_to_visual function for lmms-eval compatibility.
 """
 
-from pathlib import Path
-from typing import List, Dict, Any, Sequence
+from typing import Dict, Any, Sequence
 
 from PIL import Image
 
@@ -32,7 +31,7 @@ def doc_to_visual(doc: Dict[str, Any]) -> Sequence[Image.Image]:
         try:
             img = Image.open(path)
             images.append(img)
-        except Exception as e:
+        except (OSError, IOError) as e:
             print(f"Warning: Failed to load image {path}: {e}")
             continue
 

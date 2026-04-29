@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -149,7 +150,7 @@ def load_remote_datasets(config: EvalConfig) -> list[LMHDataset]:
     datasets: list[LMHDataset] = []
     for dataset_id in datasets_ids:
         # Download and export each dataset
-        returned_data = download_dataset_from_gcs(
+        download_dataset_from_gcs(
             dataset_id=dataset_id, directory=TEMP_DIR
         )
         dataset = LMHDataset(dataset_id, directory=TEMP_DIR)
@@ -374,8 +375,6 @@ def run_remote_evaluation(config: EvalConfig) -> None:
                 logger.info("✅ Task '%s' completed successfully", task)
             except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.error("❌ Task '%s' failed with error: %s", task, e)
-                import traceback
-
                 logger.error("Error traceback:\n%s", traceback.format_exc())
                 sys.exit(1)
 

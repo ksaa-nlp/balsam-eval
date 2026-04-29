@@ -7,17 +7,19 @@ The main improvement is separating concerns:
 - Generative judge uses 0-3 scoring with normalization to 0-1
 """
 
-from typing import Dict, Any, Optional, Literal, List, Union
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
-from deepeval.test_case import LLMTestCase
-from statistics import mean, median
 import json
-import time
 import logging
+import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from statistics import mean, median
+from typing import Any, Dict, List, Literal, Optional, Union
+
+from deepeval.models import AnthropicModel, GeminiModel, GPTModel, OllamaModel
+from deepeval.test_case import LLMTestCase
 from tqdm import tqdm
+
 from src.local_model import LocalModelEdited
-from deepeval.models import GPTModel, OllamaModel, AnthropicModel, GeminiModel
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -97,16 +99,16 @@ def create_model_adapter(config: ModelConfig) -> Any:
 
 def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) -> Dict[str, Any]:
     """Call model adapter with retry logic."""
-    
+
     for attempt in range(max_retries):
         try:
             # Try different methods to call the model based on its type
             model_response = None
-            
+
             # For DeepEval models, use the appropriate method
             if hasattr(adapter, 'generate'):
                 model_response = adapter.generate(prompt)
-            elif hasattr(adapter, '_call'):
+            elif hasattr(adapter, '_call'):  # pylint: disable=protected-access
                 model_response = adapter._call(prompt)
             elif hasattr(adapter, 'invoke'):
                 model_response = adapter.invoke(prompt)
@@ -120,15 +122,15 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                         if callable(method):
                             model_response = method(prompt)
                             break
-            
+
             if model_response is None:
                 raise ValueError("Could not find a suitable method to call the model adapter")
-            
+
             # Handle different response formats
             response_text = None
             if isinstance(model_response, tuple):
                 response_text = model_response[0]
-                logger.debug(f"Model returned tuple, using first element: {type(model_response[0])}")
+                logger.debug("Model returned tuple, using first element: %s", type(model_response[0]))
             elif isinstance(model_response, str):
                 response_text = model_response
             elif hasattr(model_response, 'text'):
@@ -137,11 +139,11 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                 response_text = model_response.content
             else:
                 response_text = str(model_response)
-                
+
             if response_text is None:
-                logger.warning(f"Received empty response text (attempt {attempt+1})")
+                logger.warning("Received empty response text (attempt %d)", attempt+1)
                 response_text = ""
-            
+
             # Parse the response
             try:
                 # Clean the response text
@@ -154,17 +156,17 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                         "explanation": parsed["explanation"]
                     }
 
-                logger.warning(f"Missing keys in parsed output (attempt {attempt+1}): {parsed}")
-            except Exception as e:
-                logger.warning(f"JSON parsing or structure error (attempt {attempt+1}): {e}")
-                logger.debug(f"Raw response: {response_text}")
+                logger.warning("Missing keys in parsed output (attempt %d): %s", attempt+1, parsed)
+            except (json.JSONDecodeError, ValueError, KeyError) as e:  # pylint: disable=broad-exception-caught
+                logger.warning("JSON parsing or structure error (attempt %d): %s", attempt+1, e)
+                logger.debug("Raw response: %s", response_text)
 
-        except Exception as e:
-            logger.error(f"Model call error (attempt {attempt+1}): {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.error("Model call error (attempt %d)", attempt+1)
 
         # Wait before retry with exponential backoff
         wait_time = min(2 ** attempt, 30)
-        logger.info(f"Retrying after {wait_time} seconds...")
+        logger.info("Retrying after %d seconds...", wait_time)
         time.sleep(wait_time)
 
     return {
@@ -176,13 +178,13 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
 class BaseLLMJudge(ABC):
     """
     Base class for LLM Judge systems.
-    
+
     Handles common logic like:
     - Model adapter management
     - Batch processing
     - Result aggregation
     - Error handling
-    
+
     Subclasses must implement:
     - get_evaluation_prompt(): Returns the prompt template
     - normalize_score(): Normalizes raw score to 0-1 range
@@ -205,33 +207,30 @@ class BaseLLMJudge(ABC):
     @abstractmethod
     def get_evaluation_prompt(self) -> str:
         """Get the evaluation prompt template. Must be implemented by subclasses."""
-        pass
 
     @abstractmethod
     def normalize_score(self, raw_score: float) -> float:
         """
         Normalize raw score to 0-1 range.
-        
+
         Args:
             raw_score: The raw score from the model
-            
+
         Returns:
             Normalized score between 0 and 1
         """
-        pass
 
     @abstractmethod
     def get_max_score(self) -> float:
         """Get the maximum possible raw score."""
-        pass
 
     def _evaluate_single_model(
-        self, 
-        question: str, 
-        reference_answer: str, 
-        given_answer: str, 
-        context: Optional[str], 
-        config: ModelConfig, 
+        self,
+        question: str,
+        reference_answer: str,
+        given_answer: str,
+        context: Optional[str],
+        config: ModelConfig,
         adapter: Any
     ) -> Dict[str, Any]:
         """Evaluate using a single model with proper error handling."""
@@ -244,10 +243,10 @@ class BaseLLMJudge(ABC):
         try:
             # Call the model with retry logic
             result = call_model_adapter_with_retry(adapter, prompt)
-            
+
             raw_score = result["score"]
             explanation = result["explanation"]
-            
+
             # Normalize score using subclass-specific logic
             norm_score = self.normalize_score(raw_score) if raw_score is not None else 0
             passed = norm_score >= self.threshold
@@ -260,9 +259,9 @@ class BaseLLMJudge(ABC):
                 "passed": passed,
                 "explanation": explanation
             }
-            
-        except Exception as e:
-            logger.error(f"Error evaluating with {config.name}: {e}")
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Error evaluating with %s: %s", config.name, e)
             return {
                 "model": config.name,
                 "provider": config.provider,
@@ -318,17 +317,16 @@ class BaseLLMJudge(ABC):
 
         if not scores:
             return {
-                "overall_score": 0, 
-                "overall_raw_score": 0, 
+                "overall_score": 0,
+                "overall_raw_score": 0,
                 "aggregated_explanation": "No valid scores"
             }
 
         agg_score = median(scores) if self.aggregation_method == "median" else mean(scores)
         agg_raw = median(raw_scores) if self.aggregation_method == "median" else mean(raw_scores)
 
-        explanation = f"Aggregated ({self.aggregation_method}) score: {agg_score:.4f}. " + "; ".join(
-            f"{res['model']}: {res['explanation']}" for res in model_results
-        )
+        explanation = (f"Aggregated ({self.aggregation_method}) score: {agg_score:.4f}. " +
+                      "; ".join(f"{res['model']}: {res['explanation']}" for res in model_results))
 
         return {
             "overall_score": agg_score,
@@ -412,4 +410,4 @@ class BaseLLMJudge(ABC):
         """Save results to file."""
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
-        logger.info(f"✅ Results saved to {filename}")
+        logger.info("Results saved to %s", filename)

@@ -9,11 +9,10 @@ from typing import Any, Dict, List, Literal, Optional, cast
 
 import lmms_eval.evaluator
 import lmms_eval.models  # Register all lmms_eval models
+import requests
 
 # Import custom metrics package to auto-register all metrics
 import src.metrics  # Registers all metrics in src.metrics.impl.*  # pylint: disable=unused-import
-
-import requests
 
 from src.adapter_utils import get_max_tokens_config
 from src.db_operations import JobStatus, update_status
@@ -343,7 +342,7 @@ class EvaluationJob:
                 for arg in exception.args:
                     if isinstance(arg, dict) and "error" in arg:
                         return cast(dict[str, Any], arg)
-                    elif isinstance(arg, str):
+                    if isinstance(arg, str):
                         try:
                             parsed = cast(dict[str, Any], json.loads(arg))
                             if "error" in parsed:

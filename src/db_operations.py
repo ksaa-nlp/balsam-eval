@@ -40,6 +40,24 @@ def _make_request_with_retry(
     initial_timeout: float = 30.0,
     max_timeout: float = 120.0,
 ) -> requests.Response:
+    """Make HTTP request with retry logic.
+
+    Args:
+        method: HTTP method
+        url: Request URL
+        headers: Optional headers
+        json_data: Optional JSON data
+        params: Optional query parameters
+        max_retries: Maximum number of retries
+        initial_timeout: Initial timeout in seconds
+        max_timeout: Maximum timeout in seconds
+
+    Returns:
+        Response object
+
+    Raises:
+        requests.RequestException: If all retries fail
+    """
     last_exception = None
     timeout: float = initial_timeout
 
@@ -78,6 +96,18 @@ def _make_request_with_retry(
 
 
 def map_alias_to_task(task_alias: str, is_sanitized: bool = False) -> str:
+    """Map task alias to task name.
+
+    Args:
+        task_alias: Task alias to map
+        is_sanitized: Whether to sanitize the output
+
+    Returns:
+        Mapped task name
+
+    Raises:
+        Exception: If mapping fails
+    """
     try:
         with open("tasks_mappping.json", "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -100,6 +130,23 @@ def submit_model_evaluation(
     benchmark_id: str,
     evaluation_types: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
+    """Submit model evaluation to server.
+
+    Args:
+        model_name: Name of the model
+        model_url: URL of the model
+        adapter: Adapter type
+        api_key: API key for the model
+        categories: List of categories to evaluate
+        server_token: Server authentication token
+        api_host: API host URL
+        user_id: User ID
+        benchmark_id: Benchmark ID
+        evaluation_types: Optional list of evaluation types
+
+    Returns:
+        Response data from server
+    """
     if evaluation_types is None:
         evaluation_types = []
     headers = {
@@ -251,6 +298,20 @@ def add_results_to_db(
     category_name: str,
     benchmark_id: str,
 ) -> None:
+    """Add evaluation results to database via webhook.
+
+    Args:
+        api_host: API host URL
+        job_id: Job ID
+        task_id: Task ID
+        server_token: Server authentication token
+        result: Evaluation results dictionary
+        category_name: Category name
+        benchmark_id: Benchmark ID
+
+    Raises:
+        RuntimeError: If posting results fails
+    """
     if not api_host:
         return
 
@@ -293,6 +354,18 @@ def update_status(
     status: JobStatus,
     error_message: Optional[str] = None,
 ) -> None:
+    """Update job status via webhook.
+
+    Args:
+        api_host: API host URL
+        job_id: Job ID
+        server_token: Server authentication token
+        status: New job status
+        error_message: Optional error message
+
+    Raises:
+        RuntimeError: If status update fails
+    """
     if not api_host:
         return
 
