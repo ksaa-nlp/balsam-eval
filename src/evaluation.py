@@ -5,7 +5,7 @@ import logging
 import os
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, cast
 
 import lmms_eval.evaluator
 import lmms_eval.models  # Register all lmms_eval models
@@ -226,16 +226,19 @@ class EvaluationJob:
         }
         model = model_mapping.get(self.adapter, self.adapter)
 
-        results = lmms_eval.evaluator.simple_evaluate(
-            model=model,
-            model_args=model_args_str,
-            tasks=self.tasks,
-            apply_chat_template=False,
-            task_manager=lmms_eval.tasks.TaskManager(
-                include_path=str(temp_dir), include_defaults=False
+        results = cast(
+            dict[str, Any],
+            lmms_eval.evaluator.simple_evaluate(
+                model=model,
+                model_args=model_args_str,
+                tasks=self.tasks,
+                apply_chat_template=False,
+                task_manager=lmms_eval.tasks.TaskManager(
+                    include_path=str(temp_dir), include_defaults=False
+                ),
+                batch_size=1,
+                gen_kwargs=gen_kwargs_str,
             ),
-            batch_size=1,
-            gen_kwargs=gen_kwargs_str,
         )
 
         logger.info("✅ simple_evaluate completed successfully")
@@ -314,7 +317,7 @@ class EvaluationJob:
             # Try to get error from response
             if hasattr(exception, "response") and exception.response is not None:
                 try:
-                    error_data = exception.response.json()
+                    error_data = cast(dict[str, Any], exception.response.json())
                     if "error" in error_data:
                         return error_data
                 except (json.JSONDecodeError, ValueError):
@@ -329,7 +332,7 @@ class EvaluationJob:
                 json_match = re.search(r"\{(?:[^{}]|{[^{}]*})*\}", error_str)
                 if json_match:
                     try:
-                        error_json = json.loads(json_match.group())
+                        error_json = cast(dict[str, Any], json.loads(json_match.group()))
                         if "error" in error_json:
                             return error_json
                     except json.JSONDecodeError:
@@ -339,10 +342,10 @@ class EvaluationJob:
             if hasattr(exception, "args") and exception.args:
                 for arg in exception.args:
                     if isinstance(arg, dict) and "error" in arg:
-                        return arg
+                        return cast(dict[str, Any], arg)
                     elif isinstance(arg, str):
                         try:
-                            parsed = json.loads(arg)
+                            parsed = cast(dict[str, Any], json.loads(arg))
                             if "error" in parsed:
                                 return parsed
                         except json.JSONDecodeError:

@@ -116,7 +116,7 @@ class TaskOperations:
         )
         return mcq_tasks, generation_tasks
 
-    def normalize_mcq_answer(self, answer: str, mcq_mapping: dict) -> str:
+    def normalize_mcq_answer(self, answer: str, mcq_mapping: dict[str, str]) -> str:
         """Normalize MCQ answer to full text using the mapping.
 
         Converts letter answers (A, B, C, D) to their full text equivalents.
@@ -155,7 +155,7 @@ class TaskOperations:
 
         # Check if it's a single letter
         if len(answer_stripped) == 1 and answer_stripped.upper() in mcq_mapping:
-            normalized = mcq_mapping[answer_stripped.upper()]
+            normalized: str = mcq_mapping[answer_stripped.upper()]
             logger.debug(f"Converted letter '{answer_stripped}' to '{normalized}'")
             return normalized
 

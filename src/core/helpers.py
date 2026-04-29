@@ -3,7 +3,7 @@
 import json
 import os
 import unicodedata
-from typing import Any
+from typing import Any, cast
 
 from google.cloud import storage
 
@@ -44,9 +44,9 @@ def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]
 
     # Read the dataset from the file
     with open(f".temp/{dataset_id}.json", "r", encoding="utf8") as fp:
-        dataset = json.load(fp)
+        dataset = cast(dict[str, Any], json.load(fp))
         if "json" in dataset:
-            dd = dataset["json"]
+            dd = cast(dict[str, Any], dataset["json"])
             dd["task"] = dataset["task"]
             dd["category"] = dataset["category"]
             # Overwrite the dataset with the new data

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 _PUNCT_TABLE = dict.fromkeys(
     i for i in range(sys.maxunicode) if unicodedata.category(chr(i)).startswith("P")
 )
-ALL_PUNCTUATIONS = "".join(chr(p) for p in _PUNCT_TABLE)  # pylint: disable=invalid-name
+ALL_PUNCTUATIONS = "".join(chr(p) for p in _PUNCT_TABLE)
 OTHERS = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ"""
 ALL_PUNCTUATIONS += "".join([o for o in OTHERS if o not in ALL_PUNCTUATIONS])
 

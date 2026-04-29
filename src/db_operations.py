@@ -3,7 +3,7 @@
 import json
 import time
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import requests
 
@@ -356,8 +356,9 @@ def get_tasks_from_category(
         raise ValueError("Failed to retrieve tasks for category")
 
     # Make sure we have the datasets
-    if "datasets" not in response.json():
+    response_data = response.json()
+    if "datasets" not in response_data:
         print(f"No datasets found for category {category}")
         raise ValueError("No datasets found for category")
 
-    return response.json()["datasets"]
+    return cast(list[str], response_data["datasets"])

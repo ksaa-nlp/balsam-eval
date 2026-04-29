@@ -80,7 +80,7 @@ def extract_first_word_or_line(text: str) -> str:
 
 def normalize_text(
     text: str,
-    mcq_mapping: Optional[dict] = None,
+    mcq_mapping: Optional[dict[str, str]] = None,
 ) -> str:
     """Normalize text for comparison, with special handling for MCQ answers.
 
@@ -108,7 +108,8 @@ def normalize_text(
     # If mcq_mapping is provided, check if text is a letter key
     if mcq_mapping and text.upper() in mcq_mapping:
         logger.debug("normalize_text: Mapping letter '%s' to full text", text)
-        return mcq_mapping[text.upper()]
+        mapped_text: str = mcq_mapping[text.upper()]
+        return mapped_text
 
     # Remove all punctuation and extra whitespace
     text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
