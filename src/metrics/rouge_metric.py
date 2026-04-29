@@ -1,91 +1,104 @@
 """ROUGE metric implementation for text evaluation."""
 
-import re
-import sys
-import unicodedata
+from typing import Any, Dict, List, Tuple
 
-import evaluate
 from lmms_eval.api import registry as le_registry
 from lmms_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
-
-rouge = evaluate.load("rouge")
-
-# Punctuation handling
-PUNCT_TABLE = dict.fromkeys(
-    i for i in range(sys.maxunicode) if unicodedata.category(chr(i)).startswith("P")
-)
-ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
-OTHERS = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ"""
-ALL_PUNCTUATIONS += "".join([o for o in OTHERS if o not in ALL_PUNCTUATIONS])
+from src.metrics.metrics_utils import prepare_text_with_punctuation
 
 
-def prepare_texts(text: str, change_curly_braces: bool = False) -> str:
-    """Prepare text for ROUGE evaluation.
+def compute_rouge_scores(
+    references: List[str],
+    predictions: List[str],
+    prepare_refs: bool = False,
+    prepare_preds: bool = True,
+) -> Dict[str, float]:
+    """Compute ROUGE scores for references and predictions.
 
     Args:
-        text: Input text
-        change_curly_braces: Whether to change curly braces
+        references: List of reference texts
+        predictions: List of prediction texts
+        prepare_refs: Whether to prepare reference texts
+        prepare_preds: Whether to prepare prediction texts
 
     Returns:
-        Prepared text
+        Dictionary with rouge1, rouge2, rougeL, rougeLsum scores
     """
-    text = re.sub("([" + ALL_PUNCTUATIONS + "])", " \\1 ", text)
-    if change_curly_braces:
-        text = text.replace("{", "[").replace("}", "]")
-    return text
+    try:
+        import evaluate
+
+        rouge = evaluate.load("rouge")
+    except ImportError:
+        return {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
+
+    def tokenizer(x):
+        return x.split()
+
+    refs = [
+        prepare_text_with_punctuation(r, prepare_refs, False).strip()
+        for r in references
+    ]
+    preds = [
+        prepare_text_with_punctuation(p, prepare_preds, False).strip()
+        for p in predictions
+    ]
+
+    total = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
+    for ref, pred in zip(refs, preds):
+        score = rouge.compute(
+            references=[ref], predictions=[pred], tokenizer=tokenizer
+        )
+        for k in total:
+            total[k] += score[k]
+    count = len(refs) if refs else 1
+    return {k: v / count for k, v in total.items()}
 
 
-# Register aggregation
+def compute_rouge_aggregation(items: List[Tuple[Any, Any]]) -> Dict[str, float]:
+    """Aggregate ROUGE scores from reference and prediction pairs.
+
+    Args:
+        items: List of (reference, prediction) tuples
+
+    Returns:
+        Dictionary with rouge1, rouge2, rougeL, rougeLsum scores
+    """
+    refs = [r for r, _ in items]
+    preds = [p for _, p in items]
+
+    return compute_rouge_scores(
+        references=refs, predictions=preds, prepare_refs=False, prepare_preds=True
+    )
+
+
+# Register aggregation function
 if "rouge" not in le_registry.AGGREGATION_REGISTRY:
-    @register_aggregation("rouge")
-    def rouge_aggregation(items):
-        """Aggregate ROUGE scores.
-
-        Args:
-            items: List of (reference, prediction) tuples
-
-        Returns:
-            Dictionary with ROUGE scores
-        """
-        def tokenizer(x):
-            return x.split()
-
-        refs = [prepare_texts(r, False).strip() for r, _ in items]
-        preds = [prepare_texts(p, True).strip() for _, p in items]
-
-        total = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
-        for ref, pred in zip(refs, preds):
-            score = rouge.compute(references=[ref], predictions=[pred], tokenizer=tokenizer)
-            for k in total.keys():
-                total[k] += score[k]
-        count = len(refs) if refs else 1
-        return {k: v / count for k, v in total.items()}
+    register_aggregation("rouge")(compute_rouge_aggregation)
 
 
-# Register metric
+# Register metric function
 if "rouge" not in le_registry.METRIC_REGISTRY:
-    @register_metric(
+    register_metric(
         metric="rouge",
         higher_is_better=True,
         output_type="generate_until",
         aggregation="rouge",
-    )
-    def rouge_fn(items):
-        """Return ROUGE metric items."""
-        return items
+    )(lambda items: items)
 
 
-def process_results(doc, results):
+def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     """Process results for ROUGE evaluation.
 
+    Extracts reference and prediction from document and model results.
+
     Args:
-        doc: Document containing reference
-        results: Model predictions
+        doc: Document containing reference output
+        results: Model predictions (list or single value)
 
     Returns:
-        Dictionary with ROUGE data
+        Dictionary with ROUGE data containing [reference, prediction]
     """
     preds = results[0] if isinstance(results, list) else results
     golds = doc["output"]
@@ -93,33 +106,37 @@ def process_results(doc, results):
 
 
 class RougeMetric(BaseMetric):
-    """ROUGE metric for YAML/task export."""
+    """ROUGE metric for YAML/task export.
+
+    This metric class integrates with the metrics registry to provide
+    ROUGE evaluation for text generation tasks.
+    """
 
     def get_doc_to_text(self, original_doc_to_text: str) -> str:
-        """Get doc_to_text template.
+        """Get the doc_to_text template for ROUGE metric.
 
         Args:
-            original_doc_to_text: Original template
+            original_doc_to_text: Original doc_to_text template
 
         Returns:
-            Original template (no modification)
+            Original template (ROUGE doesn't modify the prompt)
         """
         return original_doc_to_text
 
-    def get_generation_kwargs(self) -> dict:
-        """Get generation kwargs.
+    def get_generation_kwargs(self) -> Dict[str, Any]:
+        """Get generation kwargs for ROUGE metric.
 
         Returns:
-            Generation parameters
+            Generation parameters (no sampling, stop on empty string)
         """
         return {"do_sample": False, "until": [""]}
 
 
 # Register in custom registry
-config = MetricConfig(
+_rouge_config = MetricConfig(
     name="rouge",
     higher_is_better=True,
     aggregation_name="rouge",
     process_results=process_results,
 )
-get_metrics_registry().register("rouge", RougeMetric(config))
+get_metrics_registry().register("rouge", RougeMetric(_rouge_config))

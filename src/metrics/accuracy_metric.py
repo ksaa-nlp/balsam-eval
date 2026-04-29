@@ -2,8 +2,7 @@
 
 import logging
 import re
-import sys
-import unicodedata
+from typing import Any, Dict, List, Optional, Tuple
 
 from lmms_eval.api import registry as le_registry
 from lmms_eval.api.registry import register_aggregation, register_metric
@@ -11,14 +10,6 @@ from lmms_eval.api.registry import register_aggregation, register_metric
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 
 logger = logging.getLogger(__name__)
-
-# Punctuation handling
-PUNCT_TABLE = dict.fromkeys(
-    i for i in range(sys.maxunicode) if unicodedata.category(chr(i)).startswith("P")
-)
-ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
-OTHERS = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ"""
-ALL_PUNCTUATIONS += "".join([o for o in OTHERS if o not in ALL_PUNCTUATIONS])
 
 
 def extract_first_word_or_line(text: str) -> str:
@@ -35,6 +26,7 @@ def extract_first_word_or_line(text: str) -> str:
     """
     if not isinstance(text, str):
         text = str(text)
+
     text = text.strip()
     if not text:
         logger.debug("extract_first_word_or_line: Empty text after strip")
@@ -44,7 +36,7 @@ def extract_first_word_or_line(text: str) -> str:
     # Remove all non-alphanumeric characters from the end
     first_line = re.sub(r"[^\w\s]+$", "", first_line, flags=re.UNICODE)
 
-    logger.debug(f"extract_first_word_or_line: first_line='{first_line}'")
+    logger.debug("extract_first_word_or_line: first_line='%s'", first_line)
 
     # Handle common patterns like "Answer: A" or "The answer is: Paris"
     colon_match = re.match(r"^([^:]+):\s*([^\s]+)", first_line, re.IGNORECASE)
@@ -64,7 +56,8 @@ def extract_first_word_or_line(text: str) -> str:
         ):
             extracted = colon_match.group(2).strip()
             logger.debug(
-                f"extract_first_word_or_line: Extracted after colon pattern: '{extracted}'"
+                "extract_first_word_or_line: Extracted after colon pattern: '%s'",
+                extracted,
             )
             extracted = re.sub(r"[^\w\s]", "", extracted, flags=re.UNICODE).strip()
             return extracted
@@ -72,7 +65,8 @@ def extract_first_word_or_line(text: str) -> str:
     # If line is short (≤3 words), return it as-is
     if len(first_line.split()) <= 3:
         logger.debug(
-            f"extract_first_word_or_line: Returning short line (≤3 words): '{first_line}'"
+            "extract_first_word_or_line: Returning short line (≤3 words): '%s'",
+            first_line,
         )
         return first_line
 
@@ -80,28 +74,30 @@ def extract_first_word_or_line(text: str) -> str:
     first_word = first_line.split()[0] if first_line.split() else first_line
     first_word = re.sub(r"[^\w\s]", "", first_word, flags=re.UNICODE).strip()
 
-    logger.debug(f"extract_first_word_or_line: Extracted first word: '{first_word}'")
+    logger.debug("extract_first_word_or_line: Extracted first word: '%s'", first_word)
     return first_word
 
 
-def simple_normalize(text, reference_options=None, mcq_mapping=None):
+def normalize_text(
+    text: str,
+    mcq_mapping: Optional[dict] = None,
+) -> str:
     """Normalize text for comparison, with special handling for MCQ answers.
 
     Args:
         text: The text to normalize (could be a letter or full answer text)
-        reference_options: List of MCQ options (for old template compatibility)
         mcq_mapping: Dict mapping letters to full option text
 
     Returns:
         Normalized text or empty string if text is empty/None
     """
     logger.debug(
-        f"simple_normalize called with text='{text}', mcq_mapping={mcq_mapping}"
+        "normalize_text called with text='%s', mcq_mapping=%s", text, mcq_mapping
     )
 
     # Handle None or empty cases first
     if text is None or text == "":
-        logger.debug("simple_normalize: Received None or empty string")
+        logger.debug("normalize_text: Received None or empty string")
         return ""
 
     if not isinstance(text, str):
@@ -111,70 +107,72 @@ def simple_normalize(text, reference_options=None, mcq_mapping=None):
 
     # If mcq_mapping is provided, check if text is a letter key
     if mcq_mapping and text.upper() in mcq_mapping:
-        logger.debug(f"simple_normalize: Mapping letter '{text}' to full text")
+        logger.debug("normalize_text: Mapping letter '%s' to full text", text)
         return mcq_mapping[text.upper()]
 
     # Remove all punctuation and extra whitespace
     text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
     text = re.sub(r"\s+", " ", text).strip().lower()
 
-    logger.debug(f"simple_normalize: Normalized to '{text}'")
+    logger.debug("normalize_text: Normalized to '%s'", text)
     return text
 
 
-# Register aggregation
+def compute_accuracy(items: List[Tuple[Any, Any]]) -> float:
+    """Compute accuracy score from reference and prediction pairs.
+
+    Args:
+        items: List of (reference, prediction) tuples
+
+    Returns:
+        Accuracy score between 0 and 1
+    """
+    total = 0
+    correct = 0
+
+    for ref, pred in items:
+        if ref is None or pred is None:
+            continue
+
+        # Normalize both for comparison
+        ref_norm = normalize_text(ref)
+        pred_norm = normalize_text(pred)
+
+        if ref_norm and pred_norm:
+            total += 1
+            if ref_norm == pred_norm:
+                correct += 1
+
+    return correct / total if total > 0 else 0.0
+
+
+# Register aggregation function
 if "accuracy" not in le_registry.AGGREGATION_REGISTRY:
-    @register_aggregation("accuracy")
-    def accuracy_aggregation(items):
-        """Aggregate accuracy scores.
-
-        Args:
-            items: List of (reference, prediction) tuples
-
-        Returns:
-            Accuracy score (0-1)
-        """
-        total = 0
-        correct = 0
-
-        for ref, pred in items:
-            if ref is None or pred is None:
-                continue
-
-            # Normalize both for comparison
-            ref_norm = simple_normalize(ref)
-            pred_norm = simple_normalize(pred)
-
-            if ref_norm and pred_norm:
-                total += 1
-                if ref_norm == pred_norm:
-                    correct += 1
-
-        return correct / total if total > 0 else 0.0
+    register_aggregation("accuracy")(compute_accuracy)
 
 
-# Register metric
+# Register metric function
 if "accuracy" not in le_registry.METRIC_REGISTRY:
-    @register_metric(
+    register_metric(
         metric="accuracy",
         higher_is_better=True,
         output_type="generate_until",
         aggregation="accuracy",
-    )
-    def accuracy_metric(items):
-        """Return accuracy metric items."""
-        return items
+    )(lambda items: items)
 
 
-def process_results(doc, results):
+def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     """Process results for accuracy evaluation.
 
+    Extracts reference and prediction from document and model results,
+    then prepares them for accuracy computation.
+
     Args:
-        doc: Document containing reference and MCQ options
-        results: Model predictions
+        doc: Document containing reference output
+        results: Model predictions (list or single value)
 
     Returns:
-        Dictionary with accuracy data
+        Dictionary with accuracy data containing [reference, prediction]
     """
     preds = results[0] if isinstance(results, list) else results
     golds = doc["output"]
@@ -187,33 +185,37 @@ def process_results(doc, results):
 
 
 class AccuracyMetric(BaseMetric):
-    """Accuracy metric for YAML/task export."""
+    """Accuracy metric for YAML/task export.
+
+    This metric class integrates with the metrics registry to provide
+    accuracy evaluation for MCQ-based tasks.
+    """
 
     def get_doc_to_text(self, original_doc_to_text: str) -> str:
-        """Get doc_to_text template.
+        """Get the doc_to_text template for accuracy metric.
 
         Args:
-            original_doc_to_text: Original template
+            original_doc_to_text: Original doc_to_text template
 
         Returns:
-            Original template (no modification)
+            Original template (accuracy doesn't modify the prompt)
         """
         return original_doc_to_text
 
-    def get_generation_kwargs(self) -> dict:
-        """Get generation kwargs.
+    def get_generation_kwargs(self) -> Dict[str, Any]:
+        """Get generation kwargs for accuracy metric.
 
         Returns:
-            Generation parameters
+            Generation parameters (no sampling, stop on empty string)
         """
         return {"do_sample": False, "until": [""]}
 
 
 # Register in custom registry
-config = MetricConfig(
+_accuracy_config = MetricConfig(
     name="accuracy",
     higher_is_better=True,
     aggregation_name="accuracy",
     process_results=process_results,
 )
-get_metrics_registry().register("accuracy", AccuracyMetric(config))
+get_metrics_registry().register("accuracy", AccuracyMetric(_accuracy_config))
