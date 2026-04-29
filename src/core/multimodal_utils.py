@@ -8,18 +8,8 @@ from typing import Dict, Any, Sequence, Union
 
 import numpy as np
 from PIL import Image
-
-try:
-    import librosa
-    librosa_available = True
-except ImportError:
-    librosa_available = False
-
-try:
-    import soundfile as sf
-    soundfile_available = True
-except ImportError:
-    soundfile_available = False
+import librosa
+import soundfile as sf
 
 
 def doc_to_visual(doc: Dict[str, Any]) -> Sequence[Union[Image.Image, Dict]]:
@@ -28,7 +18,8 @@ def doc_to_visual(doc: Dict[str, Any]) -> Sequence[Union[Image.Image, Dict]]:
 
     lmms_eval supports both images and audio through doc_to_visual:
     - Images are returned as PIL.Image objects
-    - Audio files are returned as HuggingFace format dicts: {'array': np.ndarray, 'sampling_rate': int}
+    - Audio files are returned as HuggingFace format dicts:
+      {'array': np.ndarray, 'sampling_rate': int}
 
     Args:
         doc: Document dict that may have 'images' and 'audio' fields
@@ -82,19 +73,10 @@ def load_audio_file(file_path: str) -> Union[Dict[str, Any], None]:
         print(f"Audio file not found: {file_path}")
         return None
 
-    # Try using librosa first (more reliable for various formats)
-    if librosa_available:
-        try:
-            audio_array, sampling_rate = librosa.load(file_path, sr=None)
-            return {
-                "array": audio_array,
-                "sampling_rate": sampling_rate
-            }
-        except Exception as e:
-            print(f"Warning: Failed to load audio with librosa: {e}")
-
-    # Fallback to soundfile
-    if soundfile_available:
+    try:
+        audio_array, sampling_rate = librosa.load(file_path, sr=None)
+        return {"array": audio_array, "sampling_rate": sampling_rate}
+    except (OSError, ValueError, RuntimeError) as e:
         try:
             audio_array, sampling_rate = sf.read(file_path)
             # Convert to float32 and normalize if needed
@@ -105,14 +87,13 @@ def load_audio_file(file_path: str) -> Union[Dict[str, Any], None]:
             if len(audio_array.shape) > 1:
                 audio_array = audio_array[:, 0]
 
-            return {
-                "array": audio_array,
-                "sampling_rate": sampling_rate
-            }
-        except Exception as e:
+            return {"array": audio_array, "sampling_rate": sampling_rate}
+        except (OSError, ValueError, RuntimeError) as e:
             print(f"Warning: Failed to load audio with soundfile: {e}")
 
-    print(f"Error: Could not load audio file {file_path}. Please install librosa or soundfile.")
+    print(
+        f"Error: Could not load audio file {file_path}. Please install librosa or soundfile."
+    )
     return None
 
 

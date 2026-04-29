@@ -47,7 +47,7 @@ based_on_style = "google"
 indent_width = 4
 
 [tool.yapfignore]
-ignore_patterns = ["venv", "build", "dist"]
+ignore_patterns = ["venv", "build", "dist", "__pycache__", ".pytest_cache", ".vscode", ".idea", ".git", ".github", ".balsam_eval_cache", ".balsam_eval_logs", ".balsam_eval_results", ".temp", "ignores"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -67,7 +67,7 @@ module = [
 ignore_missing_imports = true
 
 [tool.pylint.master]
-ignore = [".venv",".history",".mypy_cache","build","dist","__pycache__",".pytest_cache",".vscode",".idea",".git",".github",".balsam_eval_cache",".balsam_eval_logs",".balsam_eval_results",".temp"]
+ignore = [".venv",".history",".mypy_cache","build","dist","__pycache__",".pytest_cache",".vscode",".idea",".git",".github",".balsam_eval_cache",".balsam_eval_logs",".balsam_eval_results",".temp","ignores"]
 
 [tool.pylint.messages_control]
 # Disable specific messages for entire project

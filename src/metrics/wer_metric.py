@@ -1,17 +1,15 @@
 """WER (Word Error Rate) metric implementation for ASR evaluation."""
 
-import json
 from typing import Any, Dict, List
+import jiwer
 
 from lmms_eval.api import registry as le_registry
 from lmms_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
+from src.metrics.asr_utils import process_results_asr
 
-try:
-    import jiwer
-except ImportError:
-    jiwer = None
+
 
 
 def compute_wer_score(
@@ -27,8 +25,6 @@ def compute_wer_score(
     Returns:
         Average WER score (lower is better)
     """
-    if jiwer is None:
-        return 1.0
 
     total_wer = 0.0
     valid = 0
@@ -41,7 +37,7 @@ def compute_wer_score(
             wer = jiwer.wer(ref, pred)
             total_wer += wer
             valid += 1
-        except Exception:
+        except (TypeError, ValueError, RuntimeError):
             continue
 
     return total_wer / valid if valid else 1.0
@@ -77,50 +73,6 @@ if "wer" not in le_registry.METRIC_REGISTRY:
     )(lambda items: items)
 
 
-def extract_text_from_prediction(pred: str) -> str:
-    """Extract actual text content from various prediction formats.
-
-    Handles:
-    - JSON format: {"text": "..."}
-    - Quoted strings: "..."
-    - Plain text
-
-    Args:
-        pred: Raw prediction string
-
-    Returns:
-        Extracted text content
-    """
-    if not isinstance(pred, str):
-        return str(pred) if pred else ""
-
-    pred = pred.strip()
-
-    # Try to parse as JSON first
-    try:
-        parsed = json.loads(pred)
-        if isinstance(parsed, dict):
-            # Handle {"text": "..."} format
-            if "text" in parsed:
-                return parsed["text"]
-            # Handle other dict formats - return first string value
-            for v in parsed.values():
-                if isinstance(v, str):
-                    return v
-        elif isinstance(parsed, str):
-            return parsed
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # Remove surrounding quotes if present
-    if pred.startswith('"') and pred.endswith('"'):
-        pred = pred[1:-1]
-    elif pred.startswith("'") and pred.endswith("'"):
-        pred = pred[1:-1]
-
-    return pred
-
-
 def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     """Process results for WER evaluation.
 
@@ -133,13 +85,7 @@ def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     Returns:
         Dictionary with WER data containing [reference, prediction]
     """
-    preds = results[0] if isinstance(results, list) else results
-    golds = doc["output"]
-
-    # Extract actual text from prediction
-    cleaned_pred = extract_text_from_prediction(preds)
-
-    return {"wer": [golds, cleaned_pred]}
+    return process_results_asr(doc, results, "wer")
 
 
 class WERMetric(BaseMetric):
