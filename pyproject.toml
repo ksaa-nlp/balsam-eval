@@ -65,3 +65,27 @@ ignore_missing_imports = true
 
 [tool.pylint.master]
 ignore = [".venv",".history",".mypy_cache","build","dist","__pycache__",".pytest_cache",".vscode",".idea",".git",".github",".balsam_eval_cache",".balsam_eval_logs",".balsam_eval_results",".temp"]
+
+[tool.pylint.messages_control]
+# Disable specific messages for entire project
+disable = [
+    # Reasonable design choices for this codebase
+    "too-many-instance-attributes",  # Data/model classes legitimately need many attributes
+    "too-many-arguments",  # Some functions legitimately need many parameters
+    "too-many-positional-arguments",  # Some functions legitimately need many positional parameters
+    "too-many-branches",  # Complex business logic is hard to split without making it worse
+    "too-many-locals",  # Complex functions need local variables for clarity
+    "too-many-statements",  # Complex business logic
+    "too-many-nested-blocks",  # Complex control flow
+    "too-few-public-methods",  # Some classes are primarily data containers
+    "protected-access",  # We need to access protected members when working with external libraries
+    "global-statement",  # Used for singleton pattern in metrics_registry
+]
+
+# Per-file options for specific cases
+[tool.pylint.typecheck]
+ignored-modules = ["lmms_eval.*"]
+
+[tool.pylint.similarities]
+ignore-imports = true
+min-similarity-lines = 15

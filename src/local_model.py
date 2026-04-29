@@ -45,7 +45,7 @@ class LocalModelEdited(DeepEvalBaseLLM):
 
         super().__init__(self.model_name)
 
-    def generate(self, prompt: str, *args, **kwargs) -> str:
+    def generate(self, prompt: str, *args: Any, **kwargs: Any) -> str:  # pylint: disable=arguments-differ
         """Generate a response from the model.
 
         Args:
@@ -65,7 +65,7 @@ class LocalModelEdited(DeepEvalBaseLLM):
         res_content = response.choices[0].message.content
         return res_content or ""
 
-    async def a_generate(self, prompt: str, *args, **kwargs) -> str:
+    async def a_generate(self, prompt: str, *args: Any, **kwargs: Any) -> str:  # pylint: disable=arguments-differ
         """Async generate a response from the model.
 
         Args:

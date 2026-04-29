@@ -30,7 +30,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
     if is_reasoning_env:
         max_tokens = int(os.getenv("MAX_TOKENS", "8192"))
         # For OpenAI reasoning models, use max_completion_tokens
-        if adapter in ["openai-chat-completions"]:
+        if adapter == "openai-chat-completions":
             return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
         return {"max_tokens": max_tokens}
 
@@ -59,41 +59,16 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
     }
 
     # Check if this is a thinking model for the current adapter
-    is_thinking_model = False
-    if adapter in thinking_model_patterns:
-        is_thinking_model = any(
-            pattern in model_lower for pattern in thinking_model_patterns[adapter]
-        )
+    is_thinking_model = (
+        adapter in thinking_model_patterns
+        and any(pattern in model_lower for pattern in thinking_model_patterns[adapter])
+    )
 
     # Handle thinking models with model-specific token limits
     if is_thinking_model:
-        if adapter in ["openai-chat-completions"]:
-            # Determine max tokens based on specific model
-            max_tokens = 8192
-
-            # GPT-5.2 supports up to 128,000 output tokens
-            if "gpt-5.2" in model_lower or "gpt5.2" in model_lower:
-                max_tokens = 128000
-            # GPT-5.1 and GPT-5 base
-            elif "gpt-5" in model_lower or "gpt5" in model_lower:
-                max_tokens = 8192
-            # o-series models
-            elif any(x in model_lower for x in ["o1", "o3", "o4"]):
-                max_tokens = 8192
-
-            return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
-
-        if adapter in ["local-chat-completions"]:
-            # DeepSeek R1, QwQ, Skywork-o1, etc.
-            if any(pattern in model_lower for pattern in ["deepseek", "r1"]):
-                return {"max_completion_tokens": 8192, "max_tokens": 8192}
-            return {"max_tokens": 8192}
-
-        if adapter in ["gemini"]:
-            return {"max_tokens": 8192}
-
-        if adapter in ["anthropic-chat-completions"]:
-            return {"max_tokens": 8192}
+        result = _get_thinking_model_config(adapter, model_lower)
+        if result:
+            return result
 
     # Adapter-specific defaults for non-thinking models
     adapter_defaults = {
@@ -106,6 +81,35 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
 
     default_value = adapter_defaults.get(adapter, 4096)
     return {"max_tokens": default_value}
+
+
+def _get_thinking_model_config(adapter: str, model_lower: str) -> dict | None:
+    """Get max tokens config for thinking models.
+
+    Args:
+        adapter: The adapter type
+        model_lower: Lowercase model name
+
+    Returns:
+        Dict with appropriate token config, or None if not a thinking model
+    """
+    if adapter == "openai-chat-completions":
+        # GPT-5.2 supports up to 128,000 output tokens
+        if "gpt-5.2" in model_lower or "gpt5.2" in model_lower:
+            return {"max_completion_tokens": 128000, "max_tokens": 128000}
+        # GPT-5 and o-series models
+        return {"max_completion_tokens": 8192, "max_tokens": 8192}
+
+    if adapter == "local-chat-completions":
+        # DeepSeek R1, QwQ, Skywork-o1, etc.
+        if any(pattern in model_lower for pattern in ["deepseek", "r1"]):
+            return {"max_completion_tokens": 8192, "max_tokens": 8192}
+        return {"max_tokens": 8192}
+
+    if adapter in ("gemini", "anthropic-chat-completions"):
+        return {"max_tokens": 8192}
+
+    return None
 
 
 def convert_anthropic_url(url: str | None) -> str:
