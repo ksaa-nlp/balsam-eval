@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-from pathlib import Path
 from statistics import mean
 from typing import Any, Dict
 
@@ -58,11 +57,11 @@ class ResultProcessor:
             logger.warning("No 'results' key in results for average calculation")
             return average_scores
 
-        logger.info(f"Calculating averages for {len(results['results'])} tasks")
+        logger.info("Calculating averages for %s tasks", len(results["results"]))
 
         for task_name, task_result in results["results"].items():
             if not isinstance(task_result, dict):
-                logger.warning(f"Task '{task_name}' has non-dict result, skipping")
+                logger.warning("Task '%s' has non-dict result, skipping", task_name)
                 continue
 
             for key, value in task_result.items():
@@ -80,11 +79,17 @@ class ResultProcessor:
                             all_scores[metric_name] = []
                         all_scores[metric_name].append(value["rougeLsum"])
                         logger.debug(
-                            f"Task '{task_name}': Added {metric_name}.rougeLsum={value['rougeLsum']}"
+                            "Task '%s': Added %s.rougeLsum=%s",
+                            task_name,
+                            metric_name,
+                            value["rougeLsum"],
                         )
                     else:
                         logger.warning(
-                            f"Task '{task_name}': Dict value for '{key}' but rougeLsum not found. Keys: {list(value.keys())}"
+                            "Task '%s': Dict value for '%s' but rougeLsum not found. Keys: %s",
+                            task_name,
+                            key,
+                            list(value.keys()),
                         )
 
                 # Handle numeric values (BLEU, accuracy, LLM judge scores, etc.)
@@ -92,11 +97,14 @@ class ResultProcessor:
                     if metric_name not in all_scores:
                         all_scores[metric_name] = []
                     all_scores[metric_name].append(float(value))
-                    logger.debug(f"Task '{task_name}': Added {metric_name}={value}")
+                    logger.debug("Task '%s': Added %s=%s", task_name, metric_name, value)
 
                 else:
                     logger.warning(
-                        f"Task '{task_name}': Unexpected type for '{key}': {type(value)}"
+                        "Task '%s': Unexpected type for '%s': %s",
+                        task_name,
+                        key,
+                        type(value),
                     )
 
         # Calculate averages
@@ -105,13 +113,20 @@ class ResultProcessor:
                 avg = mean(scores)
                 average_scores[metric_name] = round(avg, 4)
                 logger.info(
-                    f"Average {metric_name}: {average_scores[metric_name]} (from {len(scores)} tasks, min={min(scores):.4f}, max={max(scores):.4f})"
+                    "Average %s: %s (from %s tasks, min=%.4f, max=%.4f)",
+                    metric_name,
+                    average_scores[metric_name],
+                    len(scores),
+                    min(scores),
+                    max(scores),
                 )
             else:
-                logger.warning(f"No scores found for metric '{metric_name}'")
+                logger.warning("No scores found for metric '%s'", metric_name)
 
         logger.info(
-            f"Calculated {len(average_scores)} average metrics: {list(average_scores.keys())}"
+            "Calculated %s average metrics: %s",
+            len(average_scores),
+            list(average_scores.keys()),
         )
         return average_scores
 
@@ -140,7 +155,7 @@ class ResultProcessor:
         with open(filepath, "w", encoding="UTF-8") as fp:
             json.dump(results_with_averages, fp, ensure_ascii=False)
 
-        logger.info(f"Results exported to {filename}")
+        logger.info("Results exported to %s", filename)
 
         # Export to database if configured
         if (
@@ -158,7 +173,7 @@ class ResultProcessor:
                 )
 
                 if not task_id:
-                    logger.warning(f"No task_id found for task '{key}'")
+                    logger.warning("No task_id found for task '%s'", key)
                     continue
 
                 add_results_to_db(

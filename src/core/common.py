@@ -4,6 +4,10 @@ import json
 import os
 import shutil
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 def setup_directories(*dirs: str) -> None:
     """Create directories if they don't exist."""
@@ -71,9 +75,6 @@ def setup_environment() -> dict[str, str | None]:
     Raises:
         ValueError: If required environment variables are missing
     """
-    from dotenv import load_dotenv
-    load_dotenv()
-
     env_vars = {
         'BASE_URL': os.getenv("BASE_URL"),
         'API_KEY': os.getenv("API_KEY"),

@@ -16,9 +16,9 @@ rouge = evaluate.load("rouge")
 PUNCT_TABLE = dict.fromkeys(
     i for i in range(sys.maxunicode) if unicodedata.category(chr(i)).startswith("P")
 )
-ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
+all_punctuations = "".join(chr(p) for p in PUNCT_TABLE)
 OTHERS = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ"""
-ALL_PUNCTUATIONS += "".join([o for o in OTHERS if o not in ALL_PUNCTUATIONS])
+all_punctuations += "".join([o for o in OTHERS if o not in all_punctuations])
 
 
 def prepare_texts(text: str, change_curly_braces: bool = False) -> str:
@@ -31,7 +31,7 @@ def prepare_texts(text: str, change_curly_braces: bool = False) -> str:
     Returns:
         Prepared text
     """
-    text = re.sub("([" + ALL_PUNCTUATIONS + "])", " \\1 ", text)
+    text = re.sub("([" + all_punctuations + "])", " \\1 ", text)
     if change_curly_braces:
         text = text.replace("{", "[").replace("}", "]")
     return text
@@ -58,7 +58,7 @@ if "rouge" not in le_registry.AGGREGATION_REGISTRY:
         total = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
         for ref, pred in zip(refs, preds):
             score = rouge.compute(references=[ref], predictions=[pred], tokenizer=tokenizer)
-            for k in total.keys():
+            for k in total:
                 total[k] += score[k]
         count = len(refs) if refs else 1
         return {k: v / count for k, v in total.items()}

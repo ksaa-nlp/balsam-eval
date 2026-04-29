@@ -401,6 +401,20 @@ def get_tasks_from_category(
     server_token: str,
     evaluation_types: Optional[str] = None,
 ) -> list[str]:
+    """Get tasks from a category.
+
+    Args:
+        category: Category name
+        api_host: API host URL
+        server_token: Server token for authentication
+        evaluation_types: Optional comma-separated evaluation types
+
+    Returns:
+        List of task names
+
+    Raises:
+        ValueError: If category is empty
+    """
     if not category:
         raise ValueError("Category is required, terminating the process.")
 

@@ -68,33 +68,32 @@ def create_model_adapter(config: ModelConfig) -> Any:
             base_url=config.endpoint_url,
             **base_params
         )
-    elif config.provider == "anthropic":
+    if config.provider == "anthropic":
         return AnthropicModel(
             model=config.name,
             _anthropic_api_key=config.api_key,
             **base_params
         )
-    elif config.provider == "gemini":
+    if config.provider == "gemini":
         return GeminiModel(
             model=config.name,
             api_key=config.api_key,
             **base_params
         )
-    elif config.provider == "ollama":
+    if config.provider == "ollama":
         return OllamaModel(
             model=config.name,
             base_url=config.endpoint_url,
             **base_params
         )
-    elif config.provider == "local_openai":
+    if config.provider == "local_openai":
         return LocalModelEdited(
             model_name=config.name,
             local_model_api_key=config.api_key,
             base_url=config.endpoint_url,
             **base_params
         )
-    else:
-        raise ValueError(f"Unsupported provider: {config.provider}")
+    raise ValueError(f"Unsupported provider: {config.provider}")
 
 
 def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) -> Dict[str, Any]:
@@ -130,7 +129,10 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
             response_text = None
             if isinstance(model_response, tuple):
                 response_text = model_response[0]
-                logger.debug("Model returned tuple, using first element: %s", type(model_response[0]))
+                logger.debug(
+                    "Model returned tuple, using first element: %s",
+                    type(model_response[0]),
+                )
             elif isinstance(model_response, str):
                 response_text = model_response
             elif hasattr(model_response, 'text'):
@@ -153,7 +155,7 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                 if "score" in parsed and "explanation" in parsed:
                     return {
                         "score": parsed["score"],
-                        "explanation": parsed["explanation"]
+                        "explanation": parsed["explanation"],
                     }
 
                 logger.warning("Missing keys in parsed output (attempt %d): %s", attempt+1, parsed)
@@ -237,6 +239,8 @@ class BaseLLMJudge(ABC):
         # Create the prompt
         prompt = self.custom_prompt if self.custom_prompt else self.get_evaluation_prompt()
         prompt += f'\n\n[PROMPT]\n{question}\n[/PROMPT]\n'
+        if context:
+            prompt += f'\n[CONTEXT]\n{context}\n[/CONTEXT]\n'
         prompt += f'[GROUND TRUTH]\n{reference_answer}\n[/GROUND TRUTH]\n'
         prompt += f'[GENERATED OUTPUT]\n{given_answer}\n[/GENERATED OUTPUT]'
 
@@ -403,7 +407,11 @@ class BaseLLMJudge(ABC):
             "median_score": median(scores),
             "average_raw_score": mean(raw_scores),
             "median_raw_score": median(raw_scores),
-            "pass_rate": sum(1 for s in scores if s >= self.threshold) / len(scores) if scores else 0
+            "pass_rate": (
+                sum(1 for s in scores if s >= self.threshold) / len(scores)
+                if scores
+                else 0
+            ),
         }
 
     def save_results(self, results: Dict[str, Any], filename: str) -> None:

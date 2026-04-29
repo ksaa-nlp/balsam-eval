@@ -1,9 +1,8 @@
 """Task-related operations for evaluation jobs."""
 
 import logging
+import re
 from typing import Any, Dict
-
-from src.core.helpers import normalize_string
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +44,11 @@ class TaskOperations:
                 # First try: use explicit task_id if provided
                 if self.task_id:
                     task_result["task"] = self.task_id
-                    logger.info(f"Task ID set from explicit task_id: {self.task_id}")
+                    logger.info("Task ID set from explicit task_id: %s", self.task_id)
                 # Second try: use tasks_mapper if available
                 elif task_name in self.tasks_mapper_dict:
                     task_result["task"] = self.tasks_mapper_dict[task_name]
-                    logger.info(f"Task ID mapped: {task_name} → {task_result['task']}")
+                    logger.info("Task ID mapped: %s → %s", task_name, task_result["task"])
                 # Third try: parse from task_name (extract first part)
                 else:
                     parts = task_name.split("_")
@@ -58,12 +57,14 @@ class TaskOperations:
                         extracted_task = parts[0]
                         task_result["task"] = extracted_task
                         logger.info(
-                            f"Task ID extracted from name: {task_name} → {extracted_task}"
+                            "Task ID extracted from name: %s → %s",
+                            task_name,
+                            extracted_task,
                         )
                     else:
                         # Fallback: use the task_name as-is
                         task_result["task"] = task_name
-                        logger.warning(f"Task ID fallback to full name: {task_name}")
+                        logger.warning("Task ID fallback to full name: %s", task_name)
 
         return results
 
@@ -97,22 +98,28 @@ class TaskOperations:
                 if metric_name == "accuracy":
                     mcq_tasks.append(task_name)
                     logger.debug(
-                        f"Task '{task_name}' identified as MCQ (accuracy metric)"
+                        "Task '%s' identified as MCQ (accuracy metric)",
+                        task_name,
                     )
                 else:
                     generation_tasks.append(task_name)
                     logger.debug(
-                        f"Task '{task_name}' identified as generation (metric: {metric_name})"
+                        "Task '%s' identified as generation (metric: %s)",
+                        task_name,
+                        metric_name,
                     )
             else:
                 # No metric specified, default to generation
                 generation_tasks.append(task_name)
                 logger.debug(
-                    f"Task '{task_name}' has no metric, defaulting to generation"
+                    "Task '%s' has no metric, defaulting to generation",
+                    task_name,
                 )
 
         logger.info(
-            f"Separated tasks: {len(mcq_tasks)} MCQ, {len(generation_tasks)} generation"
+            "Separated tasks: %s MCQ, %s generation",
+            len(mcq_tasks),
+            len(generation_tasks),
         )
         return mcq_tasks, generation_tasks
 
@@ -129,10 +136,10 @@ class TaskOperations:
         Returns:
             Normalized answer as full text
         """
-        logger.debug(f"_normalize_mcq_answer called with:")
-        logger.debug(f"  answer type: {type(answer)}")
-        logger.debug(f"  answer value: {repr(answer)}")
-        logger.debug(f"  mcq_mapping: {mcq_mapping}")
+        logger.debug("_normalize_mcq_answer called with:")
+        logger.debug("  answer type: %s", type(answer))
+        logger.debug("  answer value: %s", repr(answer))
+        logger.debug("  mcq_mapping: %s", mcq_mapping)
 
         # Handle None values explicitly
         if answer is None:
@@ -146,32 +153,32 @@ class TaskOperations:
         # Convert to string if not already
         if not isinstance(answer, str):
             logger.warning(
-                f"Answer is not a string, converting to string. Type: {type(answer)}"
+                "Answer is not a string, converting to string. Type: %s",
+                type(answer),
             )
             answer = str(answer)
 
         answer_stripped = answer.strip()
-        logger.debug(f"Answer stripped: '{answer_stripped}'")
+        logger.debug("Answer stripped: '%s'", answer_stripped)
 
         # Check if it's a single letter
         if len(answer_stripped) == 1 and answer_stripped.upper() in mcq_mapping:
             normalized: str = mcq_mapping[answer_stripped.upper()]
-            logger.debug(f"Converted letter '{answer_stripped}' to '{normalized}'")
+            logger.debug("Converted letter '%s' to '%s'", answer_stripped, normalized)
             return normalized
 
         # Check for "A)" format
-        import re
-
         match = re.match(r"^([A-Za-z])\)", answer_stripped)
         if match:
             letter = match.group(1).upper()
             if letter in mcq_mapping:
                 normalized = mcq_mapping[letter]
-                logger.debug(f"Converted '{letter})' to '{normalized}'")
+                logger.debug("Converted '%s)' to '%s'", letter, normalized)
                 return normalized
 
         # If it's already full text, return as-is
         logger.debug(
-            f"Answer already full text, returning as-is: '{answer_stripped}'"
+            "Answer already full text, returning as-is: '%s'",
+            answer_stripped,
         )
         return answer_stripped

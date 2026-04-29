@@ -10,7 +10,7 @@ Usage:
     >>> from src.metrics import AccuracyMetric, process_results as accuracy_process_results
     >>> from src.metrics import BleuMetric, process_results as bleu_process_results
     >>> from src.metrics import RougeMetric, process_results as rouge_process_results
-    >>> from src.metrics.metrics_utils import prepare_text_with_punctuation, ALL_PUNCTUATIONS
+    >>> from src.metrics.metrics_utils import prepare_text_with_punctuation, all_punctuations
 """
 
 # Metric implementations
@@ -24,7 +24,7 @@ from .rouge_metric import RougeMetric, process_results as rouge_process_results
 
 # Shared utilities (only truly shared code)
 from .metrics_utils import (
-    ALL_PUNCTUATIONS,
+    all_punctuations,
     prepare_text_with_punctuation,
 )
 
@@ -39,5 +39,5 @@ __all__ = [
     "rouge_process_results",
     # Shared utilities (only truly shared)
     "prepare_text_with_punctuation",
-    "ALL_PUNCTUATIONS",
+    "all_punctuations",
 ]

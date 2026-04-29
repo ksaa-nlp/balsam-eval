@@ -53,8 +53,7 @@ def download_dataset_from_gcs(dataset_id: str, directory: str) -> dict[str, Any]
             with open(f".temp/{dataset_id}.json", "w", encoding="utf8") as fp:
                 json.dump(dd, fp, ensure_ascii=False)
             return dd
-        else:
-            return dataset
+        return dataset
 
 
 def sanitize_config_name(name: str) -> str:

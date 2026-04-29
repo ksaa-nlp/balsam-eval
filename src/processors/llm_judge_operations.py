@@ -1,7 +1,7 @@
 """LLM Judge operations for evaluation results."""
 
-import json
 import logging
+import traceback
 from statistics import mean
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -107,49 +107,58 @@ class LLMJudgeProcessor:
         pbar_desc = "Evaluating (MCQ)" if is_mcq else "Evaluating (Gen)"
 
         for sample_key, sample in tqdm(filtered_samples, desc=pbar_desc, unit="sample"):
-            logger.debug(f"Processing sample: {sample_key}")
+            logger.debug("Processing sample: %s", sample_key)
             if not isinstance(sample, dict):
                 logger.warning(
-                    f"Sample {sample_key} is not a dict, skipping. Type: {type(sample)}"
+                    "Sample %s is not a dict, skipping. Type: %s",
+                    sample_key,
+                    type(sample),
                 )
                 continue
 
             responses = sample.get("filtered_resps", [])
-            logger.debug(f"Sample {sample_key}: Found {len(responses)} filtered responses")
+            logger.debug("Sample %s: Found %s filtered responses", sample_key, len(responses))
             if not responses:
-                logger.warning(f"Sample {sample_key}: No filtered responses found, skipping")
+                logger.warning("Sample %s: No filtered responses found, skipping", sample_key)
                 continue
 
             response = responses[0]
             expected_output = sample.get("doc", {}).get("output", "")
             question = sample.get("doc", {}).get("input", "")
 
-            logger.debug(f"Sample {sample_key}:")
-            logger.debug(f"  Question length: {len(question)} chars")
-            logger.debug(f"  Expected output length: {len(expected_output)} chars")
-            logger.debug(f"  Response type: {type(response)}")
+            logger.debug("Sample %s:", sample_key)
+            logger.debug("  Question length: %s chars", len(question))
+            logger.debug("  Expected output length: %s chars", len(expected_output))
+            logger.debug("  Response type: %s", type(response))
             logger.debug(
-                f"  Response value: {repr(response) if len(str(response)) < 200 else repr(str(response)[:200])}"
+                "  Response value: %s",
+                repr(response) if len(str(response)) < 200 else repr(str(response)[:200]),
             )
 
             # For MCQ tasks, normalize answers to text BEFORE sending to judge
             mcq_options = sample.get("doc", {}).get("mcq", [])
-            logger.debug(f"Sample {sample_key}: MCQ options: {mcq_options}")
+            logger.debug("Sample %s: MCQ options: %s", sample_key, mcq_options)
 
             if is_mcq and mcq_options:
                 # Create letter-to-text mapping
                 mcq_mapping = {chr(65 + i): opt for i, opt in enumerate(mcq_options)}
-                logger.debug(f"Sample {sample_key}: MCQ mapping: {mcq_mapping}")
+                logger.debug("Sample %s: MCQ mapping: %s", sample_key, mcq_mapping)
 
                 # Normalize both the model's response and the expected output
                 original_response = response
                 original_expected = expected_output
 
                 logger.debug(
-                    f"Sample {sample_key}: Before normalization - Response type: {type(response)}, Expected type: {type(expected_output)}"
+                    "Sample %s: Before normalization - Response type: %s, Expected type: %s",
+                    sample_key,
+                    type(response),
+                    type(expected_output),
                 )
                 logger.debug(
-                    f"Sample {sample_key}: Before normalization - Response: {repr(original_response)}, Expected: {repr(original_expected)}"
+                    "Sample %s: Before normalization - Response: %s, Expected: %s",
+                    sample_key,
+                    repr(original_response),
+                    repr(original_expected),
                 )
 
                 response = self.task_operations.normalize_mcq_answer(response, mcq_mapping)
@@ -157,16 +166,16 @@ class LLMJudgeProcessor:
                     expected_output, mcq_mapping
                 )
 
-                logger.debug(f"Sample {sample_key}: MCQ Normalization:")
-                logger.debug(f"  Response: '{original_response}' → '{response}'")
-                logger.debug(f"  Expected: '{original_expected}' → '{expected_output}'")
+                logger.debug("Sample %s: MCQ Normalization:", sample_key)
+                logger.debug("  Response: '%s' → '%s'", original_response, response)
+                logger.debug("  Expected: '%s' → '%s'", original_expected, expected_output)
 
             if expected_output and response:
                 try:
-                    logger.debug(f"Sample {sample_key}: Calling LLM judge...")
-                    logger.debug(f"  Question length: {len(question)}")
-                    logger.debug(f"  Reference answer length: {len(expected_output)}")
-                    logger.debug(f"  Given answer length: {len(response)}")
+                    logger.debug("Sample %s: Calling LLM judge...", sample_key)
+                    logger.debug("  Question length: %s", len(question))
+                    logger.debug("  Reference answer length: %s", len(expected_output))
+                    logger.debug("  Given answer length: %s", len(response))
 
                     evaluation_result = llm_judge.evaluate_answer(
                         question=question,
@@ -178,7 +187,9 @@ class LLMJudgeProcessor:
                     )
 
                     logger.debug(
-                        f"Sample {sample_key}: LLM judge result keys: {list(evaluation_result.keys())}"
+                        "Sample %s: LLM judge result keys: %s",
+                        sample_key,
+                        list(evaluation_result.keys()),
                     )
 
                     normalized_score = evaluation_result["overall_score"]
@@ -186,7 +197,10 @@ class LLMJudgeProcessor:
                     explanation = evaluation_result["aggregated_explanation"]
 
                     logger.debug(
-                        f"Sample {sample_key}: Scores - Normalized: {normalized_score}, Raw: {raw_score}"
+                        "Sample %s: Scores - Normalized: %s, Raw: %s",
+                        sample_key,
+                        normalized_score,
+                        raw_score,
                     )
 
                     sample[f"{prefix}llm_score"] = normalized_score
@@ -203,45 +217,51 @@ class LLMJudgeProcessor:
                     taskwise_scores.setdefault(sample_key, []).append(normalized_score)
                     taskwise_scores_raw.setdefault(sample_key, []).append(raw_score)
 
-                except Exception as e:
-                    logger.error(f"Sample {sample_key}: ❌ LLM evaluation failed")
-                    logger.error(f"  Error type: {type(e).__name__}")
-                    logger.error(f"  Error message: {str(e)}")
-                    logger.error(f"  Question length: {len(question)}")
+                except Exception as e: # pylint: disable=broad-except
+                    logger.error("Sample %s: ❌ LLM evaluation failed", sample_key)
+                    logger.error("  Error type: %s", type(e).__name__)
+                    logger.error("  Error message: %s", str(e))
+                    logger.error("  Question length: %s", len(question))
                     logger.error(
-                        f"  Expected output type: {type(expected_output)}, value: {repr(expected_output)[:100]}"
+                        "  Expected output type: %s, value: %s",
+                        type(expected_output),
+                        repr(expected_output)[:100],
                     )
                     logger.error(
-                        f"  Response type: {type(response)}, value: {repr(response)[:100]}"
+                        "  Response type: %s, value: %s",
+                        type(response),
+                        repr(response)[:100],
                     )
-                    import traceback
-
-                    logger.error(f"  Traceback: {traceback.format_exc()}")
+                    logger.error("  Traceback: %s", traceback.format_exc())
 
                     sample[f"{prefix}llm_score"] = None
                     sample[f"{prefix}llm_score_raw"] = None
                     sample[f"{prefix}llm_explanation"] = f"Error during LLM evaluation: {str(e)}"
                     sample[f"{prefix}llm_judge_details"] = {"error": str(e)}
             else:
-                logger.warning(f"Sample {sample_key}: Missing expected_output or response")
+                logger.warning("Sample %s: Missing expected_output or response", sample_key)
                 logger.warning(
-                    f"  expected_output: {repr(expected_output)[:50] if expected_output else 'MISSING'}"
+                    "  expected_output: %s",
+                    repr(expected_output)[:50] if expected_output else "MISSING",
                 )
-                logger.warning(f"  response: {repr(response)[:50] if response else 'MISSING'}")
+                logger.warning(
+                    "  response: %s",
+                    repr(response)[:50] if response else "MISSING",
+                )
 
         # Aggregate scores per task
-        for task_key in taskwise_scores:
-            if taskwise_scores[task_key]:
-                avg_score = round(mean(taskwise_scores[task_key]), 4)
+        for task_key, scores in taskwise_scores.items():
+            if scores:
+                avg_score = round(mean(scores), 4)
                 avg_score_raw = round(mean(taskwise_scores_raw[task_key]), 4)
 
                 # Ensure the task result exists and is a dict, create if needed
                 if task_key not in processed_data["results"]:
                     processed_data["results"][task_key] = {"alias": task_key}
-                    logger.debug(f"Created new result entry for task '{task_key}'")
+                    logger.debug("Created new result entry for task '%s'", task_key)
                 elif not isinstance(processed_data["results"][task_key], dict):
                     logger.warning(
-                        f"Task '{task_key}' has non-dict result, converting to dict"
+                        "Task '%s' has non-dict result, converting to dict", task_key
                     )
                     processed_data["results"][task_key] = {"alias": task_key}
 
@@ -260,11 +280,15 @@ class LLMJudgeProcessor:
                 processed_data["results"][task_key][f"{prefix}llm_as_judge"] = {
                     "average_score": avg_score,
                     "average_score_raw": avg_score_raw,
-                    "num_samples": len(taskwise_scores[task_key]),
+                    "num_samples": len(scores),
                 }
 
                 logger.debug(
-                    f"Task '{task_key}': Added LLM judge scores (avg={avg_score}, avg_raw={avg_score_raw}, samples={len(taskwise_scores[task_key])})"
+                    "Task '%s': Added LLM judge scores (avg=%s, avg_raw=%s, samples=%s)",
+                    task_key,
+                    avg_score,
+                    avg_score_raw,
+                    len(scores),
                 )
 
         # Add overall statistics
@@ -306,7 +330,10 @@ class LLMJudgeProcessor:
             logger.info("No generation tasks or LLM judge config, skipping.")
             return results_data
 
-        logger.info("Processing %s generation tasks with GenerativeLLMJudge...", len(generation_tasks))
+        logger.info(
+            "Processing %s generation tasks with GenerativeLLMJudge...",
+            len(generation_tasks),
+        )
 
         llm_judge_generation = GenerativeLLMJudge(
             model_configs=[

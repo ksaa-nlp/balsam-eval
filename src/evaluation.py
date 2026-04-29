@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, cast
@@ -326,8 +327,6 @@ class EvaluationJob:
 
             # Try to parse JSON from error string
             if "API request failed with error message:" in error_str:
-                import re
-
                 json_match = re.search(r"\{(?:[^{}]|{[^{}]*})*\}", error_str)
                 if json_match:
                     try:

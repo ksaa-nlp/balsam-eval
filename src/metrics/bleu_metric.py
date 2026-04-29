@@ -8,6 +8,11 @@ from lmms_eval.api.registry import register_aggregation, register_metric
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 from src.metrics.metrics_utils import prepare_text_with_punctuation
 
+try:
+    import evaluate
+except ImportError:
+    evaluate = None
+
 
 def compute_bleu_score(
     references: List[str],
@@ -28,12 +33,10 @@ def compute_bleu_score(
     Returns:
         Average BLEU score
     """
-    try:  # pylint: disable=import-outside-toplevel
-        import evaluate
-
-        bleu = evaluate.load("bleu")
-    except ImportError:
+    if evaluate is None:
         return 0.0
+
+    bleu = evaluate.load("bleu")
 
     def tokenizer(x):
         return x.split()

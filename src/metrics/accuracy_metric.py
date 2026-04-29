@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from rapidfuzz import fuzz
 from lmms_eval.api import registry as le_registry
 from lmms_eval.api.registry import register_aggregation, register_metric
 
@@ -119,11 +120,17 @@ def normalize_text(
     return text
 
 
-def compute_accuracy(items: List[Tuple[Any, Any]]) -> float:
+def compute_accuracy(
+    items: List[Tuple[Any, Any]],
+    fuzzy_threshold: float = 0.85,
+    use_fuzzy: bool = True,
+) -> float:
     """Compute accuracy score from reference and prediction pairs.
 
     Args:
         items: List of (reference, prediction) tuples
+        fuzzy_threshold: Similarity threshold for fuzzy matching (0-1)
+        use_fuzzy: Whether to use fuzzy matching or exact matching
 
     Returns:
         Accuracy score between 0 and 1
@@ -141,15 +148,52 @@ def compute_accuracy(items: List[Tuple[Any, Any]]) -> float:
 
         if ref_norm and pred_norm:
             total += 1
-            if ref_norm == pred_norm:
-                correct += 1
+
+            if use_fuzzy:
+                # Use fuzzy matching with RapidFuzz
+                similarity_ratio = fuzz.ratio(ref_norm, pred_norm) / 100.0
+
+                # Also check partial ratio for cases where one string contains the other
+                partial_ratio = fuzz.partial_ratio(ref_norm, pred_norm) / 100.0
+
+                # Consider it a match if either ratio meets the threshold
+                if similarity_ratio >= fuzzy_threshold or partial_ratio >= fuzzy_threshold:
+                    correct += 1
+                    logger.debug(
+                        "Fuzzy match: ref='%s', pred='%s', similarity=%.2f, partial=%.2f",
+                        ref_norm,
+                        pred_norm,
+                        similarity_ratio,
+                        partial_ratio,
+                    )
+            else:
+                # Use exact matching
+                if ref_norm == pred_norm:
+                    correct += 1
 
     return correct / total if total > 0 else 0.0
+
+
+def compute_fuzzy_accuracy(items: List[Tuple[Any, Any]]) -> float:
+    """Compute fuzzy accuracy score with default threshold.
+
+    This is a wrapper that uses fuzzy matching with a default threshold of 0.85.
+
+    Args:
+        items: List of (reference, prediction) tuples
+
+    Returns:
+        Accuracy score between 0 and 1
+    """
+    return compute_accuracy(items, fuzzy_threshold=0.85, use_fuzzy=True)
 
 
 # Register aggregation function
 if "accuracy" not in le_registry.AGGREGATION_REGISTRY:
     register_aggregation("accuracy")(compute_accuracy)
+
+if "fuzzy_accuracy" not in le_registry.AGGREGATION_REGISTRY:
+    register_aggregation("fuzzy_accuracy")(compute_fuzzy_accuracy)
 
 
 # Register metric function
@@ -159,6 +203,14 @@ if "accuracy" not in le_registry.METRIC_REGISTRY:
         higher_is_better=True,
         output_type="generate_until",
         aggregation="accuracy",
+    )(lambda items: items)
+
+if "fuzzy_accuracy" not in le_registry.METRIC_REGISTRY:
+    register_metric(
+        metric="fuzzy_accuracy",
+        higher_is_better=True,
+        output_type="generate_until",
+        aggregation="fuzzy_accuracy",
     )(lambda items: items)
 
 
@@ -183,6 +235,29 @@ def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     gold_extracted = extract_first_word_or_line(golds)
 
     return {"accuracy": [gold_extracted, pred_extracted]}
+
+
+def process_results_fuzzy(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
+    """Process results for fuzzy accuracy evaluation.
+
+    This function processes results specifically for fuzzy matching,
+    which is more lenient with typos and minor variations.
+
+    Args:
+        doc: Document containing reference output
+        results: Model predictions (list or single value)
+
+    Returns:
+        Dictionary with fuzzy_accuracy data containing [reference, prediction]
+    """
+    preds = results[0] if isinstance(results, list) else results
+    golds = doc["output"]
+
+    # Extract first word/line for MCQ answers
+    pred_extracted = extract_first_word_or_line(preds)
+    gold_extracted = extract_first_word_or_line(golds)
+
+    return {"fuzzy_accuracy": [gold_extracted, pred_extracted]}
 
 
 class AccuracyMetric(BaseMetric):
@@ -220,3 +295,12 @@ _accuracy_config = MetricConfig(
     process_results=process_results,
 )
 get_metrics_registry().register("accuracy", AccuracyMetric(_accuracy_config))
+
+# Register fuzzy accuracy in custom registry
+_fuzzy_accuracy_config = MetricConfig(
+    name="fuzzy_accuracy",
+    higher_is_better=True,
+    aggregation_name="fuzzy_accuracy",
+    process_results=process_results_fuzzy,
+)
+get_metrics_registry().register("fuzzy_accuracy", AccuracyMetric(_fuzzy_accuracy_config))
