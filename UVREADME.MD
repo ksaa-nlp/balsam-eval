@@ -29,6 +29,8 @@ uv remove package-name           # Remove dependency
 uv add "package>=1.0.0,<2.0.0"   # Add with version constraint
 uv pip install -e .               # install without lock file
 uv sync --upgrade                 # Update all dependencies
+uv sync --frozen
+uv sync --frozen --upgrade 
 uv run python script.py           # Run command in locked environment
 uv lock                          # Generate/update lock file
 ```

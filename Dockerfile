@@ -1,26 +1,29 @@
-FROM python:3.11-slim as build
+FROM python:3.11-slim AS build
 
 ENV PYTHONUNBUFFERED=1
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Install git and clean up in one layer
+# Install build dependencies and git
 RUN mkdir -p /tmp && chmod 1777 /tmp && \
     apt-get update && \
-    apt-get install -y --no-install-recommends git && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc \
+        git \
+        zlib1g-dev && \
     apt-get purge -y --auto-remove && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy dependency files
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 
 # Create virtual environment and install dependencies with uv
 RUN uv venv /opt/venv && \
-    . /opt/venv/bin/activate && \
-    uv pip install -e .
+    uv sync --frozen --no-editable
 
 # Final stage
 FROM python:3.11-slim
@@ -34,8 +37,6 @@ COPY --from=build /opt/venv /opt/venv
 COPY . .
 
 # Set environment variables
-ENV API_KEY=$API_KEY \
-    SERVER_TOKEN=$SERVER_TOKEN \
-    PATH="/opt/venv/bin:$PATH"
+ENV PATH="/opt/venv/bin:$PATH"
 
 CMD ["python", "-u", "/app/run.py"]

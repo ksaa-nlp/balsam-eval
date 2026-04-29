@@ -1,5 +1,6 @@
 """CER (Character Error Rate) metric implementation for ASR evaluation."""
 
+import json
 from typing import Any, Dict, List
 
 from lmms_eval.api import registry as le_registry
@@ -76,6 +77,50 @@ if "cer" not in le_registry.METRIC_REGISTRY:
     )(lambda items: items)
 
 
+def extract_text_from_prediction(pred: str) -> str:
+    """Extract actual text content from various prediction formats.
+
+    Handles:
+    - JSON format: {"text": "..."}
+    - Quoted strings: "..."
+    - Plain text
+
+    Args:
+        pred: Raw prediction string
+
+    Returns:
+        Extracted text content
+    """
+    if not isinstance(pred, str):
+        return str(pred) if pred else ""
+
+    pred = pred.strip()
+
+    # Try to parse as JSON first
+    try:
+        parsed = json.loads(pred)
+        if isinstance(parsed, dict):
+            # Handle {"text": "..."} format
+            if "text" in parsed:
+                return parsed["text"]
+            # Handle other dict formats - return first string value
+            for v in parsed.values():
+                if isinstance(v, str):
+                    return v
+        elif isinstance(parsed, str):
+            return parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Remove surrounding quotes if present
+    if pred.startswith('"') and pred.endswith('"'):
+        pred = pred[1:-1]
+    elif pred.startswith("'") and pred.endswith("'"):
+        pred = pred[1:-1]
+
+    return pred
+
+
 def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     """Process results for CER evaluation.
 
@@ -90,7 +135,11 @@ def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     """
     preds = results[0] if isinstance(results, list) else results
     golds = doc["output"]
-    return {"cer": [golds, preds]}
+
+    # Extract actual text from prediction
+    cleaned_pred = extract_text_from_prediction(preds)
+
+    return {"cer": [golds, cleaned_pred]}
 
 
 class CERMetric(BaseMetric):

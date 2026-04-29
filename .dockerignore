@@ -33,7 +33,7 @@ venv.bak/
 .venv
 
 # uv specific
-uv.lock
+# uv.lock  # Commented out - needed for reproducible Docker builds
 .python-version
 
 # Testing
