@@ -66,6 +66,36 @@ def copy_images_to_temp(json_file_path: str, temp_dir: str) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def copy_audio_to_temp(json_file_path: str, temp_dir: str) -> None:
+    """Copy audio files referenced in JSON file to temp directory.
+
+    Args:
+        json_file_path: Path to JSON file containing audio file references
+        temp_dir: Directory to copy audio files to
+    """
+    with open(json_file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    audio_dir = os.path.join(temp_dir, "audio")
+    os.makedirs(audio_dir, exist_ok=True)
+
+    for item in data:
+        if 'audio' in item and isinstance(item['audio'], list):
+            for audio_path in item['audio']:
+                if os.path.exists(audio_path):
+                    audio_name = os.path.basename(audio_path)
+                    dst_path = os.path.join(audio_dir, audio_name)
+                    if not os.path.exists(dst_path):
+                        shutil.copy2(audio_path, dst_path)
+                        print(f"Copied audio: {audio_name} -> {dst_path}")
+                    # Update path in item to relative path
+                    item['audio'] = [dst_path if p == audio_path else p for p in item['audio']]
+
+    # Write back updated JSON
+    with open(json_file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 def setup_environment() -> dict[str, str | None]:
     """Load and return environment variables.
 

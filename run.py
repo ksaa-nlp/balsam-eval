@@ -12,6 +12,7 @@ from typing import Any
 
 from src.adapter_utils import process_adapter_and_url
 from src.core.common import (
+    copy_audio_to_temp,
     copy_images_to_temp,
     copy_multimodal_utils_to_temp,
     set_api_key_for_adapter,
@@ -89,6 +90,10 @@ def load_local_tasks() -> tuple[dict[str, list[str]], dict[str, str]]:
         if not file.endswith("json"):
             continue
 
+        # Skip exported data files (they are lists, not task definitions)
+        if file.endswith("_test.json") or file.endswith("_dev.json"):
+            continue
+
         with open(f"./{TASKS_DIR}/{file}", "r", encoding="utf-8") as f:
             content = f.read()
             d = json.loads(content)
@@ -100,7 +105,9 @@ def load_local_tasks() -> tuple[dict[str, list[str]], dict[str, str]]:
 
             task_mapper[d["name"]] = d["task"]
 
-            with open(f"./{TEMP_DIR}/{file}", "w", encoding="utf-8") as f_out:
+            # Copy the task file to TEMP_DIR first
+            temp_file_path = f"./{TEMP_DIR}/{file}"
+            with open(temp_file_path, "w", encoding="utf-8") as f_out:
                 if "json" in d:
                     d["json"]["category"] = d["category"]
                     d["json"]["task"] = d["task"]
@@ -108,14 +115,17 @@ def load_local_tasks() -> tuple[dict[str, list[str]], dict[str, str]]:
                 else:
                     json.dump(d, f_out, ensure_ascii=False)
 
+            # Now create dataset from TEMP_DIR so exports go there
             dataset = LMHDataset(str(file.rsplit(".", 1)[0]), TEMP_DIR)
             dataset.export()
 
             # Copy images to .temp directory if dataset contains images
+            # Copy audio files to .temp directory if dataset contains audio
             for split in ["test", "dev"]:
                 json_file = os.path.join(TEMP_DIR, f"{dataset.file_name}_{split}.json")
                 if os.path.exists(json_file):
                     copy_images_to_temp(json_file, TEMP_DIR)
+                    copy_audio_to_temp(json_file, TEMP_DIR)
 
             if tasks_temp.get(d["category"]) is None:
                 tasks_temp[d["category"]] = []
@@ -157,10 +167,12 @@ def load_remote_datasets(config: EvalConfig) -> list[LMHDataset]:
         dataset.export()
 
         # Copy images to .temp directory if dataset contains images
+        # Copy audio files to .temp directory if dataset contains audio
         for split in ["test", "dev"]:
             json_file = f"{TEMP_DIR}/{dataset.file_name}_{split}.json"
             if os.path.exists(json_file):
                 copy_images_to_temp(json_file, TEMP_DIR)
+                copy_audio_to_temp(json_file, TEMP_DIR)
 
         datasets.append(dataset)
 

@@ -1,41 +1,55 @@
 """
 Utilities for multimodal datasets in Balsam Eval.
-Provides doc_to_visual function for lmms-eval compatibility.
+Provides doc_to_visual function for lmms-eval compatibility with both images and audio.
 """
 
-from typing import Dict, Any, Sequence
+import os
+from typing import Dict, Any, Sequence, Union
 
 from PIL import Image
 
 
-def doc_to_visual(doc: Dict[str, Any]) -> Sequence[Image.Image]:
+def doc_to_visual(doc: Dict[str, Any]) -> Sequence[Union[Image.Image, str]]:
     """
-    Extract PIL Images from a document for lmms-eval multimodal processing.
+    Extract PIL Images and audio file paths from a document for lmms-eval multimodal processing.
+
+    lmms_eval supports both images and audio through doc_to_visual:
+    - Images are returned as PIL.Image objects
+    - Audio files are returned as string paths (lmms_eval detects them by extension)
 
     Args:
-        doc: Document dict that may have an 'images' field with image paths
+        doc: Document dict that may have 'images' and 'audio' fields
 
     Returns:
-        Sequence of PIL.Image objects
+        Sequence of PIL.Image objects and audio file path strings
 
     Example:
-        >>> doc = {"images": ["/path/to/image1.png", "/path/to/image2.jpg"]}
-        >>> images = doc_to_visual(doc)
-        >>> len(images)
+        >>> doc = {"images": ["/path/to/image1.png"], "audio": ["/path/to/audio1.wav"]}
+        >>> visuals = doc_to_visual(doc)
+        >>> len(visuals)
         2
     """
-    image_paths = doc.get("images", [])
-    images: list[Image.Image] = []
+    visuals: list[Union[Image.Image, str]] = []
 
+    # Handle images
+    image_paths = doc.get("images", [])
     for path in image_paths:
         try:
             img = Image.open(path)
-            images.append(img)
+            visuals.append(img)
         except (OSError, IOError) as e:
             print(f"Warning: Failed to load image {path}: {e}")
             continue
 
-    return images
+    # Handle audio files (return as string paths for lmms_eval)
+    audio_paths = doc.get("audio", [])
+    for path in audio_paths:
+        if os.path.exists(path):
+            visuals.append(path)
+        else:
+            print(f"Warning: Audio file not found: {path}")
+
+    return visuals
 
 
 def doc_to_text(doc: Dict[str, Any]) -> str:

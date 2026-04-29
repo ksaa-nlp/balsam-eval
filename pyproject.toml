@@ -6,6 +6,7 @@ dependencies = [
     "absl-py~=2.4.0",
     "deepeval~=3.9.9",
     "google-cloud-storage>=2.7.0,<3.10.1",
+    "jiwer~=4.0.0",
     "lmms-eval[all]~=0.7.1",
     "pillow~=12.2.0",
     "pyarabic~=0.6.15",

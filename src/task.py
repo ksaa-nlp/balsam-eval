@@ -38,6 +38,26 @@ def _is_image_file(filename: str) -> bool:
     }
 
 
+def _is_audio_file(filename: str) -> bool:
+    """Check if a filename has an audio extension.
+
+    Args:
+        filename: File name to check
+
+    Returns:
+        True if file has an audio extension
+    """
+    return Path(filename).suffix.lower() in {
+        ".wav",
+        ".mp3",
+        ".flac",
+        ".ogg",
+        ".m4a",
+        ".aac",
+        ".wma",
+    }
+
+
 class LMHDataset:
     """Represents an LM Harness task with multi-format support.
 
@@ -373,10 +393,11 @@ class LMHDataset:
         for item in items:
             it = item.copy()
 
-            # Handle input list - check for images
+            # Handle input list - check for images and audio
             if isinstance(it.get("input"), list):
                 text_parts = []
                 image_paths = []
+                audio_paths = []
 
                 for input_item in it["input"]:
                     if _is_image_file(str(input_item)):
@@ -403,6 +424,30 @@ class LMHDataset:
                             )
 
                         text_parts.append("<image>")
+                    elif _is_audio_file(str(input_item)):
+                        # Try multiple locations for the audio file
+                        possible_paths = [
+                            os.path.abspath(os.path.join(source_dir, str(input_item))),
+                            os.path.abspath(os.path.join(".tasks", str(input_item))),
+                            os.path.abspath(str(input_item)),
+                        ]
+
+                        abs_path = None
+                        for path in possible_paths:
+                            if os.path.exists(path):
+                                abs_path = path
+                                break
+
+                        if abs_path:
+                            audio_paths.append(abs_path)
+                        else:
+                            audio_paths.append(
+                                os.path.abspath(
+                                    os.path.join(source_dir, str(input_item))
+                                )
+                            )
+
+                        text_parts.append("<audio>")
                     else:
                         text_parts.append(str(input_item))
 
@@ -414,6 +459,13 @@ class LMHDataset:
                     it["images"] = image_paths
                     logger.info(
                         "Item %s contains %s image(s)", it.get("id"), len(image_paths)
+                    )
+
+                # Store audio paths for doc_to_audio
+                if audio_paths:
+                    it["audio"] = audio_paths
+                    logger.info(
+                        "Item %s contains %s audio file(s)", it.get("id"), len(audio_paths)
                     )
 
             # Ensure output is a single string
@@ -524,6 +576,15 @@ class LMHDataset:
             for input_item in item["input"]
         )
 
+        # Check if dataset contains audio files
+        has_audio = any(
+            _is_audio_file(str(input_item))
+            for items in self.data.values()
+            for item in items
+            if isinstance(item.get("input"), list)
+            for input_item in item["input"]
+        )
+
         # Build base YAML
         yaml_config = {
             "task": self.name,
@@ -540,10 +601,14 @@ class LMHDataset:
             **self.task_kwargs,
         }
 
-        # Add doc_to_visual if dataset contains images
-        if has_images:
+        # Add doc_to_visual if dataset contains images or audio
+        # lmms_eval handles both images and audio through doc_to_visual
+        if has_images or has_audio:
             yaml_config["doc_to_visual"] = "!function multimodal_utils.doc_to_visual"
-            logger.info("Dataset contains images - adding doc_to_visual function")
+            if has_images:
+                logger.info("Dataset contains images - adding doc_to_visual function")
+            if has_audio:
+                logger.info("Dataset contains audio files - adding doc_to_visual function")
 
         return yaml_config
 
@@ -557,7 +622,7 @@ class LMHDataset:
 
         # Extract doc_to_visual if it's a function tag
         doc_to_visual_value = data.pop("doc_to_visual", None)
-        is_function_tag = (
+        is_visual_function_tag = (
             doc_to_visual_value
             and isinstance(doc_to_visual_value, str)
             and doc_to_visual_value.startswith("!function")
@@ -582,5 +647,5 @@ class LMHDataset:
             )
 
             # Add doc_to_visual without quotes if it's a function tag
-            if is_function_tag:
+            if is_visual_function_tag:
                 f.write(f"doc_to_visual: {doc_to_visual_value}\n")
