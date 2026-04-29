@@ -9,7 +9,7 @@ from typing import Dict, Any, Sequence, Union
 import numpy as np
 from PIL import Image
 import librosa
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 
 
 def doc_to_visual(doc: Dict[str, Any]) -> Sequence[Union[Image.Image, Dict]]:
@@ -77,6 +77,7 @@ def load_audio_file(file_path: str) -> Union[Dict[str, Any], None]:
         audio_array, sampling_rate = librosa.load(file_path, sr=None)
         return {"array": audio_array, "sampling_rate": sampling_rate}
     except (OSError, ValueError, RuntimeError) as e:
+        print(f"Warning: Failed to load audio with librosa: {e}")
         try:
             audio_array, sampling_rate = sf.read(file_path)
             # Convert to float32 and normalize if needed
@@ -88,8 +89,8 @@ def load_audio_file(file_path: str) -> Union[Dict[str, Any], None]:
                 audio_array = audio_array[:, 0]
 
             return {"array": audio_array, "sampling_rate": sampling_rate}
-        except (OSError, ValueError, RuntimeError) as e:
-            print(f"Warning: Failed to load audio with soundfile: {e}")
+        except (OSError, ValueError, RuntimeError) as e2:
+            print(f"Warning: Failed to load audio with soundfile: {e2}")
 
     print(
         f"Error: Could not load audio file {file_path}. Please install librosa or soundfile."
