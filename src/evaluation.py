@@ -174,13 +174,17 @@ class EvaluationJob:
         mcq_tasks, generation_tasks = self.task_ops.separate_mcq_and_generation_tasks(results)
 
         # Process with LLM judge if configured
+        # NOTE: LLM judge has been moved to a metric-based approach.
+        # It is now called during evaluation via metric_list in dataset YAML.
+        # Uncomment the following lines if you want to use the old post-processing approach:
+        # updated_results = results
+        # updated_results = self.llm_judge_processor.process_generation_tasks(
+        #     updated_results, generation_tasks
+        # )
+        # updated_results = self.llm_judge_processor.process_mcq_tasks(
+        #     updated_results, mcq_tasks
+        # )
         updated_results = results
-        updated_results = self.llm_judge_processor.process_generation_tasks(
-            updated_results, generation_tasks
-        )
-        updated_results = self.llm_judge_processor.process_mcq_tasks(
-            updated_results, mcq_tasks
-        )
 
         # Remove API key from results
         self._sanitize_results(updated_results)
