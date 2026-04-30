@@ -124,14 +124,20 @@ class LMHDataset:
         task_part = task_dict.get("task", "Unknown_Task")
         category_part = task_dict.get("category", "Unknown_Category")
         type_part = task_dict.get("Type of result", "")
-        metric_part = task_dict.get("metric", "")
+
+        # Handle metric(s) - support both string and list formats
+        metric_value = task_dict.get("metric", "")
+        if isinstance(metric_value, list):
+            metric_part = "_".join([sanitize_config_name(m) for m in metric_value])
+        else:
+            metric_part = sanitize_config_name(metric_value)
 
         unique_suffix = os.urandom(5).hex()
         self.name = (
             f"{sanitize_config_name(task_part)}_"
             f"{sanitize_config_name(category_part)}_"
             f"{sanitize_config_name(type_part)}_"
-            f"{sanitize_config_name(metric_part)}_"
+            f"{metric_part}_"
             f"{unique_suffix}"
         )
 
@@ -500,46 +506,114 @@ class LMHDataset:
 
         # Apply metric logic from registry
         registry = get_metrics_registry()
-        m_name = self.metric["metric"] if isinstance(self.metric, dict) else self.metric
 
-        if not m_name:
+        # Extract metric name(s) - support both string/dict and list formats
+        def extract_metric_name(metric_value):
+            """Extract metric name from various formats."""
+            if isinstance(metric_value, dict):
+                return metric_value.get("metric")
+            return metric_value
+
+        # Handle both single metric and multiple metrics
+        if isinstance(self.metric, list):
+            metric_names = [extract_metric_name(m) for m in self.metric]
+        else:
+            metric_names = [extract_metric_name(self.metric)] if self.metric else []
+
+        # Filter out None values
+        metric_names = [m for m in metric_names if m]
+
+        if not metric_names:
             final_yaml = base_yaml
             logger.warning("No metric specified in dataset. Using base configuration.")
         else:
-            detected_metric = registry.detect_metric_type(m_name)
+            # Collect all metric objects and their configs
+            metric_objects = []
+            metric_list = []
+            final_yaml = base_yaml.copy()
 
-            if detected_metric:
-                metric_obj = registry.get(detected_metric)
-                if metric_obj:
-                    final_yaml = metric_obj.get_yaml_config(base_yaml)
+            # First pass: collect all metric objects
+            for m_name in metric_names:
+                detected_metric = registry.detect_metric_type(m_name)
+                if detected_metric:
+                    metric_obj = registry.get(detected_metric)
+                    metric_objects.append(metric_obj)
+                else:
+                    metric_objects.append(None)
+
+            # Build metric_list from all metrics
+            for i, m_name in enumerate(metric_names):
+                detected_metric = registry.detect_metric_type(m_name)
+
+                if detected_metric and metric_objects[i] is not None:
+                    metric_obj = metric_objects[i]
+                    # Type narrowing: we know metric_obj is not None here
+                    assert metric_obj is not None  # for mypy
+                    metric_entry = {
+                        "metric": metric_obj.config.name,
+                        "aggregation": (
+                            metric_obj.config.aggregation_name or metric_obj.config.name
+                        ),
+                        "higher_is_better": metric_obj.config.higher_is_better,
+                    }
+                    metric_list.append(metric_entry)
                     logger.info("Using custom metric: %s", detected_metric)
                 else:
-                    logger.warning(
-                        "Metric '%s' detected but couldn't retrieve object.",
-                        detected_metric,
+                    logger.info(
+                        "Metric '%s' not found in custom registry. "
+                        "Assuming it's a built-in LM Harness metric.",
+                        m_name,
                     )
-                    final_yaml = base_yaml.copy()
-                    final_yaml["metric_list"] = [
-                        {
-                            "metric": m_name,
-                            "aggregation": m_name,
-                            "higher_is_better": True,
-                        }
-                    ]
-            else:
-                logger.info(
-                    "Metric '%s' not found in custom registry. "
-                    "Assuming it's a built-in LM Harness metric.",
-                    m_name,
-                )
-                final_yaml = base_yaml.copy()
-                final_yaml["metric_list"] = [
-                    {
+                    metric_entry = {
                         "metric": m_name,
                         "aggregation": m_name,
                         "higher_is_better": True,
                     }
-                ]
+                    metric_list.append(metric_entry)
+
+            # Update metric_list in final_yaml
+            if metric_list:
+                final_yaml["metric_list"] = metric_list
+
+            # Create combined process_results if we have multiple custom metrics
+            if len(metric_objects) > 1 and any(m is not None for m in metric_objects):
+                # Create metric configs for the combined function
+                metric_configs = []
+                for metric_obj in metric_objects:
+                    if metric_obj is not None:
+                        metric_configs.append({
+                            "name": metric_obj.config.name,
+                            "process_results": metric_obj.config.process_results,
+                        })
+
+                # Create the combined function
+                # pylint: disable=import-outside-toplevel
+                from src.metrics_combined import create_combined_process_results
+                import src.metrics_combined as mc_module
+
+                combined_func = create_combined_process_results(metric_configs)
+
+                # Set it as the current global function
+                mc_module.CURRENT_COMBINED_FUNCTION = combined_func
+
+                # Reference the wrapper function in YAML as a string
+                final_yaml["process_results"] = (
+                    "!function src.metrics_combined._current_combined_process_results"
+                )
+
+                # Use generation_kwargs from first custom metric if available
+                first_custom_metric = next((m for m in metric_objects if m is not None), None)
+                if first_custom_metric is not None:
+                    final_yaml["generation_kwargs"] = (
+                        first_custom_metric.get_generation_kwargs()
+                    )
+
+                logger.info(
+                    "Using combined process_results for %d metrics", len(metric_names)
+                )
+            elif len(metric_objects) == 1 and metric_objects[0] is not None:
+                # Single custom metric - use its full config
+                final_yaml = metric_objects[0].get_yaml_config(base_yaml)
 
         # Write YAML
         self._write_yaml(final_yaml)
@@ -628,6 +702,14 @@ class LMHDataset:
             and doc_to_visual_value.startswith("!function")
         )
 
+        # Extract process_results if it's a function tag
+        process_results_value = data.pop("process_results", None)
+        is_process_results_function_tag = (
+            process_results_value
+            and isinstance(process_results_value, str)
+            and process_results_value.startswith("!function")
+        )
+
         # Custom representer for multiline strings
         def str_representer(dumper, data):
             if "\n" in data:
@@ -649,3 +731,7 @@ class LMHDataset:
             # Add doc_to_visual without quotes if it's a function tag
             if is_visual_function_tag:
                 f.write(f"doc_to_visual: {doc_to_visual_value}\n")
+
+            # Add process_results without quotes if it's a function tag
+            if is_process_results_function_tag:
+                f.write(f"process_results: {process_results_value}\n")
