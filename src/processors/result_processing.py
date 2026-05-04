@@ -8,9 +8,22 @@ from typing import Any, Dict
 
 from src.db_operations import add_results_to_db
 from src.core.helpers import normalize_string
+import numpy as np
+
 
 logger = logging.getLogger(__name__)
 
+
+class _NumpyEncoder(json.JSONEncoder):
+    """JSON encoder that handles numpy types."""
+    def default(self, o):
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        if isinstance(o, (np.integer,)):
+            return int(o)
+        if isinstance(o, (np.floating,)):
+            return float(o)
+        return super().default(o)
 
 class ResultProcessor:
     """Handles result processing and export operations."""
@@ -153,7 +166,7 @@ class ResultProcessor:
         )
 
         with open(filepath, "w", encoding="UTF-8") as fp:
-            json.dump(results_with_averages, fp, ensure_ascii=False)
+            json.dump(results_with_averages, fp, ensure_ascii=False, cls=_NumpyEncoder)
 
         logger.info("Results exported to %s", filename)
 

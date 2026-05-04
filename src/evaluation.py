@@ -22,6 +22,9 @@ from src.processors.llm_judge_operations import LLMJudgeProcessor
 from src.processors.result_processing import ResultProcessor
 from src.processors.task_operations import TaskOperations
 
+from src.gemini_adapter import GeminiLM
+from src.groq_adapter import GroqLM
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 

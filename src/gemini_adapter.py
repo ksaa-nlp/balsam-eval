@@ -16,6 +16,10 @@ from google.genai import types
 
 from lm_eval.api.model import LM
 from lm_eval.api.registry import register_model
+import io
+import base64
+import numpy as np
+import soundfile as sf
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +29,8 @@ class GeminiLM(LM):
     """
     Gemini model API integration for the LM Evaluation Harness
     """
+
+    MULTIMODAL = True
 
     def __init__(
         self,
@@ -41,9 +47,7 @@ class GeminiLM(LM):
         super().__init__()
 
         if model_name is None:
-            model_name = os.environ.get(
-                "MODEL", "models/gemini-1.5-pro"
-            )
+            model_name = os.environ.get("MODEL", "models/gemini-1.5-pro")
 
         if not model_name.startswith("models/"):
             model_name = f"models/{model_name}"
@@ -130,253 +134,113 @@ class GeminiLM(LM):
 
         return str(instance), []
 
+    def _extract_instance_data(
+        self, instance: Any
+    ) -> Tuple[str, List[str], Optional[List[dict]]]:
+        """
+        Returns (prompt, stop_seqs, audio_dicts_or_None).
+        audio_dicts items are {"array": np.ndarray, "sampling_rate": int}.
+        """
+        audio = None
+
+        if hasattr(instance, "args"):
+            args = instance.args
+            # Multimodal: args is (prompt_obj, gen_kwargs, auxiliary_args)
+            if len(args) >= 3:
+                aux = args[2]
+                audio = aux.get("audio") if isinstance(aux, dict) else None
+
+            prompt_obj = args[0] if args else instance
+            gen_kwargs = args[1] if len(args) > 1 else {}
+            until = gen_kwargs.get("until", []) if isinstance(gen_kwargs, dict) else []
+            if isinstance(until, str):
+                until = [until]
+
+            prompt_str = (
+                prompt_obj.prompt if hasattr(prompt_obj, "prompt") else str(prompt_obj)
+            )
+            return prompt_str, until, audio
+
+        # Fallback for plain tuple / dict
+        if isinstance(instance, tuple):
+            stop = instance[1] if len(instance) >= 2 else []
+            if not isinstance(stop, list):
+                stop = [stop] if stop else []
+            return instance[0], stop, None
+
+        if isinstance(instance, dict):
+            stop = instance.get("until", [])
+            if not isinstance(stop, list):
+                stop = [stop] if stop else []
+            return instance.get("prompt", ""), stop, None
+
+        return str(instance), [], None
+
+    def _audio_dicts_to_parts(self, audio_dicts: List[dict]) -> list:
+        """Convert lm_eval audio dicts → google.genai Part objects."""
+        parts = []
+        for audio in audio_dicts:
+            array = np.array(audio["array"])
+            if array.dtype != np.float32:
+                array = array.astype(np.float32)
+            buf = io.BytesIO()
+            sf.write(buf, array, audio["sampling_rate"], format="WAV", subtype="PCM_16")
+            parts.append(
+                types.Part.from_bytes(
+                    data=buf.getvalue(),
+                    mime_type="audio/wav",
+                )
+            )
+        return parts
+
     # ---------------------------------------------------------------------
     # Generation with GUARANTEED 1:1 Mapping
     # ---------------------------------------------------------------------
 
     def generate_until(self, instances: List[Any]) -> List[str]:
-        """
-        Generate text until stop sequences are encountered.
-        """
-        logger.info(f"=" * 80)
-        logger.info(f"GENERATE_UNTIL called with {len(instances)} instances")
-        logger.info(f"=" * 80)
-        
+        logger.info("=" * 80)
+        logger.info("GENERATE_UNTIL called with %d instances", len(instances))
+        logger.info("=" * 80)
+
         results = []
 
         for idx, instance in enumerate(instances):
-            logger.info(f"\n--- Processing instance {idx + 1}/{len(instances)} ---")
-            logger.debug(f"Instance type: {type(instance)}")
-            
-            prompt, stop_seqs = self._extract_instance_data(instance)
-            
-            logger.info(f"Prompt length: {len(prompt)} chars")
-            logger.info(f"Stop sequences: {stop_seqs}")
-            logger.debug(f"Prompt preview: {prompt[:200]}..." if len(prompt) > 200 else f"Prompt: {prompt}")
+            prompt, stop_seqs, audio_dicts = self._extract_instance_data(instance)
 
-            # Handle empty prompts immediately
-            if not prompt:
-                logger.warning(f"❌ Empty prompt encountered at index {idx}")
-                results.append("")  # ALWAYS append
+            if not prompt and not audio_dicts:
+                logger.warning("Empty prompt at index %d", idx)
+                results.append("")
                 continue
 
-            # DEFAULT: Start with empty string
-            # This guarantees we have something to append even if all retries fail
+            # Build contents: audio parts first, then the text prompt
+            if audio_dicts:
+                contents = self._audio_dicts_to_parts(audio_dicts) + [prompt]
+            else:
+                contents = prompt
+
             final_response = ""
-            
-            # Try multiple times
             for attempt in range(self.max_retries):
                 try:
-                    logger.debug(f"API call attempt {attempt + 1}/{self.max_retries} for instance {idx}")
-                    
                     response = self.client.models.generate_content(
                         model=self.model_name,
-                        contents=prompt,
+                        contents=contents,
                         config=self._gen_config(stop_seqs),
                     )
-
-                    # Extract text or use empty string
-                    response_text = response.text if response.text else ""
-                    
-                    logger.debug(f"Response received: {len(response_text)} chars")
-                    logger.debug(f"Response preview: {response_text[:200]}..." if len(response_text) > 200 else f"Response: {response_text}")
-                    
-                    # If we got a non-empty response, use it and stop trying
-                    if response_text.strip() != "":
+                    response_text = response.text or ""
+                    if response_text.strip():
                         final_response = response_text
-                        logger.info(f"✅ Got valid response at index {idx} on attempt {attempt + 1}")
-                        break  # Got a good response, exit retry loop
-                    
-                    # Empty response - should we retry?
+                        break
                     if attempt < self.max_retries - 1:
-                        logger.warning(
-                            f"⚠️  Empty response at index {idx}, "
-                            f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
-                        )
                         time.sleep(self.retry_timeout * (attempt + 1))
-                        # Don't update final_response, keep it as ""
-                        continue
-                    else:
-                        # Last attempt and still empty
-                        logger.error(
-                            f"❌ All {self.max_retries} attempts returned empty response "
-                            f"for request {idx}. Using empty string."
-                        )
-                        final_response = ""  # Explicitly set to empty
-                        break
-
                 except Exception as e:
-                    logger.error(
-                        f"❌ Generation error at index {idx}, "
-                        f"attempt {attempt + 1}/{self.max_retries}: {type(e).__name__}: {e}"
-                    )
-                    
-                    # If this is NOT the last attempt, retry
+                    logger.error("Generation error idx=%d attempt=%d: %s", idx, attempt + 1, e)
                     if attempt < self.max_retries - 1:
-                        wait_time = self.retry_timeout * (attempt + 1)
-                        logger.info(f"⏳ Waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        # Last attempt failed with exception
-                        logger.error(
-                            f"❌ All {self.max_retries} attempts failed for request {idx}. "
-                            f"Last error: {e}. Returning empty string."
-                        )
-                        final_response = ""  # Explicitly set to empty
-                        break
-            
-            # CRITICAL: ALWAYS append exactly one result per request
-            # No conditions, no exceptions, no matter what happened above
-            results.append(final_response)
-            logger.info(f"✅ Result {idx} added to results list (total: {len(results)})")
-
-        # CRITICAL: Verify count matches to prevent reordering assertion errors
-        logger.info(f"\n" + "=" * 80)
-        logger.info(f"GENERATE_UNTIL COMPLETE")
-        logger.info(f"Input instances: {len(instances)}")
-        logger.info(f"Output results: {len(results)}")
-        
-        if len(results) != len(instances):
-            logger.error(f"❌ CRITICAL MISMATCH - THIS WILL CAUSE ASSERTION ERROR!")
-            logger.error(f"Expected {len(instances)} results, got {len(results)}")
-            # Emergency padding to prevent crash
-            while len(results) < len(instances):
-                results.append("")
-                logger.error(f"Emergency padding: added empty string (total now: {len(results)})")
-            logger.info(f"Match after padding: ✅ YES")
-        else:
-            logger.info(f"Match: ✅ YES - Perfect 1:1 mapping!")
-        
-        logger.info(f"=" * 80 + "\n")
-        
-        assert len(results) == len(instances), (
-            f"Result count mismatch: {len(results)} results for {len(instances)} instances. "
-            f"This mismatch will cause reordering assertion errors in lm_eval."
-        )
-        
-        return results
-
-    def greedy_until(self, requests: List[Any]) -> List[str]:
-        """
-        Generate text greedily (temperature=0) until stop sequences.
-        
-        CRITICAL FIX: Always returns exactly one result per request.
-        No exceptions - guaranteed 1:1 mapping to prevent assertion errors.
-        """
-        logger.info(f"=" * 80)
-        logger.info(f"GREEDY_UNTIL called with {len(requests)} requests")
-        logger.info(f"=" * 80)
-        
-        results = []
-
-        for idx, req in enumerate(requests):
-            logger.info(f"\n--- Processing greedy request {idx + 1}/{len(requests)} ---")
-            logger.debug(f"Request type: {type(req)}")
-            
-            prompt, stop_seqs = self._extract_instance_data(req)
-            
-            logger.info(f"Prompt length: {len(prompt)} chars")
-            logger.info(f"Stop sequences: {stop_seqs}")
-            logger.debug(f"Prompt preview: {prompt[:200]}..." if len(prompt) > 200 else f"Prompt: {prompt}")
-            
-            # Handle empty prompts immediately
-            if not prompt:
-                logger.warning(f"❌ Empty prompt encountered at index {idx}")
-                results.append("")  # ALWAYS append
-                continue
-
-            # DEFAULT: Start with empty string
-            final_response = ""
-            
-            # Try multiple times
-            for attempt in range(self.max_retries):
-                try:
-                    logger.debug(f"Greedy API call attempt {attempt + 1}/{self.max_retries} for request {idx}")
-                    
-                    response = self.client.models.generate_content(
-                        model=self.model_name,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            temperature=0.0,
-                            max_output_tokens=self.max_tokens,
-                            top_p=1.0,
-                            top_k=1,
-                            stop_sequences=stop_seqs or None,
-                        ),
-                    )
-                    
-                    response_text = response.text if response.text else ""
-                    
-                    logger.debug(f"Greedy response received: {len(response_text)} chars")
-                    logger.debug(f"Response preview: {response_text[:200]}..." if len(response_text) > 200 else f"Response: {response_text}")
-                    
-                    # If we got a non-empty response, use it and stop trying
-                    if response_text.strip() != "":
-                        final_response = response_text
-                        logger.info(f"✅ Got valid greedy response at index {idx} on attempt {attempt + 1}")
-                        break
-                    
-                    # Empty response - should we retry?
-                    if attempt < self.max_retries - 1:
-                        logger.warning(
-                            f"⚠️  Empty greedy response at index {idx}, "
-                            f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
-                        )
                         time.sleep(self.retry_timeout * (attempt + 1))
-                        continue
-                    else:
-                        logger.error(
-                            f"❌ All {self.max_retries} attempts returned empty response "
-                            f"for greedy request {idx}. Using empty string."
-                        )
-                        final_response = ""
-                        break
-                    
-                except Exception as e:
-                    logger.error(
-                        f"❌ Greedy generation error at index {idx}, "
-                        f"attempt {attempt + 1}/{self.max_retries}: {type(e).__name__}: {e}"
-                    )
-                    
-                    if attempt < self.max_retries - 1:
-                        wait_time = self.retry_timeout * (attempt + 1)
-                        logger.info(f"⏳ Waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        logger.error(f"❌ All attempts failed for greedy request {idx}. Using empty string.")
-                        final_response = ""
-                        break
 
-            # CRITICAL: ALWAYS append exactly one result per request
             results.append(final_response)
-            logger.info(f"✅ Greedy result {idx} added to results list (total: {len(results)})")
 
-        logger.info(f"\n" + "=" * 80)
-        logger.info(f"GREEDY_UNTIL COMPLETE")
-        logger.info(f"Input requests: {len(requests)}")
-        logger.info(f"Output results: {len(results)}")
-        
-        if len(results) != len(requests):
-            logger.error(f"❌ CRITICAL MISMATCH!")
-            # Emergency padding
-            while len(results) < len(requests):
-                results.append("")
-                logger.error(f"Emergency padding: {len(results)}")
-            logger.info(f"Match after padding: ✅ YES")
-        else:
-            logger.info(f"Match: ✅ YES - Perfect 1:1 mapping!")
-        
-        logger.info(f"=" * 80 + "\n")
-
-        assert len(results) == len(requests), (
-            f"Result count mismatch: {len(results)} results for {len(requests)} requests. "
-            f"This mismatch will cause reordering assertion errors in lm_eval."
-        )
-        
+        assert len(results) == len(instances)
         return results
-
     # ---------------------------------------------------------------------
     # Loglikelihood (unsupported by Gemini)
     # ---------------------------------------------------------------------
@@ -386,7 +250,9 @@ class GeminiLM(LM):
         Gemini API does not support loglikelihood computation.
         Returns dummy values.
         """
-        logger.info(f"LOGLIKELIHOOD called with {len(instances)} instances (returning dummy values)")
+        logger.info(
+            f"LOGLIKELIHOOD called with {len(instances)} instances (returning dummy values)"
+        )
         return [(0.0, True) for _ in instances]
 
     def loglikelihood_rolling(
@@ -396,7 +262,9 @@ class GeminiLM(LM):
         Gemini API does not support rolling loglikelihood computation.
         Returns dummy values.
         """
-        logger.info(f"LOGLIKELIHOOD_ROLLING called with {len(instances)} instances (returning dummy values)")
+        logger.info(
+            f"LOGLIKELIHOOD_ROLLING called with {len(instances)} instances (returning dummy values)"
+        )
         return [[(0.0, True)] for _ in instances]
 
     # ---------------------------------------------------------------------
@@ -406,6 +274,7 @@ class GeminiLM(LM):
     def _tokenize(self, text: str) -> List[str]:
         """Simple tokenization fallback using regex split."""
         import re
+
         return [t for t in re.split(r"\s+|[,.!?;:\"()\[\]{}]", text) if t]
 
     def _count_tokens(self, text: str) -> int:
@@ -474,7 +343,7 @@ class GeminiLM(LM):
         """
         Create a completion for the given prompt.
         Convenience method for direct API usage.
-        
+
         Includes retry logic for empty responses.
         """
         stop_seqs = None
@@ -482,15 +351,19 @@ class GeminiLM(LM):
             stop_seqs = [stop] if isinstance(stop, str) else stop
 
         final_response = ""
-        
+
         for attempt in range(self.max_retries):
             try:
                 response = self.client.models.generate_content(
                     model=self.model_name,
                     contents=prompt,
                     config=types.GenerateContentConfig(
-                        temperature=temperature if temperature is not None else self.temperature,
-                        max_output_tokens=max_tokens if max_tokens is not None else self.max_tokens,
+                        temperature=(
+                            temperature if temperature is not None else self.temperature
+                        ),
+                        max_output_tokens=(
+                            max_tokens if max_tokens is not None else self.max_tokens
+                        ),
                         top_p=self.top_p,
                         top_k=self.top_k,
                         stop_sequences=stop_seqs,
@@ -498,7 +371,7 @@ class GeminiLM(LM):
                 )
 
                 response_text = response.text or ""
-                
+
                 # Retry on empty response
                 if response_text.strip() == "":
                     if attempt < self.max_retries - 1:
@@ -518,14 +391,18 @@ class GeminiLM(LM):
                 else:
                     final_response = response_text
                     break
-                    
+
             except Exception as e:
-                logger.warning(f"Completion error, attempt {attempt + 1}/{self.max_retries}: {e}")
+                logger.warning(
+                    f"Completion error, attempt {attempt + 1}/{self.max_retries}: {e}"
+                )
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_timeout * (attempt + 1))
                 else:
-                    logger.error(f"All attempts failed. Last error: {e}. Returning empty string.")
+                    logger.error(
+                        f"All attempts failed. Last error: {e}. Returning empty string."
+                    )
                     final_response = ""
                     break
-        
+
         return final_response
