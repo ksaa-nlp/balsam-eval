@@ -3,8 +3,8 @@
 from typing import Any, Dict, List
 import jiwer
 
-from lmms_eval.api import registry as le_registry
-from lmms_eval.api.registry import register_aggregation, register_metric
+from lm_eval.api import registry as le_registry
+from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 from src.metrics.asr_utils import process_results_asr

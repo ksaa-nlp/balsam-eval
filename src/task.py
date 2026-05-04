@@ -460,7 +460,7 @@ class LMHDataset:
                 # Join text with newlines
                 it["input"] = "\n".join(text_parts)
 
-                # Store image paths for doc_to_visual
+                # Store image paths for doc_to_image
                 if image_paths:
                     it["images"] = image_paths
                     logger.info(
@@ -674,15 +674,13 @@ class LMHDataset:
             "metadata": self.metadata,
             **self.task_kwargs,
         }
-
-        # Add doc_to_visual if dataset contains images or audio
-        # lmms_eval handles both images and audio through doc_to_visual
-        if has_images or has_audio:
-            yaml_config["doc_to_visual"] = "!function multimodal_utils.doc_to_visual"
-            if has_images:
-                logger.info("Dataset contains images - adding doc_to_visual function")
-            if has_audio:
-                logger.info("Dataset contains audio files - adding doc_to_visual function")
+        
+        if has_images:
+            yaml_config["doc_to_image"] = "!function multimodal_utils.doc_to_image"
+            logger.info("Dataset contains images - adding doc_to_image function")
+        if has_audio:
+            yaml_config["doc_to_audio"] = "!function multimodal_utils.doc_to_audio"
+            logger.info("Dataset contains audio files - adding doc_to_audio function")
 
         return yaml_config
 
@@ -693,13 +691,20 @@ class LMHDataset:
             data: YAML configuration dictionary
         """
         out_path = Path(self.directory) / f"{self.file_name}.yaml"
-
-        # Extract doc_to_visual if it's a function tag
-        doc_to_visual_value = data.pop("doc_to_visual", None)
-        is_visual_function_tag = (
-            doc_to_visual_value
-            and isinstance(doc_to_visual_value, str)
-            and doc_to_visual_value.startswith("!function")
+        
+        doc_to_image_value = data.pop("doc_to_image", None)
+        is_doc_to_image_function_tag = (
+            doc_to_image_value
+            and isinstance(doc_to_image_value, str)
+            and doc_to_image_value.startswith("!function")
+        )
+        
+        
+        doc_to_audio_value = data.pop("doc_to_audio", None)
+        is_doc_to_audio_function_tag = (
+            doc_to_audio_value
+            and isinstance(doc_to_audio_value, str)
+            and doc_to_audio_value.startswith("!function")
         )
 
         # Extract process_results if it's a function tag
@@ -728,9 +733,13 @@ class LMHDataset:
                 width=1000,
             )
 
-            # Add doc_to_visual without quotes if it's a function tag
-            if is_visual_function_tag:
-                f.write(f"doc_to_visual: {doc_to_visual_value}\n")
+            # Add doc_to_image without quotes if it's a function tag
+            if is_doc_to_image_function_tag:
+                f.write(f"doc_to_image: {doc_to_image_value}\n")
+
+            # Add doc_to_audio without quotes if it's a function tag
+            if is_doc_to_audio_function_tag:
+                f.write(f"doc_to_audio: {doc_to_audio_value}\n")
 
             # Add process_results without quotes if it's a function tag
             if is_process_results_function_tag:

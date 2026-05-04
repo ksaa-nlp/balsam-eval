@@ -8,8 +8,9 @@ import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, cast
 
-import lmms_eval.evaluator
-import lmms_eval.models  # Register all lmms_eval models
+import lm_eval.evaluator
+import lm_eval.tasks
+import lm_eval.models  # Register all lm_eval models
 import requests
 
 # Import custom metrics package to auto-register all metrics
@@ -122,8 +123,8 @@ class EvaluationJob:
 
         # Setup model args
         if "eos_string" not in self.model_args:
-            self.model_args["eos_string"] = ""
-            logger.info("Added default eos_string='' to model_args")
+            self.model_args["eos_string"] = "<|endoftext|>"
+            logger.info("Added default eos_string='<|endoftext|>' to model_args")
 
         # Set API key environment variables
         api_key = os.getenv("API_KEY")
@@ -159,8 +160,8 @@ class EvaluationJob:
         logger.info("Model args: %s", self.model_args)
         logger.info("=" * 80)
 
-        # Run lmms_eval evaluation
-        results = self._run_lmms_eval()
+        # Run lm_eval evaluation
+        results = self._run_lm_eval()
 
         # Add task information to results
         results = self.task_ops.add_task_to_results(results)
@@ -199,45 +200,28 @@ class EvaluationJob:
 
         logger.info("✅ Evaluation job completed successfully")
 
-    def _run_lmms_eval(self) -> Dict[str, Any]:
-        """Run the lmms_eval evaluation.
+    def _run_lm_eval(self) -> Dict[str, Any]:
+        """Run the lm_eval evaluation.
 
         Returns:
             Evaluation results dictionary
         """
         temp_dir = Path(".temp").resolve()
 
-        logger.info("Calling lmms_eval.evaluator.simple_evaluate...")
-
-        # Convert gen_kwargs dict to string format for lmms_eval
-        gen_kwargs_dict = get_max_tokens_config(self.adapter, self.model_args["model"])
-        gen_kwargs_str = ",".join(f"{k}={v}" for k, v in gen_kwargs_dict.items())
-
-        # Convert model_args dict to string format for lmms_eval
-        model_args_str = ",".join(f"{k}={v}" for k, v in self.model_args.items())
-
-        # Map old adapter names to new lmms_eval model names
-        model_mapping = {
-            "openai-chat-completions": "openai",
-            "local-chat-completions": "openai_compatible",
-            "gemini": "gemini_api",
-            "anthropic-chat-completions": "claude",
-            "groq": "openai_compatible",
-        }
-        model = model_mapping.get(self.adapter, self.adapter)
+        logger.info("Calling lm_eval.evaluator.simple_evaluate...")
 
         results = cast(
             dict[str, Any],
-            lmms_eval.evaluator.simple_evaluate(
-                model=model,
-                model_args=model_args_str,
+            lm_eval.evaluator.simple_evaluate(
+                model=self.adapter,
+                model_args=self.model_args,
                 tasks=self.tasks,
-                apply_chat_template=False,
-                task_manager=lmms_eval.tasks.TaskManager(
-                    include_path=str(temp_dir), include_defaults=False
+                apply_chat_template=True,
+                task_manager=lm_eval.tasks.TaskManager(
+                    include_path=str(temp_dir)
                 ),
                 batch_size=1,
-                gen_kwargs=gen_kwargs_str,
+                gen_kwargs=get_max_tokens_config(self.adapter, self.model_args["model"]),
             ),
         )
 

@@ -3,13 +3,13 @@
 This file serves as a template for creating new metrics. Copy this file
 and customize the TODO sections to implement your custom metric logic.
 
-The metric is fully wired into lmms_eval and metrics_registry systems.
+The metric is fully wired into lm_eval and metrics_registry systems.
 """
 
 from typing import Any, Dict, List
 
-from lmms_eval.api import registry as le_registry
-from lmms_eval.api.registry import register_aggregation, register_metric
+from lm_eval.api import registry as le_registry
+from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 

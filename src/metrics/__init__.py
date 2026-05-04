@@ -3,7 +3,7 @@
 This package provides implementations of various evaluation metrics
 including accuracy, BLEU, ROUGE, WER, CER, and extensible templates for custom metrics.
 
-All metrics are automatically registered with both lmms_eval and the
+All metrics are automatically registered with both lm_eval and the
 custom metrics_registry system.
 
 Usage:

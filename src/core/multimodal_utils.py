@@ -1,10 +1,8 @@
 """
 Utilities for multimodal datasets in Balsam Eval.
-Provides doc_to_visual function for lmms-eval compatibility with both images and audio.
 """
 
 import os
-from typing import Dict, Any, Sequence, Union
 
 import numpy as np
 from PIL import Image
@@ -12,50 +10,55 @@ import librosa
 import soundfile as sf  # type: ignore[import-untyped]
 
 
-def doc_to_visual(doc: Dict[str, Any]) -> Sequence[Union[Image.Image, Dict]]:
-    """
-    Extract PIL Images and audio data from a document for lmms-eval multimodal processing.
+from typing import Dict, Any, List, Union
 
-    lmms_eval supports both images and audio through doc_to_visual:
-    - Images are returned as PIL.Image objects
-    - Audio files are returned as HuggingFace format dicts:
-      {'array': np.ndarray, 'sampling_rate': int}
+
+def doc_to_image(doc: Dict[str, Any]) -> List[Image.Image]:
+    """
+    Extract PIL Images from a document.
 
     Args:
-        doc: Document dict that may have 'images' and 'audio' fields
+        doc: Document dict that may have 'images' field
 
     Returns:
-        Sequence of PIL.Image objects and audio data dicts
-
-    Example:
-        >>> doc = {"images": ["/path/to/image1.png"], "audio": ["/path/to/audio1.wav"]}
-        >>> visuals = doc_to_visual(doc)
-        >>> len(visuals)
-        2
+        List of PIL.Image objects
     """
-    visuals: list[Union[Image.Image, Dict]] = []
+    images: List[Image.Image] = []
 
-    # Handle images
     image_paths = doc.get("images", [])
     for path in image_paths:
         try:
             img = Image.open(path)
-            visuals.append(img)
+            images.append(img)
         except (OSError, IOError) as e:
             print(f"Warning: Failed to load image {path}: {e}")
             continue
 
-    # Handle audio files (load and convert to HuggingFace format)
+    return images
+
+
+def doc_to_audio(doc: Dict[str, Any]) -> List[Dict]:
+    """
+    Extract audio data from a document in HuggingFace format.
+
+    Args:
+        doc: Document dict that may have 'audio' field
+
+    Returns:
+        List of audio dicts: {'array': np.ndarray, 'sampling_rate': int}
+    """
+    audios: List[Dict] = []
+
     audio_paths = doc.get("audio", [])
     for path in audio_paths:
         if os.path.exists(path):
             audio_dict = load_audio_file(path)
             if audio_dict is not None:
-                visuals.append(audio_dict)
+                audios.append(audio_dict)
         else:
             print(f"Warning: Audio file not found: {path}")
 
-    return visuals
+    return audios
 
 
 def load_audio_file(file_path: str) -> Union[Dict[str, Any], None]:
