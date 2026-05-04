@@ -1,11 +1,16 @@
-from enum import Enum
+"""Database operations and API interactions."""
+
 import json
 import time
-from typing import Any, Dict, List, Optional
+from enum import Enum
+from typing import Any, Dict, List, Optional, cast
+
 import requests
 
 
 class JobStatus(Enum):
+    """Job status enumeration."""
+
     STARTING = "starting"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -13,21 +18,48 @@ class JobStatus(Enum):
 
 
 def sanitize_text(text: str) -> str:
+    """Sanitize text for use as an identifier.
+
+    Args:
+        text: Text to sanitize
+
+    Returns:
+        Sanitized text
+    """
     return text.strip().lower().replace(" ", "_").replace("-", "_")
 
 
 def _make_request_with_retry(
     method: str,
     url: str,
+    *,
     headers: Optional[Dict[str, str]] = None,
     json_data: Optional[Dict[str, Any]] = None,
     params: Optional[Dict[str, Any]] = None,
     max_retries: int = 3,
-    initial_timeout: int = 30,
-    max_timeout: int = 120,
+    initial_timeout: float = 30.0,
+    max_timeout: float = 120.0,
 ) -> requests.Response:
+    """Make HTTP request with retry logic.
+
+    Args:
+        method: HTTP method
+        url: Request URL
+        headers: Optional headers
+        json_data: Optional JSON data
+        params: Optional query parameters
+        max_retries: Maximum number of retries
+        initial_timeout: Initial timeout in seconds
+        max_timeout: Maximum timeout in seconds
+
+    Returns:
+        Response object
+
+    Raises:
+        requests.RequestException: If all retries fail
+    """
     last_exception = None
-    timeout = initial_timeout
+    timeout: float = initial_timeout
 
     for attempt in range(max_retries):
         try:
@@ -53,7 +85,7 @@ def _make_request_with_retry(
                 time.sleep(wait_time)
             # On last attempt, loop ends and falls through to raise below
 
-        except requests.RequestException:
+        except requests.RequestException:  # pylint: disable=try-except-raise
             raise  # Non-retryable errors bubble up immediately
 
     print(f"❌ All {max_retries} retry attempts failed.")
@@ -61,10 +93,21 @@ def _make_request_with_retry(
         f"Failed to connect to {url} after {max_retries} attempts. "
         f"Last error: {last_exception}"
     ) from last_exception
-    
 
 
 def map_alias_to_task(task_alias: str, is_sanitized: bool = False) -> str:
+    """Map task alias to task name.
+
+    Args:
+        task_alias: Task alias to map
+        is_sanitized: Whether to sanitize the output
+
+    Returns:
+        Mapped task name
+
+    Raises:
+        Exception: If mapping fails
+    """
     try:
         with open("tasks_mappping.json", "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -80,12 +123,32 @@ def submit_model_evaluation(
     adapter: str,
     api_key: str,
     categories: List[str],
+    *,
     server_token: str,
     api_host: str,
     user_id: str,
     benchmark_id: str,
-    evaluation_types: List[str] = [],
+    evaluation_types: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
+    """Submit model evaluation to server.
+
+    Args:
+        model_name: Name of the model
+        model_url: URL of the model
+        adapter: Adapter type
+        api_key: API key for the model
+        categories: List of categories to evaluate
+        server_token: Server authentication token
+        api_host: API host URL
+        user_id: User ID
+        benchmark_id: Benchmark ID
+        evaluation_types: Optional list of evaluation types
+
+    Returns:
+        Response data from server
+    """
+    if evaluation_types is None:
+        evaluation_types = []
     headers = {
         "Content-Type": "application/json",
         "x-server-token": server_token,
@@ -174,16 +237,16 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             final_results["nGramScore"] = extracted_value
         else:
             final_results["nGramScore"] = rouge_result
-            print(f"[DEBUG] Using rouge_result directly: {final_results['nGramScore']}")
+            print(f"[DEBUG] Using rouge_result directly: {final_results["nGramScore"]}")
     # Handle BLEU metric (returns a float)
     elif "bleu,none" in result:
         final_results["nGramScore"] = result["bleu,none"]
-        print(f"[DEBUG] Found bleu,none: {final_results['nGramScore']}")
+        print(f"[DEBUG] Found bleu,none: {final_results["nGramScore"]}")
 
     # Handle accuracy metric
     if "accuracy,none" in result:
         final_results["mcqScore"] = result["accuracy,none"]
-        print(f"[DEBUG] Found accuracy,none: {final_results['mcqScore']}")
+        print(f"[DEBUG] Found accuracy,none: {final_results["mcqScore"]}")
 
     # Handle LLM as judge metrics (dict format with average_score)
     # These are set by process_results_with_llm_judge for task-level summaries
@@ -191,13 +254,13 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
         final_results["llmAsJudgeScore"] = result["llm_as_judge"].get(
             "average_score", 0
         )
-        print(f"[DEBUG] Found llm_as_judge: {final_results['llmAsJudgeScore']}")
+        print(f"[DEBUG] Found llm_as_judge: {final_results["llmAsJudgeScore"]}")
 
     if "mcq_llm_as_judge" in result:
         final_results["MCQllmAsJudgeScore"] = result["mcq_llm_as_judge"].get(
             "average_score", 0
         )
-        print(f"[DEBUG] Found mcq_llm_as_judge: {final_results['MCQllmAsJudgeScore']}")
+        print(f"[DEBUG] Found mcq_llm_as_judge: {final_results["MCQllmAsJudgeScore"]}")
 
     # Handle LLM judge scores in numeric format (set by process_results_with_llm_judge)
     # These are the actual score values (not dict summaries)
@@ -208,7 +271,7 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             if "llmAsJudgeScore" not in final_results:
                 final_results["llmAsJudgeScore"] = float(value)
                 print(
-                    f"[DEBUG] Found llm_judge_score,none: {final_results['llmAsJudgeScore']}"
+                    f"[DEBUG] Found llm_judge_score,none: {final_results["llmAsJudgeScore"]}"
                 )
 
     if "mcq_llm_judge_score,none" in result:
@@ -218,7 +281,7 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             if "MCQllmAsJudgeScore" not in final_results:
                 final_results["MCQllmAsJudgeScore"] = float(value)
                 print(
-                    f"[DEBUG] Found mcq_llm_judge_score,none: {final_results['MCQllmAsJudgeScore']}"
+                    f"[DEBUG] Found mcq_llm_judge_score,none: {final_results["MCQllmAsJudgeScore"]}"
                 )
 
     print(f"[DEBUG] Final results: {final_results}")
@@ -231,9 +294,24 @@ def add_results_to_db(
     task_id: str,
     server_token: str,
     result: dict[str, Any],
+    *,
     category_name: str,
     benchmark_id: str,
 ) -> None:
+    """Add evaluation results to database via webhook.
+
+    Args:
+        api_host: API host URL
+        job_id: Job ID
+        task_id: Task ID
+        server_token: Server authentication token
+        result: Evaluation results dictionary
+        category_name: Category name
+        benchmark_id: Benchmark ID
+
+    Raises:
+        RuntimeError: If posting results fails
+    """
     if not api_host:
         return
 
@@ -276,6 +354,18 @@ def update_status(
     status: JobStatus,
     error_message: Optional[str] = None,
 ) -> None:
+    """Update job status via webhook.
+
+    Args:
+        api_host: API host URL
+        job_id: Job ID
+        server_token: Server authentication token
+        status: New job status
+        error_message: Optional error message
+
+    Raises:
+        RuntimeError: If status update fails
+    """
     if not api_host:
         return
 
@@ -311,6 +401,20 @@ def get_tasks_from_category(
     server_token: str,
     evaluation_types: Optional[str] = None,
 ) -> list[str]:
+    """Get tasks from a category.
+
+    Args:
+        category: Category name
+        api_host: API host URL
+        server_token: Server token for authentication
+        evaluation_types: Optional comma-separated evaluation types
+
+    Returns:
+        List of task names
+
+    Raises:
+        ValueError: If category is empty
+    """
     if not category:
         raise ValueError("Category is required, terminating the process.")
 
@@ -339,8 +443,9 @@ def get_tasks_from_category(
         raise ValueError("Failed to retrieve tasks for category")
 
     # Make sure we have the datasets
-    if "datasets" not in response.json():
+    response_data = response.json()
+    if "datasets" not in response_data:
         print(f"No datasets found for category {category}")
         raise ValueError("No datasets found for category")
 
-    return response.json()["datasets"]
+    return cast(list[str], response_data["datasets"])

@@ -1,3 +1,5 @@
+"""LLM Judge specialized for Multiple Choice Questions."""
+
 from src.llm_judger.base_llm_judge import BaseLLMJudge
 
 
@@ -56,4 +58,3 @@ Return only a JSON object with:
     def get_max_score(self) -> float:
         """MCQ uses binary scoring, max is 1."""
         return 1.0
-

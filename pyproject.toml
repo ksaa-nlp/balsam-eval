@@ -1,19 +1,30 @@
 [project]
 name = "balsam-lm-evaluation"
-version = "0.1.0"
+version = "1.0.0"
 requires-python = ">=3.10,<4"
 dependencies = [
-    "lm-eval[api]~=0.4.10",
-    "pyyaml~=6.0.3",
-    "google-cloud-storage~=3.9.0",
-    "six~=1.17.0",
-    "nltk~=3.9.2",
-    "pyarabic~=0.6.15",
-    "deepeval~=3.8.6",
-    "python-dotenv~=1.2.1",
-    "google-genai~=1.61.0",
-    "groq~=1.0.0",
+    "deepeval~=3.9.9",
+    "google-cloud-storage~=3.10.1",
+    "google-genai~=1.74.0",
+    "groq~=1.2.0",
+    "jiwer~=4.0.0",
+    "librosa~=0.11.0",
+    "lm-eval[api]~=0.4.11",
     "pillow~=12.2.0",
+    "pyarabic~=0.6.15",
+    "python-dotenv~=1.2.2",
+    "pyyaml~=6.0.3",
+    "rouge-score~=0.1.2",
+    "soundfile~=0.13.1",
+]
+
+[dependency-groups]
+dev = [
+    "mypy~=1.20.2",
+    "pylint[spelling]~=4.0.5",
+    "types-pyyaml~=6.0.12.20260408",
+    "types-tqdm~=4.67.3.20260408",
+    "types-requests~=2.33.0.20260408",
 ]
 
 [build-system]
@@ -37,4 +48,47 @@ based_on_style = "google"
 indent_width = 4
 
 [tool.yapfignore]
-ignore_patterns = ["venv", "build", "dist"]
+ignore_patterns = ["venv", "build", "dist", "__pycache__", ".pytest_cache", ".vscode", ".idea", ".git", ".github", ".balsam_eval_cache", ".balsam_eval_logs", ".balsam_eval_results", ".temp", "ignores"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+# Ignore external dependencies that don't have stubs
+[[tool.mypy.overrides]]
+module = [
+    "google.cloud.*",
+    "pyarabic.*",
+    "evaluate.*",
+]
+ignore_missing_imports = true
+
+[tool.pylint.master]
+ignore = [".venv",".history",".mypy_cache","build","dist","__pycache__",".pytest_cache",".vscode",".idea",".git",".github",".balsam_eval_cache",".balsam_eval_logs",".balsam_eval_results",".temp","ignores"]
+
+[tool.pylint.messages_control]
+# Disable specific messages for entire project
+disable = [
+    # Reasonable design choices for this codebase
+    "too-many-instance-attributes",  # Data/model classes legitimately need many attributes
+    "too-many-arguments",  # Some functions legitimately need many parameters
+    "too-many-positional-arguments",  # Some functions legitimately need many positional parameters
+    "too-many-branches",  # Complex business logic is hard to split without making it worse
+    "too-many-locals",  # Complex functions need local variables for clarity
+    "too-many-statements",  # Complex business logic
+    "too-many-nested-blocks",  # Complex control flow
+    "too-few-public-methods",  # Some classes are primarily data containers
+    "protected-access",  # We need to access protected members when working with external libraries
+    "global-statement",  # Used for singleton pattern in metrics_registry
+]
+
+# Per-file options for specific cases
+[tool.pylint.typecheck]
+ignored-modules = []
+
+[tool.pylint.similarities]
+ignore-imports = true
+min-similarity-lines = 15

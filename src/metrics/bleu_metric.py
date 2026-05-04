@@ -1,68 +1,149 @@
-import re
+"""BLEU metric implementation for text evaluation."""
+
+from typing import Any, Dict, List, Tuple
+
 import evaluate
-import pyarabic.araby as araby
-import unicodedata
-import sys
-from lm_eval.api.registry import register_aggregation, register_metric
+
 from lm_eval.api import registry as le_registry
+from lm_eval.api.registry import register_aggregation, register_metric
+
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
+from src.metrics.metrics_utils import prepare_text_with_punctuation
 
-bleu = evaluate.load("bleu")
-PUNCT_TABLE = dict.fromkeys(i for i in range(sys.maxunicode)
-                            if unicodedata.category(chr(i)).startswith('P'))
-ALL_PUNCTUATIONS = "".join(chr(p) for p in PUNCT_TABLE)
-others = '''`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!”…“–ـ'''
-ALL_PUNCTUATIONS += ''.join([o for o in others if o not in ALL_PUNCTUATIONS])
+def compute_bleu_score(
+    references: List[str],
+    predictions: List[str],
+    prepare_refs: bool = False,
+    prepare_preds: bool = True,
+    remove_diacritics: bool = True,
+) -> float:
+    """Compute BLEU score for references and predictions.
 
-def prepare_texts(text, change_curly_braces, remove_diactrics):
-    text = re.sub('([' + ALL_PUNCTUATIONS + '])', ' \\1 ', text)
-    if change_curly_braces:
-        text = text.replace('{', '[').replace('}', ']')
-    if remove_diactrics:
-        text = araby.strip_diacritics(text)
-    return text
+    Args:
+        references: List of reference texts
+        predictions: List of prediction texts
+        prepare_refs: Whether to prepare reference texts
+        prepare_preds: Whether to prepare prediction texts
+        remove_diacritics: Whether to remove Arabic diacritics
 
-# ---- aggregation name kept as in your original: "custom_bleu"
+    Returns:
+        Average BLEU score
+    """
+    bleu = evaluate.load("bleu")
+
+    def tokenizer(x):
+        return x.split()
+
+    refs = [
+        prepare_text_with_punctuation(r, prepare_refs, remove_diacritics).strip()
+        for r in references
+    ]
+    preds = [
+        prepare_text_with_punctuation(p, prepare_preds, remove_diacritics).strip()
+        for p in predictions
+    ]
+
+    total = 0.0
+    valid = 0
+    for ref, pred in zip(refs, preds):
+        if not pred or not ref:
+            continue
+        try:
+            score = bleu.compute(
+                references=[ref], predictions=[pred], tokenizer=tokenizer
+            )
+            total += score["bleu"]
+            valid += 1
+        except ZeroDivisionError:
+            continue
+    return total / valid if valid else 0.0
+
+
+def compute_bleu_aggregation(items: List[Tuple[Any, Any]]) -> float:
+    """Aggregate BLEU scores from reference and prediction pairs.
+
+    Args:
+        items: List of (reference, prediction) tuples
+
+    Returns:
+        Average BLEU score
+    """
+    refs = [r[0] if isinstance(r, (list, tuple)) else r for r, _ in items]
+    preds = [p for _, p in items]
+
+    return compute_bleu_score(
+        references=refs,
+        predictions=preds,
+        prepare_refs=False,
+        prepare_preds=True,
+        remove_diacritics=True,
+    )
+
+
+# Register aggregation function
 if "custom_bleu" not in le_registry.AGGREGATION_REGISTRY:
-    @register_aggregation("custom_bleu")
-    def bleu_aggregation(items):
-        def tokenizer(x): return x.split()
-        refs = [r[0] if isinstance(r, (list, tuple)) else r for r, _ in items]
-        preds = [p for _, p in items]
+    register_aggregation("custom_bleu")(compute_bleu_aggregation)
 
-        refs = [prepare_texts(r, False, True).strip() for r in refs]
-        preds = [prepare_texts(p, True, True).strip() for p in preds]
 
-        total, valid = 0.0, 0
-        for ref, pred in zip(refs, preds):
-            if not pred or not ref:
-                continue
-            try:
-                score = bleu.compute(references=[ref], predictions=[pred], tokenizer=tokenizer)
-                total += score["bleu"]
-                valid += 1
-            except ZeroDivisionError:
-                continue
-        return total / valid if valid else 0.0
-
-# ---- metric "bleu" uses aggregation "custom_bleu" (register only if missing)
+# Register metric function
 if "bleu" not in le_registry.METRIC_REGISTRY:
-    @register_metric(metric="bleu", higher_is_better=True,
-                     output_type="generate_until", aggregation="custom_bleu")
-    def bleu_metric(items): 
-        return items
+    register_metric(
+        metric="bleu",
+        higher_is_better=True,
+        output_type="generate_until",
+        aggregation="custom_bleu",
+    )(lambda items: items)
 
-def process_results(doc, results):
-    preds, golds = results[0], doc["output"]
-    return {'bleu': [golds, preds]}
+
+def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
+    """Process results for BLEU evaluation.
+
+    Extracts reference and prediction from document and model results.
+
+    Args:
+        doc: Document containing reference output
+        results: Model predictions (list or single value)
+
+    Returns:
+        Dictionary with BLEU data containing [reference, prediction]
+    """
+    preds = results[0] if isinstance(results, list) else results
+    golds = doc["output"]
+    return {"bleu": [golds, preds]}
+
 
 class BleuMetric(BaseMetric):
-    def get_doc_to_text(self, original_doc_to_text: str) -> str:
-        return original_doc_to_text
-    def get_generation_kwargs(self):
-        return {"do_sample": False, "until": ["<|endoftext|>"]}
+    """BLEU metric for YAML/task export.
 
-config = MetricConfig(
-    name="bleu", higher_is_better=True,
-    aggregation_name="custom_bleu", process_results=process_results)
-get_metrics_registry().register("bleu", BleuMetric(config))
+    This metric class integrates with the metrics registry to provide
+    BLEU evaluation for text generation tasks.
+    """
+
+    def get_doc_to_text(self, original_doc_to_text: str) -> str:
+        """Get the doc_to_text template for BLEU metric.
+
+        Args:
+            original_doc_to_text: Original doc_to_text template
+
+        Returns:
+            Original template (BLEU doesn't modify the prompt)
+        """
+        return original_doc_to_text
+
+    def get_generation_kwargs(self) -> Dict[str, Any]:
+        """Get generation kwargs for BLEU metric.
+
+        Returns:
+            Generation parameters (no sampling, stop on empty string)
+        """
+        return {"do_sample": False, "until": [""]}
+
+
+# Register in custom registry
+_bleu_config = MetricConfig(
+    name="bleu",
+    higher_is_better=True,
+    aggregation_name="custom_bleu",
+    process_results=process_results,
+)
+get_metrics_registry().register("bleu", BleuMetric(_bleu_config))

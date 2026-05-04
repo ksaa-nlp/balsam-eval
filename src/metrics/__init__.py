@@ -1,11 +1,51 @@
-"""Metrics package initialization (auto-discovery)."""
+"""Metrics package for evaluation metrics.
 
-import importlib
-import pkgutil
+This package provides implementations of various evaluation metrics
+including accuracy, BLEU, ROUGE, WER, CER, and extensible templates for custom metrics.
 
-__all__ = []
+All metrics are automatically registered with both lm_eval and the
+custom metrics_registry system.
 
-for module_info in pkgutil.iter_modules(__path__):
-    if module_info.name.endswith("_metric"):
-        module = importlib.import_module(f"{__name__}.{module_info.name}")
-        __all__.append(module_info.name)
+Usage:
+    >>> from src.metrics import AccuracyMetric, process_results as accuracy_process_results
+    >>> from src.metrics import BleuMetric, process_results as bleu_process_results
+    >>> from src.metrics import RougeMetric, process_results as rouge_process_results
+    >>> from src.metrics import WERMetric, process_results as wer_process_results
+    >>> from src.metrics import CERMetric, process_results as cer_process_results
+    >>> from src.metrics.metrics_utils import prepare_text_with_punctuation, all_punctuations
+"""
+
+# Metric implementations
+from .accuracy_metric import (
+    AccuracyMetric,
+    process_results as accuracy_process_results,
+)
+from .bleu_metric import BleuMetric, process_results as bleu_process_results
+from .cer_metric import CERMetric, process_results as cer_process_results
+from .new_metric import NewMetric, process_results as new_metric_process_results
+from .rouge_metric import RougeMetric, process_results as rouge_process_results
+from .wer_metric import WERMetric, process_results as wer_process_results
+
+# Shared utilities (only truly shared code)
+from .metrics_utils import (
+    all_punctuations,
+    prepare_text_with_punctuation,
+)
+
+__all__ = [
+    # Metric classes
+    "AccuracyMetric",
+    "BleuMetric",
+    "RougeMetric",
+    "WERMetric",
+    "CERMetric",
+    # Process results functions
+    "accuracy_process_results",
+    "bleu_process_results",
+    "rouge_process_results",
+    "wer_process_results",
+    "cer_process_results",
+    # Shared utilities (only truly shared)
+    "prepare_text_with_punctuation",
+    "all_punctuations",
+]
