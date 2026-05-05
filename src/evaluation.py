@@ -177,6 +177,11 @@ class EvaluationJob:
         # Separate MCQ and generation tasks
         mcq_tasks, generation_tasks = self.task_ops.separate_mcq_and_generation_tasks(results)
 
+        # Exclude tasks that already have llm_as_judge as a metric (scored during lm-eval)
+        tasks_with_llm_metric = self._get_tasks_with_llm_judge_metric(results)
+        generation_tasks = [t for t in generation_tasks if t not in tasks_with_llm_metric]
+        mcq_tasks = [t for t in mcq_tasks if t not in tasks_with_llm_metric]
+
         # Process with LLM judge if configured
         updated_results = results
         updated_results = self.llm_judge_processor.process_generation_tasks(
@@ -232,6 +237,19 @@ class EvaluationJob:
         logger.info("Exporting results to %s.json", self.category_name)
 
         return results
+
+    @staticmethod
+    def _get_tasks_with_llm_judge_metric(results: Dict[str, Any]) -> set[str]:
+        """Return task names whose metric_list includes llm_as_judge or mcq_llm_as_judge."""
+        llm_judge_metrics = {"llm_as_judge", "mcq_llm_as_judge"}
+        tasks: set[str] = set()
+        for task_name, task_config in results.get("configs", {}).items():
+            for entry in task_config.get("metric_list", []):
+                metric = entry.get("metric") if isinstance(entry, dict) else entry
+                if metric in llm_judge_metrics:
+                    tasks.add(task_name)
+                    break
+        return tasks
 
     def _sanitize_results(self, results: Dict[str, Any]) -> None:
         """Remove sensitive information from results.
