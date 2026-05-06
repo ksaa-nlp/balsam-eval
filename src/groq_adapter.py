@@ -364,7 +364,7 @@ class GroqLM(LM):
                 continue
 
             if audio_dicts:
-                content: Union[str, list] = self._audio_dicts_to_content_parts(audio_dicts)
+                content = self._audio_dicts_to_content_parts(audio_dicts)
                 if prompt:
                     content.append({"type": "text", "text": prompt})
                 messages: List[Dict[str, Any]] = [{"role": "user", "content": content}]

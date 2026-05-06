@@ -86,6 +86,7 @@ disable = [
     "too-few-public-methods",  # Some classes are primarily data containers
     "protected-access",  # We need to access protected members when working with external libraries
     "global-statement",  # Used for singleton pattern in metrics_registry
+    "duplicate-code",  # Adapters intentionally duplicate helpers to stay self-contained/portable
 ]
 
 # Per-file options for specific cases
