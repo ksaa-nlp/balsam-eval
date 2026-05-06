@@ -32,10 +32,30 @@ class GeminiLM(LM):
 
     MULTIMODAL = True
 
+    @staticmethod
+    def _parse_vertex_url(url: str) -> Dict[str, str]:
+        """Extract project, location, and model from a Vertex AI endpoint URL."""
+        m = re.match(
+            r"https?://(?P<location>[\w-]+)-aiplatform\.googleapis\.com"
+            r"/(?:v[\w]+)/projects/(?P<project>[^/]+)"
+            r"/locations/[^/]+"
+            r"/publishers/[^/]+/models/(?P<model>[^/:]+)",
+            url,
+        )
+        if not m:
+            raise ValueError(
+                f"Could not parse Vertex AI URL: {url}\n"
+                "Expected format: https://<location>-aiplatform.googleapis.com"
+                "/v1/projects/<project>/locations/<location>"
+                "/publishers/google/models/<model>"
+            )
+        return m.groupdict()
+
     def __init__(
         self,
         model_name: Optional[str] = None,
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
         top_p: float = 0.95,
@@ -46,10 +66,21 @@ class GeminiLM(LM):
     ):
         super().__init__()
 
-        if model_name is None:
-            model_name = os.environ.get("MODEL", "models/gemini-1.5-pro")
+        self.use_vertexai = False
+        project = None
+        location = None
 
-        if not model_name.startswith("models/"):
+        if base_url and "aiplatform.googleapis.com" in base_url:
+            parsed = self._parse_vertex_url(base_url)
+            self.use_vertexai = True
+            project = parsed["project"]
+            location = parsed["location"]
+            model_name = parsed["model"]
+
+        if model_name is None:
+            model_name = os.environ.get("MODEL", "gemini-1.5-pro")
+
+        if not self.use_vertexai and not model_name.startswith("models/"):
             model_name = f"models/{model_name}"
 
         self.model_name = model_name
@@ -61,20 +92,33 @@ class GeminiLM(LM):
         self.max_retries = max_retries
         self._tokenizer_name = model_name
 
-        if api_key is None:
-            api_key = os.environ.get("GOOGLE_API_KEY")
-
-        if api_key is None:
-            raise ValueError(
-                "No API key provided and GOOGLE_API_KEY environment variable not set."
+        if self.use_vertexai:
+            self.client = genai.Client(
+                vertexai=True,
+                project=project,
+                location=location,
+                http_options={"timeout": 120_000},
             )
-
-        self.client = genai.Client(
-            api_key=api_key,
-            http_options={"timeout": 120_000},
-        )
-
-        logger.info("Initialized GeminiLM with model %s", self.model_name)
+            logger.info(
+                "Initialized GeminiLM (Vertex AI) with model %s, "
+                "project=%s, location=%s",
+                self.model_name,
+                project,
+                location,
+            )
+        else:
+            if api_key is None:
+                api_key = os.environ.get("GOOGLE_API_KEY")
+            if api_key is None:
+                raise ValueError(
+                    "No API key provided and GOOGLE_API_KEY environment variable "
+                    "not set. For Vertex AI, pass a base_url instead."
+                )
+            self.client = genai.Client(
+                api_key=api_key,
+                http_options={"timeout": 120_000},
+            )
+            logger.info("Initialized GeminiLM with model %s", self.model_name)
 
     # ---------------------------------------------------------------------
     # Required LM Eval properties
