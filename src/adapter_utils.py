@@ -30,7 +30,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
     if is_reasoning_env:
         max_tokens = int(os.getenv("MAX_TOKENS", "8192"))
         # For OpenAI reasoning models, use max_completion_tokens
-        if adapter == "openai-chat-completions":
+        if adapter in ("openai-chat-completions", "openai"):
             return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
         return {"max_tokens": max_tokens}
 
@@ -40,6 +40,13 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
     # Detect thinking/reasoning models by adapter and model name
     thinking_model_patterns = {
         "openai-chat-completions": [
+            "o1-",
+            "o3-",
+            "o4-",
+            "gpt-5",
+            "gpt5",
+        ],
+        "openai": [
             "o1-",
             "o3-",
             "o4-",
@@ -56,6 +63,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         ],
         "gemini": ["thinking", "2.0-flash-thinking"],
         "anthropic-chat-completions": ["extended-thinking"],
+        "anthropic": ["extended-thinking"],
     }
 
     # Check if this is a thinking model for the current adapter
@@ -75,7 +83,10 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         "gemini": 4096,
         "groq": 4096,
         "openai-chat-completions": 4096,
+        "openai": 4096,
         "anthropic-chat-completions": 4096,
+        "anthropic": 4096,
+        "cohere": 4096,
         "local-chat-completions": 4096,
     }
 
@@ -93,7 +104,7 @@ def _get_thinking_model_config(adapter: str, model_lower: str) -> dict | None:
     Returns:
         Dict with appropriate token config, or None if not a thinking model
     """
-    if adapter == "openai-chat-completions":
+    if adapter in ("openai-chat-completions", "openai"):
         # GPT-5.2 supports up to 128,000 output tokens
         if "gpt-5.2" in model_lower or "gpt5.2" in model_lower:
             return {"max_completion_tokens": 128000, "max_tokens": 128000}
@@ -106,7 +117,7 @@ def _get_thinking_model_config(adapter: str, model_lower: str) -> dict | None:
             return {"max_completion_tokens": 8192, "max_tokens": 8192}
         return {"max_tokens": 8192}
 
-    if adapter in ("gemini", "anthropic-chat-completions"):
+    if adapter in ("gemini", "anthropic-chat-completions", "anthropic"):
         return {"max_tokens": 8192}
 
     return None

@@ -24,6 +24,9 @@ from src.processors.task_operations import TaskOperations
 
 from src.gemini_adapter import GeminiLM  # noqa: F401  # pylint: disable=unused-import
 from src.groq_adapter import GroqLM  # noqa: F401  # pylint: disable=unused-import
+from src.openai_adapter import OpenAIAudioLM  # noqa: F401  # pylint: disable=unused-import
+from src.anthropic_adapter import AnthropicAudioLM  # noqa: F401  # pylint: disable=unused-import
+from src.cohere_adapter import CohereAudioLM  # noqa: F401  # pylint: disable=unused-import
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -71,6 +74,10 @@ class EvaluationJob:
             "openai-chat-completions",
             "anthropic-chat-completions",
             "gemini",
+            "groq",
+            "openai",
+            "anthropic",
+            "cohere",
         ] = "local-chat-completions",
         job_id: Optional[str] = None,
         api_host: Optional[str] = None,
@@ -131,12 +138,16 @@ class EvaluationJob:
 
         # Set API key environment variables
         api_key = os.getenv("API_KEY")
-        if api_key and self.adapter in ["openai-chat-completions", "local-chat-completions"]:
+        if api_key and self.adapter in [
+            "openai-chat-completions", "local-chat-completions", "openai",
+        ]:
             os.environ["OPENAI_API_KEY"] = api_key
-        if api_key and self.adapter == "anthropic-chat-completions":
+        if api_key and self.adapter in ["anthropic-chat-completions", "anthropic"]:
             os.environ["ANTHROPIC_API_KEY"] = api_key
         if api_key and self.adapter == "gemini":
             os.environ["GOOGLE_API_KEY"] = api_key
+        if api_key and self.adapter == "cohere":
+            os.environ["CO_API_KEY"] = api_key
 
     def __call__(self) -> None:
         """Run the evaluation job."""
