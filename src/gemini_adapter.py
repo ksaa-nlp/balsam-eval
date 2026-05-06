@@ -6,20 +6,20 @@ with LM Evaluation Harness, using the new google.genai SDK.
 
 """
 
-import os
-import time
+import io
 import logging
-from typing import Dict, List, Optional, Tuple, Any, Union
+import os
+import re
+import time
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import numpy as np
+import soundfile as sf  # type: ignore[import-untyped]
 from google import genai
 from google.genai import types
 
-from lm_eval.api.model import LM
-from lm_eval.api.registry import register_model
-import io
-import base64
-import numpy as np
-import soundfile as sf
+from lm_eval.api.model import LM  # type: ignore[import-untyped]
+from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class GeminiLM(LM):
             http_options={"timeout": 120_000},
         )
 
-        logger.info(f"Initialized GeminiLM with model {self.model_name}")
+        logger.info("Initialized GeminiLM with model %s", self.model_name)
 
     # ---------------------------------------------------------------------
     # Required LM Eval properties
@@ -86,10 +86,12 @@ class GeminiLM(LM):
 
     @property
     def max_sequence_length(self) -> int:
+        """Max context length for Gemini models."""
         return 32000
 
     @property
     def batch_size(self) -> int:
+        """Default batch size for Gemini requests."""
         return 8
 
     # ---------------------------------------------------------------------
@@ -104,35 +106,6 @@ class GeminiLM(LM):
             top_k=self.top_k,
             stop_sequences=stop_seqs or None,
         )
-
-    def _extract_instance_data(self, instance: Any) -> Tuple[str, List[str]]:
-        if hasattr(instance, "__class__") and instance.__class__.__name__ == "Instance":
-            if hasattr(instance, "args"):
-                args = instance.args
-                if hasattr(args, "prompt"):
-                    until = getattr(args, "until", [])
-                    if until and not isinstance(until, list):
-                        until = [until]
-                    return args.prompt, until
-                if hasattr(args, "context"):
-                    return args.context, []
-            return str(instance), []
-
-        if isinstance(instance, tuple):
-            if len(instance) >= 2:
-                stop = instance[1]
-                if not isinstance(stop, list):
-                    stop = [stop] if stop else []
-                return instance[0], stop
-            return instance[0], []
-
-        if isinstance(instance, dict):
-            stop = instance.get("until", [])
-            if not isinstance(stop, list):
-                stop = [stop] if stop else []
-            return instance.get("prompt", ""), stop
-
-        return str(instance), []
 
     def _extract_instance_data(
         self, instance: Any
@@ -213,10 +186,9 @@ class GeminiLM(LM):
                 continue
 
             # Build contents: audio parts first, then the text prompt
+            contents: Union[str, list] = prompt
             if audio_dicts:
                 contents = self._audio_dicts_to_parts(audio_dicts) + [prompt]
-            else:
-                contents = prompt
 
             final_response = ""
             for attempt in range(self.max_retries):
@@ -251,7 +223,8 @@ class GeminiLM(LM):
         Returns dummy values.
         """
         logger.info(
-            f"LOGLIKELIHOOD called with {len(instances)} instances (returning dummy values)"
+            "LOGLIKELIHOOD called with %d instances (returning dummy values)",
+            len(instances),
         )
         return [(0.0, True) for _ in instances]
 
@@ -263,7 +236,8 @@ class GeminiLM(LM):
         Returns dummy values.
         """
         logger.info(
-            f"LOGLIKELIHOOD_ROLLING called with {len(instances)} instances (returning dummy values)"
+            "LOGLIKELIHOOD_ROLLING called with %d instances (returning dummy values)",
+            len(instances),
         )
         return [[(0.0, True)] for _ in instances]
 
@@ -273,8 +247,6 @@ class GeminiLM(LM):
 
     def _tokenize(self, text: str) -> List[str]:
         """Simple tokenization fallback using regex split."""
-        import re
-
         return [t for t in re.split(r"\s+|[,.!?;:\"()\[\]{}]", text) if t]
 
     def _count_tokens(self, text: str) -> int:
@@ -284,7 +256,7 @@ class GeminiLM(LM):
                 model=self.model_name,
                 contents=text,
             )
-            return resp.total_tokens
+            return resp.total_tokens or 0
         except Exception:
             return len(self._tokenize(text))
 
@@ -376,31 +348,36 @@ class GeminiLM(LM):
                 if response_text.strip() == "":
                     if attempt < self.max_retries - 1:
                         logger.warning(
-                            f"Empty completion response, "
-                            f"attempt {attempt + 1}/{self.max_retries}. Retrying..."
+                            "Empty completion response, attempt %d/%d. Retrying...",
+                            attempt + 1,
+                            self.max_retries,
                         )
                         time.sleep(self.retry_timeout * (attempt + 1))
                         continue
-                    else:
-                        logger.error(
-                            f"All {self.max_retries} attempts returned empty response. "
-                            "Returning empty string."
-                        )
-                        final_response = ""
-                        break
-                else:
-                    final_response = response_text
+
+                    logger.error(
+                        "All %d attempts returned empty response. Returning empty string.",
+                        self.max_retries,
+                    )
+                    final_response = ""
                     break
+
+                final_response = response_text
+                break
 
             except Exception as e:
                 logger.warning(
-                    f"Completion error, attempt {attempt + 1}/{self.max_retries}: {e}"
+                    "Completion error, attempt %d/%d: %s",
+                    attempt + 1,
+                    self.max_retries,
+                    e,
                 )
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_timeout * (attempt + 1))
                 else:
                     logger.error(
-                        f"All attempts failed. Last error: {e}. Returning empty string."
+                        "All attempts failed. Last error: %s. Returning empty string.",
+                        e,
                     )
                     final_response = ""
                     break

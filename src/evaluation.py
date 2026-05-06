@@ -22,8 +22,8 @@ from src.processors.llm_judge_operations import LLMJudgeProcessor
 from src.processors.result_processing import ResultProcessor
 from src.processors.task_operations import TaskOperations
 
-from src.gemini_adapter import GeminiLM
-from src.groq_adapter import GroqLM
+from src.gemini_adapter import GeminiLM  # noqa: F401  # pylint: disable=unused-import
+from src.groq_adapter import GroqLM  # noqa: F401  # pylint: disable=unused-import
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
