@@ -4,13 +4,18 @@ This adapter uses the official Groq SDK to interact with Groq Cloud API by:
 1. Using the native Groq Python client
 2. Cleaning messages to ensure API compatibility
 3. Handling Groq-specific limitations (no loglikelihood support)
+4. Supporting audio via base64-encoded content parts for audio-capable models
 """
 
+import base64
+import io
 import logging
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import numpy as np
+import soundfile as sf  # type: ignore[import-untyped]
 from groq import Groq
 from lm_eval.api.model import LM  # type: ignore[import-untyped]
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
@@ -25,8 +30,11 @@ class GroqLM(LM):
     Groq-specific adapter using the official Groq SDK.
 
     This adapter uses the native Groq client and ensures message compatibility
-    with Groq Cloud API.
+    with Groq Cloud API. Audio is supported by sending base64-encoded audio
+    as content parts to audio-capable models.
     """
+
+    MULTIMODAL = True
 
     def __init__(
         self,
@@ -198,51 +206,70 @@ class GroqLM(LM):
             "content": str(content)
         }
 
-    def _extract_instance_data(self, instance: Any) -> Tuple[str, List[str]]:
+    def _extract_instance_data(
+        self, instance: Any
+    ) -> Tuple[str, List[str], Optional[List[dict]]]:
         """
-        Extract prompt and stop sequences from various instance formats.
-
-        Args:
-            instance: Request instance (can be Instance object, tuple, dict, or string)
+        Extract prompt, stop sequences, and audio data from various instance formats.
 
         Returns:
-            Tuple of (prompt, stop_sequences)
+            Tuple of (prompt, stop_sequences, audio_dicts_or_None).
+            audio_dicts items are {"array": np.ndarray, "sampling_rate": int}.
         """
-        prompt: str = ""
-        stop: List[str] = []
+        audio = None
 
-        # Handle Instance objects from lm_eval
-        if hasattr(instance, "__class__") and instance.__class__.__name__ == "Instance":
-            if hasattr(instance, "args"):
-                args = instance.args
-                if hasattr(args, "prompt"):
-                    prompt = args.prompt
-                    until = getattr(args, "until", [])
-                    if until and not isinstance(until, list):
-                        until = [until] if until else []
-                    stop = until
-                elif hasattr(args, "context"):
-                    prompt = args.context
-                else:
-                    prompt = str(instance)
-            else:
-                prompt = str(instance)
-        elif isinstance(instance, tuple):
-            prompt = instance[0]
-            if len(instance) >= 2:
-                raw_stop = instance[1]
-                stop = raw_stop if isinstance(raw_stop, list) else ([raw_stop] if raw_stop else [])
-        elif isinstance(instance, dict):
-            prompt = str(instance.get("prompt", instance.get("context", "")))
-            raw_stop = instance.get("until", [])
-            if isinstance(raw_stop, list):
-                stop = [str(s) for s in raw_stop]
-            else:
-                stop = [str(raw_stop)] if raw_stop else []
-        else:
-            prompt = str(instance)
+        if hasattr(instance, "args"):
+            args = instance.args
+            # Multimodal: args is (prompt_obj, gen_kwargs, auxiliary_args)
+            if len(args) >= 3:
+                aux = args[2]
+                audio = aux.get("audio") if isinstance(aux, dict) else None
 
-        return prompt, stop
+            prompt_obj = args[0] if args else instance
+            gen_kwargs = args[1] if len(args) > 1 else {}
+            until = gen_kwargs.get("until", []) if isinstance(gen_kwargs, dict) else []
+            if isinstance(until, str):
+                until = [until]
+
+            prompt_str = (
+                prompt_obj.prompt if hasattr(prompt_obj, "prompt") else str(prompt_obj)
+            )
+            return prompt_str, until, audio
+
+        if isinstance(instance, tuple):
+            stop = instance[1] if len(instance) >= 2 else []
+            if not isinstance(stop, list):
+                stop = [stop] if stop else []
+            return instance[0], stop, None
+
+        if isinstance(instance, dict):
+            stop = instance.get("until", [])
+            if not isinstance(stop, list):
+                stop = [stop] if stop else []
+            return instance.get("prompt", ""), stop, None
+
+        return str(instance), [], None
+
+    # ---------------------------------------------------------------------
+    # Audio utilities
+    # ---------------------------------------------------------------------
+
+    @staticmethod
+    def _audio_dicts_to_content_parts(audio_dicts: List[dict]) -> list:
+        """Convert lm_eval audio dicts to OpenAI-compatible input_audio content parts."""
+        parts = []
+        for audio in audio_dicts:
+            array = np.array(audio["array"])
+            if array.dtype != np.float32:
+                array = array.astype(np.float32)
+            buf = io.BytesIO()
+            sf.write(buf, array, audio["sampling_rate"], format="WAV", subtype="PCM_16")
+            encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+            parts.append({
+                "type": "input_audio",
+                "input_audio": {"data": encoded, "format": "wav"},
+            })
+        return parts
 
     # ---------------------------------------------------------------------
     # API request with retry logic
@@ -329,22 +356,21 @@ class GroqLM(LM):
         results = []
 
         for instance in tqdm(requests, desc=f"Generating {self.model_name}", unit="req"):
-            # Extract prompt and stop sequences
-            prompt, stop_seqs = self._extract_instance_data(instance)
+            prompt, stop_seqs, audio_dicts = self._extract_instance_data(instance)
 
-            logger.debug("Prompt length: %d chars", len(prompt))
-            logger.debug("Stop sequences: %s", stop_seqs)
-
-            # Handle empty prompts
-            if not prompt or not prompt.strip():
+            if not prompt and not audio_dicts:
                 logger.warning("Empty prompt encountered")
                 results.append("")
                 continue
 
-            # Create cleaned message
-            messages = [self._clean_message({"role": "user", "content": prompt})]
+            if audio_dicts:
+                content: Union[str, list] = self._audio_dicts_to_content_parts(audio_dicts)
+                if prompt:
+                    content.append({"type": "text", "text": prompt})
+                messages: List[Dict[str, Any]] = [{"role": "user", "content": content}]
+            else:
+                messages = [self._clean_message({"role": "user", "content": prompt})]
 
-            # Make request with retry
             response = self._make_request_with_retry(
                 messages=messages,
                 stop=stop_seqs if stop_seqs else None
