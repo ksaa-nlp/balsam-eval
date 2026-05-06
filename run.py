@@ -14,6 +14,7 @@ from src.adapter_utils import process_adapter_and_url
 from src.core.common import (
     copy_audio_to_temp,
     copy_images_to_temp,
+    copy_metrics_combined_to_temp,
     copy_multimodal_utils_to_temp,
     set_api_key_for_adapter,
     setup_directories,
@@ -402,8 +403,9 @@ def main() -> None:
     # Setup directories
     setup_directories(TEMP_DIR, RESULTS_DIR)
 
-    # Copy multimodal utils
+    # Copy multimodal utils and metrics to temp for lm_eval
     copy_multimodal_utils_to_temp(TEMP_DIR)
+    copy_metrics_combined_to_temp(TEMP_DIR)
 
     # Load configuration
     config = EvalConfig.from_env()
