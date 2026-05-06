@@ -6,15 +6,15 @@ This adapter uses the official Groq SDK to interact with Groq Cloud API by:
 3. Handling Groq-specific limitations (no loglikelihood support)
 """
 
-import os
 import logging
+import os
 import time
-from typing import Dict, List, Optional, Tuple, Any, Union
-from tqdm import tqdm
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from groq import Groq
-from lm_eval.api.model import LM
-from lm_eval.api.registry import register_model
+from lm_eval.api.model import LM  # type: ignore[import-untyped]
+from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class GroqLM(LM):
         **kwargs,
     ):
         super().__init__()
-        
+
         # Support both 'model' and 'model_name' parameters
         self.model_name = model or model_name or os.environ.get("MODEL", "llama-3.3-70b-versatile")
         self.temperature = temperature
@@ -49,7 +49,7 @@ class GroqLM(LM):
         self.retry_timeout = retry_timeout
         self.max_retries = max_retries
         self._tokenizer_name = self.model_name
-        
+
         # Get API key from parameters or environment
         api_key = api_key or os.environ.get("API_KEY") or os.environ.get("GROQ_API_KEY")
         if not api_key:
@@ -57,7 +57,7 @@ class GroqLM(LM):
                 "No API key provided. Set GROQ_API_KEY or API_KEY environment variable "
                 "or pass api_key parameter."
             )
-        
+
         # Default Groq base URL
         base_url = base_url or os.environ.get("BASE_URL") or "https://api.groq.com"
 
@@ -71,8 +71,8 @@ class GroqLM(LM):
             api_key=api_key,
             base_url=base_url
         )
-        
-        logger.info(f"✅ Initialized GroqLM with model '{self.model_name}' at {base_url}")
+
+        logger.info("Initialized GroqLM with model '%s' at %s", self.model_name, base_url)
 
     # ---------------------------------------------------------------------
     # Required LM Eval properties
@@ -89,6 +89,7 @@ class GroqLM(LM):
 
     @property
     def batch_size(self) -> int:
+        """Default batch size for Groq requests."""
         return 8
 
     # ---------------------------------------------------------------------
@@ -129,7 +130,7 @@ class GroqLM(LM):
             if base_url.endswith(pattern):
                 base_url = base_url[:-len(pattern)]
                 base_url = base_url.rstrip('/')  # Remove any trailing slash after removal
-                logger.info(f"Removed endpoint path '{pattern}' from base_url")
+                logger.info("Removed endpoint path '%s' from base_url", pattern)
                 break
 
         return base_url
@@ -142,18 +143,18 @@ class GroqLM(LM):
     def _clean_message(message: Union[Dict[str, Any], str]) -> Dict[str, str]:
         """
         Clean message to ensure Groq API compatibility.
-        
+
         Groq's API only accepts standard OpenAI format:
         {
             "role": "system" | "user" | "assistant",
             "content": "string"
         }
-        
+
         Any other properties (like 'type', 'name', etc.) will cause errors.
-        
+
         Args:
             message: Message dict or string
-            
+
         Returns:
             Cleaned message dict with only 'role' and 'content'
         """
@@ -162,17 +163,17 @@ class GroqLM(LM):
                 "role": "user",
                 "content": message
             }
-        
+
         if not isinstance(message, dict):
             return {
                 "role": "user",
                 "content": str(message)
             }
-        
+
         # Extract only the supported fields
         role = message.get("role", "user")
         content = message.get("content", "")
-        
+
         # Ensure content is a string (not a list or dict)
         if isinstance(content, (list, dict)):
             # If content is structured (like multimodal), convert to string
@@ -191,7 +192,7 @@ class GroqLM(LM):
             else:
                 # Dict content
                 content = str(content)
-        
+
         return {
             "role": role,
             "content": str(content)
@@ -200,13 +201,16 @@ class GroqLM(LM):
     def _extract_instance_data(self, instance: Any) -> Tuple[str, List[str]]:
         """
         Extract prompt and stop sequences from various instance formats.
-        
+
         Args:
             instance: Request instance (can be Instance object, tuple, dict, or string)
-            
+
         Returns:
             Tuple of (prompt, stop_sequences)
         """
+        prompt: str = ""
+        stop: List[str] = []
+
         # Handle Instance objects from lm_eval
         if hasattr(instance, "__class__") and instance.__class__.__name__ == "Instance":
             if hasattr(instance, "args"):
@@ -216,30 +220,29 @@ class GroqLM(LM):
                     until = getattr(args, "until", [])
                     if until and not isinstance(until, list):
                         until = [until] if until else []
-                    return prompt, until
-                if hasattr(args, "context"):
-                    return args.context, []
-            return str(instance), []
-        
-        # Handle tuple format: (prompt, stop_sequences)
-        if isinstance(instance, tuple):
+                    stop = until
+                elif hasattr(args, "context"):
+                    prompt = args.context
+                else:
+                    prompt = str(instance)
+            else:
+                prompt = str(instance)
+        elif isinstance(instance, tuple):
+            prompt = instance[0]
             if len(instance) >= 2:
-                stop = instance[1]
-                if not isinstance(stop, list):
-                    stop = [stop] if stop else []
-                return instance[0], stop
-            return instance[0], []
-        
-        # Handle dict format
-        if isinstance(instance, dict):
-            prompt = instance.get("prompt", instance.get("context", ""))
-            stop = instance.get("until", [])
-            if not isinstance(stop, list):
-                stop = [stop] if stop else []
-            return prompt, stop
-        
-        # Fallback: convert to string
-        return str(instance), []
+                raw_stop = instance[1]
+                stop = raw_stop if isinstance(raw_stop, list) else ([raw_stop] if raw_stop else [])
+        elif isinstance(instance, dict):
+            prompt = str(instance.get("prompt", instance.get("context", "")))
+            raw_stop = instance.get("until", [])
+            if isinstance(raw_stop, list):
+                stop = [str(s) for s in raw_stop]
+            else:
+                stop = [str(raw_stop)] if raw_stop else []
+        else:
+            prompt = str(instance)
+
+        return prompt, stop
 
     # ---------------------------------------------------------------------
     # API request with retry logic
@@ -253,54 +256,54 @@ class GroqLM(LM):
     ) -> str:
         """
         Make a request to Groq API with retry logic.
-        
+
         Args:
             messages: List of message dicts (already cleaned)
             stop: Optional stop sequences
             max_tokens: Optional max tokens override
-            
+
         Returns:
             Generated text (or empty string on failure)
         """
         final_response = ""
-        
+
         for attempt in range(self.max_retries):
             try:
-                logger.debug(f"API call attempt {attempt + 1}/{self.max_retries}")
-                
+                logger.debug("API call attempt %d/%d", attempt + 1, self.max_retries)
+
                 response = self.client.chat.completions.create(
                     model=self.model_name,
-                    messages=messages,
+                    messages=messages,  # type: ignore[arg-type]
                     temperature=self.temperature,
                     max_tokens=max_tokens or self.max_tokens,
                     stop=stop if stop else None,
                 )
-                
+
                 response_text = response.choices[0].message.content or ""
-                
+
                 if response_text.strip():
                     final_response = response_text
-                    logger.debug(f"✅ Got valid response: {len(response_text)} chars")
+                    logger.debug("Got valid response: %d chars", len(response_text))
                     break
+
+                if attempt < self.max_retries - 1:
+                    logger.warning("Empty response, retrying...")
+                    time.sleep(self.retry_timeout * (attempt + 1))
                 else:
-                    if attempt < self.max_retries - 1:
-                        logger.warning(f"Empty response, retrying...")
-                        time.sleep(self.retry_timeout * (attempt + 1))
-                    else:
-                        logger.error(f"All retries returned empty response")
-                        final_response = ""
-                
-            except Exception as e:
-                logger.error(f"API error (attempt {attempt + 1}): {type(e).__name__}: {e}")
-                
+                    logger.error("All retries returned empty response")
+                    final_response = ""
+
+            except Exception as e:  # noqa: BLE001
+                logger.error("API error (attempt %d): %s: %s", attempt + 1, type(e).__name__, e)
+
                 if attempt < self.max_retries - 1:
                     wait_time = self.retry_timeout * (attempt + 1)
-                    logger.info(f"⏳ Waiting {wait_time}s before retry...")
+                    logger.info("Waiting %.0fs before retry...", wait_time)
                     time.sleep(wait_time)
                 else:
-                    logger.error(f"All attempts failed. Using empty string.")
+                    logger.error("All attempts failed. Using empty string.")
                     final_response = ""
-        
+
         return final_response
 
     # ---------------------------------------------------------------------
@@ -310,18 +313,18 @@ class GroqLM(LM):
     def generate_until(self, instances: List[Any]) -> List[str]:
         """
         Generate text until stop sequences are encountered.
-        
+
         This is the main method used by lm_eval for text generation tasks.
-        
+
         Args:
             instances: List of request instances
-            
+
         Returns:
             List of generated strings (same length as instances)
         """
-        logger.info(f"{'=' * 80}")
-        logger.info(f"GENERATE_UNTIL called with {len(instances)} instances")
-        logger.info(f"{'=' * 80}")
+        logger.info("=" * 80)
+        logger.info("GENERATE_UNTIL called with %d instances", len(instances))
+        logger.info("=" * 80)
 
         results = []
 
@@ -329,12 +332,12 @@ class GroqLM(LM):
             # Extract prompt and stop sequences
             prompt, stop_seqs = self._extract_instance_data(instance)
 
-            logger.debug(f"Prompt length: {len(prompt)} chars")
-            logger.debug(f"Stop sequences: {stop_seqs}")
+            logger.debug("Prompt length: %d chars", len(prompt))
+            logger.debug("Stop sequences: %s", stop_seqs)
 
             # Handle empty prompts
             if not prompt or not prompt.strip():
-                logger.warning(f"Empty prompt encountered")
+                logger.warning("Empty prompt encountered")
                 results.append("")
                 continue
 
@@ -348,28 +351,28 @@ class GroqLM(LM):
             )
 
             results.append(response)
-        
-        logger.info(f"\n{'=' * 80}")
-        logger.info(f"GENERATE_UNTIL COMPLETE")
-        logger.info(f"Input requests: {len(instances)}")
-        logger.info(f"Output results: {len(results)}")
-        logger.info(f"Match: {'✅ YES' if len(results) == len(instances) else '❌ NO'}")
-        logger.info(f"{'=' * 80}\n")
-        
+
+        logger.info("\n%s", "=" * 80)
+        logger.info("GENERATE_UNTIL COMPLETE")
+        logger.info("Input requests: %d", len(instances))
+        logger.info("Output results: %d", len(results))
+        logger.info("Match: %s", "YES" if len(results) == len(instances) else "NO")
+        logger.info("%s\n", "=" * 80)
+
         # Ensure 1:1 mapping
         assert len(results) == len(instances), (
             f"Result count mismatch: {len(results)} results for {len(instances)} requests"
         )
-        
+
         return results
 
     def greedy_until(self, instances: List[Any]) -> List[str]:
         """
         Greedy generation (same as generate_until with temperature=0).
-        
+
         Args:
             instances: List of request instances
-            
+
         Returns:
             List of generated strings
         """
@@ -384,13 +387,14 @@ class GroqLM(LM):
         """
         Groq API does not support loglikelihood computation.
         Returns dummy values to allow evaluation to continue.
-        
+
         Note: Metrics that require loglikelihood will not work correctly.
         """
         logger.warning(
-            f"⚠️  Groq doesn't support loglikelihood. "
-            f"Returning dummy values for {len(instances)} instances. "
-            f"Accuracy and perplexity metrics will not be accurate."
+            "Groq doesn't support loglikelihood. "
+            "Returning dummy values for %d instances. "
+            "Accuracy and perplexity metrics will not be accurate.",
+            len(instances),
         )
         return [(0.0, True) for _ in instances]
 
@@ -402,8 +406,9 @@ class GroqLM(LM):
         Returns dummy values.
         """
         logger.warning(
-            f"⚠️  Groq doesn't support loglikelihood_rolling. "
-            f"Returning dummy values for {len(instances)} instances."
+            "Groq doesn't support loglikelihood_rolling. "
+            "Returning dummy values for %d instances.",
+            len(instances),
         )
         return [[(0.0, True)] for _ in instances]
 

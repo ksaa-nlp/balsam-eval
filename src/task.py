@@ -674,7 +674,7 @@ class LMHDataset:
             "metadata": self.metadata,
             **self.task_kwargs,
         }
-        
+
         if has_images:
             yaml_config["doc_to_image"] = "!function multimodal_utils.doc_to_image"
             logger.info("Dataset contains images - adding doc_to_image function")
@@ -691,15 +691,15 @@ class LMHDataset:
             data: YAML configuration dictionary
         """
         out_path = Path(self.directory) / f"{self.file_name}.yaml"
-        
+
         doc_to_image_value = data.pop("doc_to_image", None)
         is_doc_to_image_function_tag = (
             doc_to_image_value
             and isinstance(doc_to_image_value, str)
             and doc_to_image_value.startswith("!function")
         )
-        
-        
+
+
         doc_to_audio_value = data.pop("doc_to_audio", None)
         is_doc_to_audio_function_tag = (
             doc_to_audio_value

@@ -3,14 +3,12 @@ Utilities for multimodal datasets in Balsam Eval.
 """
 
 import os
+from typing import Any, Dict, List, Union
 
-import numpy as np
-from PIL import Image
 import librosa
+import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
-
-
-from typing import Dict, Any, List, Union
+from PIL import Image
 
 
 def doc_to_image(doc: Dict[str, Any]) -> List[Image.Image]:

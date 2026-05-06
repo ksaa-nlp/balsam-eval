@@ -6,9 +6,10 @@ import os
 from statistics import mean
 from typing import Any, Dict
 
-from src.db_operations import add_results_to_db
-from src.core.helpers import normalize_string
 import numpy as np
+
+from src.core.helpers import normalize_string
+from src.db_operations import add_results_to_db
 
 
 logger = logging.getLogger(__name__)

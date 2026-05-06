@@ -56,18 +56,21 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 check_untyped_defs = true
+exclude = ["_api_models\\.temp\\.py$"]
 
 # Ignore external dependencies that don't have stubs
 [[tool.mypy.overrides]]
 module = [
     "google.cloud.*",
+    "lm_eval.*",
     "pyarabic.*",
     "evaluate.*",
+    "soundfile.*",
 ]
 ignore_missing_imports = true
 
 [tool.pylint.master]
-ignore = [".venv",".history",".mypy_cache","build","dist","__pycache__",".pytest_cache",".vscode",".idea",".git",".github",".balsam_eval_cache",".balsam_eval_logs",".balsam_eval_results",".temp","ignores"]
+ignore = [".venv",".history",".mypy_cache","build","dist","__pycache__",".pytest_cache",".vscode",".idea",".git",".github",".balsam_eval_cache",".balsam_eval_logs",".balsam_eval_results",".temp","ignores","_api_models.temp.py"]
 
 [tool.pylint.messages_control]
 # Disable specific messages for entire project
