@@ -38,7 +38,7 @@ class GroqLM(LM):
         max_tokens: int = 4096,
         retry_timeout: float = 30.0,
         max_retries: int = 3,
-        **kwargs,
+        **_kwargs,
     ):
         super().__init__()
 
@@ -293,7 +293,7 @@ class GroqLM(LM):
                     logger.error("All retries returned empty response")
                     final_response = ""
 
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001  # pylint: disable=broad-exception-caught
                 logger.error("API error (attempt %d): %s: %s", attempt + 1, type(e).__name__, e)
 
                 if attempt < self.max_retries - 1:
@@ -310,25 +310,25 @@ class GroqLM(LM):
     # Generation methods
     # ---------------------------------------------------------------------
 
-    def generate_until(self, instances: List[Any]) -> List[str]:
+    def generate_until(self, requests: List[Any]) -> List[str]:
         """
         Generate text until stop sequences are encountered.
 
         This is the main method used by lm_eval for text generation tasks.
 
         Args:
-            instances: List of request instances
+            requests: List of request instances
 
         Returns:
-            List of generated strings (same length as instances)
+            List of generated strings (same length as requests)
         """
         logger.info("=" * 80)
-        logger.info("GENERATE_UNTIL called with %d instances", len(instances))
+        logger.info("GENERATE_UNTIL called with %d requests", len(requests))
         logger.info("=" * 80)
 
         results = []
 
-        for instance in tqdm(instances, desc=f"Generating {self.model_name}", unit="req"):
+        for instance in tqdm(requests, desc=f"Generating {self.model_name}", unit="req"):
             # Extract prompt and stop sequences
             prompt, stop_seqs = self._extract_instance_data(instance)
 
@@ -354,19 +354,19 @@ class GroqLM(LM):
 
         logger.info("\n%s", "=" * 80)
         logger.info("GENERATE_UNTIL COMPLETE")
-        logger.info("Input requests: %d", len(instances))
+        logger.info("Input requests: %d", len(requests))
         logger.info("Output results: %d", len(results))
-        logger.info("Match: %s", "YES" if len(results) == len(instances) else "NO")
+        logger.info("Match: %s", "YES" if len(results) == len(requests) else "NO")
         logger.info("%s\n", "=" * 80)
 
         # Ensure 1:1 mapping
-        assert len(results) == len(instances), (
-            f"Result count mismatch: {len(results)} results for {len(instances)} requests"
+        assert len(results) == len(requests), (
+            f"Result count mismatch: {len(results)} results for {len(requests)} requests"
         )
 
         return results
 
-    def greedy_until(self, instances: List[Any]) -> List[str]:
+    def greedy_until(self, requests: List[Any]) -> List[str]:
         """
         Greedy generation (same as generate_until with temperature=0).
 
@@ -377,13 +377,13 @@ class GroqLM(LM):
             List of generated strings
         """
         # For Groq, greedy_until is the same as generate_until when temperature=0
-        return self.generate_until(instances)
+        return self.generate_until(requests)
 
     # ---------------------------------------------------------------------
     # Loglikelihood (unsupported by Groq)
     # ---------------------------------------------------------------------
 
-    def loglikelihood(self, instances: List[Any]) -> List[Tuple[float, bool]]:
+    def loglikelihood(self, requests: List[Any]) -> List[Tuple[float, bool]]:
         """
         Groq API does not support loglikelihood computation.
         Returns dummy values to allow evaluation to continue.
@@ -392,14 +392,14 @@ class GroqLM(LM):
         """
         logger.warning(
             "Groq doesn't support loglikelihood. "
-            "Returning dummy values for %d instances. "
+            "Returning dummy values for %d requests. "
             "Accuracy and perplexity metrics will not be accurate.",
-            len(instances),
+            len(requests),
         )
-        return [(0.0, True) for _ in instances]
+        return [(0.0, True) for _ in requests]
 
     def loglikelihood_rolling(
-        self, instances: List[Any]
+        self, requests: List[Any]
     ) -> List[List[Tuple[float, bool]]]:
         """
         Groq API does not support rolling loglikelihood computation.
@@ -407,10 +407,10 @@ class GroqLM(LM):
         """
         logger.warning(
             "Groq doesn't support loglikelihood_rolling. "
-            "Returning dummy values for %d instances.",
-            len(instances),
+            "Returning dummy values for %d requests.",
+            len(requests),
         )
-        return [[(0.0, True)] for _ in instances]
+        return [[(0.0, True)] for _ in requests]
 
     # ---------------------------------------------------------------------
     # Chat template support

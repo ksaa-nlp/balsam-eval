@@ -42,7 +42,7 @@ class GeminiLM(LM):
         top_k: int = 40,
         retry_timeout: float = 30.0,
         max_retries: int = 3,
-        **kwargs,
+        **_kwargs,
     ):
         super().__init__()
 
@@ -170,14 +170,14 @@ class GeminiLM(LM):
     # Generation with GUARANTEED 1:1 Mapping
     # ---------------------------------------------------------------------
 
-    def generate_until(self, instances: List[Any]) -> List[str]:
+    def generate_until(self, requests: List[Any]) -> List[str]:
         logger.info("=" * 80)
-        logger.info("GENERATE_UNTIL called with %d instances", len(instances))
+        logger.info("GENERATE_UNTIL called with %d requests", len(requests))
         logger.info("=" * 80)
 
         results = []
 
-        for idx, instance in enumerate(instances):
+        for idx, instance in enumerate(requests):
             prompt, stop_seqs, audio_dicts = self._extract_instance_data(instance)
 
             if not prompt and not audio_dicts:
@@ -204,42 +204,42 @@ class GeminiLM(LM):
                         break
                     if attempt < self.max_retries - 1:
                         time.sleep(self.retry_timeout * (attempt + 1))
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     logger.error("Generation error idx=%d attempt=%d: %s", idx, attempt + 1, e)
                     if attempt < self.max_retries - 1:
                         time.sleep(self.retry_timeout * (attempt + 1))
 
             results.append(final_response)
 
-        assert len(results) == len(instances)
+        assert len(results) == len(requests)
         return results
     # ---------------------------------------------------------------------
     # Loglikelihood (unsupported by Gemini)
     # ---------------------------------------------------------------------
 
-    def loglikelihood(self, instances: List[Any]) -> List[Tuple[float, bool]]:
+    def loglikelihood(self, requests: List[Any]) -> List[Tuple[float, bool]]:
         """
         Gemini API does not support loglikelihood computation.
         Returns dummy values.
         """
         logger.info(
-            "LOGLIKELIHOOD called with %d instances (returning dummy values)",
-            len(instances),
+            "LOGLIKELIHOOD called with %d requests (returning dummy values)",
+            len(requests),
         )
-        return [(0.0, True) for _ in instances]
+        return [(0.0, True) for _ in requests]
 
     def loglikelihood_rolling(
-        self, instances: List[Any]
+        self, requests: List[Any]
     ) -> List[List[Tuple[float, bool]]]:
         """
         Gemini API does not support rolling loglikelihood computation.
         Returns dummy values.
         """
         logger.info(
-            "LOGLIKELIHOOD_ROLLING called with %d instances (returning dummy values)",
-            len(instances),
+            "LOGLIKELIHOOD_ROLLING called with %d requests (returning dummy values)",
+            len(requests),
         )
-        return [[(0.0, True)] for _ in instances]
+        return [[(0.0, True)] for _ in requests]
 
     # ---------------------------------------------------------------------
     # Tokenization
@@ -257,7 +257,7 @@ class GeminiLM(LM):
                 contents=text,
             )
             return resp.total_tokens or 0
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return len(self._tokenize(text))
 
     def token_count(self, instances: List[str]) -> List[int]:
@@ -288,15 +288,15 @@ class GeminiLM(LM):
 
     def apply_chat_template(
         self,
-        messages: Union[List[Dict[str, Any]], List[Dict[str, str]], str],
+        chat_history: Union[List[Dict[str, Any]], List[Dict[str, str]], str],
         add_generation_prompt: bool = True,
-        **kwargs,
+        **_kwargs,
     ) -> str:
         """Apply chat template to messages."""
-        if isinstance(messages, str):
-            return messages
+        if isinstance(chat_history, str):
+            return chat_history
 
-        prompt = self._format_chat_prompt(messages)
+        prompt = self._format_chat_prompt(chat_history)
         if add_generation_prompt:
             prompt += "\n\nAssistant:"
         return prompt
@@ -365,7 +365,7 @@ class GeminiLM(LM):
                 final_response = response_text
                 break
 
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.warning(
                     "Completion error, attempt %d/%d: %s",
                     attempt + 1,

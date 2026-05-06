@@ -36,6 +36,41 @@ def copy_multimodal_utils_to_temp(temp_dir: str = ".temp") -> str | None:
     return None
 
 
+def copy_metrics_combined_to_temp(temp_dir: str = ".temp") -> str | None:
+    """Write a proxy metrics_combined module to temp directory for lm_eval.
+
+    lm_eval resolves !function references relative to the YAML directory and
+    loads the module as a fresh instance. A plain copy would have
+    CURRENT_COMBINED_FUNCTION=None since task.py sets it on the original
+    module in sys.modules. This proxy delegates to the real module at call
+    time so the global is resolved correctly.
+
+    Args:
+        temp_dir: Directory to write the proxy to
+
+    Returns:
+        Path to the proxy file, or None if source not found
+    """
+    metrics_src = "src/metrics_combined.py"
+    metrics_dst = os.path.join(temp_dir, "src.metrics_combined.py")
+
+    if os.path.exists(metrics_src):
+        os.makedirs(temp_dir, exist_ok=True)
+        proxy_content = (
+            "import sys\n"
+            "\n"
+            "def _current_combined_process_results(doc, results):\n"
+            "    real = sys.modules['src.metrics_combined']\n"
+            "    return real._current_combined_process_results(doc, results)\n"
+        )
+        with open(metrics_dst, "w", encoding="utf-8") as f:
+            f.write(proxy_content)
+        print(f"Wrote metrics_combined proxy to {metrics_dst}")
+        return metrics_dst
+    print(f"Warning: {metrics_src} not found")
+    return None
+
+
 def copy_images_to_temp(json_file_path: str, temp_dir: str) -> None:
     """Copy images referenced in JSON file to temp directory.
 
