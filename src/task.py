@@ -615,6 +615,17 @@ class LMHDataset:
                 # Single custom metric - use its full config
                 final_yaml = metric_objects[0].get_yaml_config(base_yaml)
 
+                # Wire up process_results via the combined function wrapper
+                # so _write_yaml emits it as a !function tag
+                if metric_objects[0].config.process_results is not None:
+                    import src.metrics_combined as mc_module  # pylint: disable=import-outside-toplevel
+                    mc_module.CURRENT_COMBINED_FUNCTION = (
+                        metric_objects[0].config.process_results
+                    )
+                    final_yaml["process_results"] = (
+                        "!function src.metrics_combined._current_combined_process_results"
+                    )
+
         # Write YAML
         self._write_yaml(final_yaml)
 

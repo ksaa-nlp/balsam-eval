@@ -144,6 +144,25 @@ class ResultProcessor:
         )
         return average_scores
 
+    @staticmethod
+    def _strip_audio_data(results: Dict[str, Any]) -> None:
+        """Remove large audio array data from results to reduce file size."""
+        samples = results.get("samples", {})
+        for task_samples in samples.values():
+            if not isinstance(task_samples, list):
+                continue
+            for sample in task_samples:
+                # audio arrays live in arguments[i][2]["audio"]
+                for arg_tuple in sample.get("arguments", []):
+                    if isinstance(arg_tuple, (list, tuple)) and len(arg_tuple) >= 3:
+                        aux = arg_tuple[2]
+                        if isinstance(aux, dict) and "audio" in aux:
+                            del aux["audio"]
+                # also strip from doc["audio"] (file paths, small but noisy)
+                doc = sample.get("doc")
+                if isinstance(doc, dict) and "audio" in doc:
+                    del doc["audio"]
+
     def export_results(self, results: Dict[str, Any]) -> None:
         """Export results to file and optionally to database.
 
@@ -165,6 +184,8 @@ class ResultProcessor:
             if not self.task_id
             else filename
         )
+
+        self._strip_audio_data(results_with_averages)
 
         with open(filepath, "w", encoding="UTF-8") as fp:
             json.dump(results_with_averages, fp, ensure_ascii=False, cls=_NumpyEncoder)
