@@ -233,11 +233,12 @@ class BaseLLMJudge(ABC):
         given_answer: str,
         context: Optional[str],
         config: ModelConfig,
-        adapter: Any
+        adapter: Any,
+        custom_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Evaluate using a single model with proper error handling."""
-        # Create the prompt
-        prompt = self.custom_prompt if self.custom_prompt else self.get_evaluation_prompt()
+        # Create the prompt (per-call > instance-level > default)
+        prompt = custom_prompt or self.custom_prompt or self.get_evaluation_prompt()
         prompt += f'\n\n[PROMPT]\n{question}\n[/PROMPT]\n'
         if context:
             prompt += f'\n[CONTEXT]\n{context}\n[/CONTEXT]\n'
@@ -282,7 +283,8 @@ class BaseLLMJudge(ABC):
         given_answer: str,
         context: Optional[str] = None,
         test_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        custom_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Evaluate a single answer using multiple models."""
         model_results = []
@@ -290,7 +292,8 @@ class BaseLLMJudge(ABC):
         # Evaluate using each model
         for config, adapter in zip(self.model_configs, self.model_adapters):
             result = self._evaluate_single_model(
-                question, reference_answer, given_answer, context, config, adapter
+                question, reference_answer, given_answer, context, config, adapter,
+                custom_prompt=custom_prompt,
             )
             model_results.append(result)
 

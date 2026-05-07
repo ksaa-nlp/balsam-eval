@@ -158,6 +158,7 @@ class LLMJudgeProcessor:
             response = responses[0]
             expected_output = sample.get("doc", {}).get("output", "")
             question = sample.get("doc", {}).get("input", "")
+            custom_prompt = sample.get("doc", {}).get("custom_prompt") or None
 
             logger.debug("Sample %s:", sample_key)
             logger.debug("  Question length: %s chars", len(question))
@@ -217,6 +218,7 @@ class LLMJudgeProcessor:
                         context=None,
                         test_id=f"{sample_key}_{len(all_scores)}",
                         metadata={"task": sample_key},
+                        custom_prompt=custom_prompt,
                     )
 
                     logger.debug(
