@@ -143,12 +143,13 @@ class GeminiLM(LM):
     # ---------------------------------------------------------------------
 
     def _gen_config(self, stop_seqs: Optional[List[str]] = None):
+        filtered = [s for s in stop_seqs if s] if stop_seqs else None
         return types.GenerateContentConfig(
             temperature=self.temperature,
             max_output_tokens=self.max_tokens,
             top_p=self.top_p,
             top_k=self.top_k,
-            stop_sequences=stop_seqs or None,
+            stop_sequences=filtered or None,
         )
 
     def _extract_instance_data(
@@ -382,7 +383,7 @@ class GeminiLM(LM):
                         ),
                         top_p=self.top_p,
                         top_k=self.top_k,
-                        stop_sequences=stop_seqs,
+                        stop_sequences=stop_seqs or None,
                     ),
                 )
 

@@ -18,7 +18,6 @@ import src.metrics  # Registers all metrics in src.metrics.impl.*  # pylint: dis
 
 from src.adapter_utils import get_max_tokens_config
 from src.db_operations import JobStatus, update_status
-from src.processors.llm_judge_operations import LLMJudgeProcessor
 from src.processors.result_processing import ResultProcessor
 from src.processors.task_operations import TaskOperations
 
@@ -83,9 +82,6 @@ class EvaluationJob:
         api_host: Optional[str] = None,
         server_token: Optional[str] = None,
         benchmark_id: Optional[str] = None,
-        llm_judge_model: Optional[str] = None,
-        llm_judge_provider: Optional[str] = None,
-        llm_judge_api_key: Optional[str] = None,
         task_id: Optional[str] = None,
     ):
         """Initialize evaluation job.
@@ -100,9 +96,6 @@ class EvaluationJob:
             api_host: Optional API host URL
             server_token: Optional server token for authentication
             benchmark_id: Optional benchmark ID
-            llm_judge_model: Optional LLM judge model name
-            llm_judge_provider: Optional LLM judge provider
-            llm_judge_api_key: Optional LLM judge API key
             task_id: Optional explicit task ID
         """
         self.model_args = model_args or {}
@@ -123,12 +116,6 @@ class EvaluationJob:
             server_token=server_token,
             benchmark_id=benchmark_id,
             task_id=task_id,
-        )
-        self.llm_judge_processor = LLMJudgeProcessor(
-            task_operations=self.task_ops,
-            llm_judge_api_key=llm_judge_api_key,
-            llm_judge_model=llm_judge_model,
-            llm_judge_provider=llm_judge_provider,
         )
 
         # Setup model args
@@ -185,23 +172,11 @@ class EvaluationJob:
             self._update_status(JobStatus.FAILED, "No results found for the evaluation job.")
             return
 
-        # Separate MCQ and generation tasks
-        mcq_tasks, generation_tasks = self.task_ops.separate_mcq_and_generation_tasks(results)
-
-        # Process with LLM judge if configured
-        updated_results = results
-        updated_results = self.llm_judge_processor.process_generation_tasks(
-            updated_results, generation_tasks
-        )
-        updated_results = self.llm_judge_processor.process_mcq_tasks(
-            updated_results, mcq_tasks
-        )
-
         # Remove API key from results
-        self._sanitize_results(updated_results)
+        self._sanitize_results(results)
 
         # Export results
-        self.result_processor.export_results(updated_results)
+        self.result_processor.export_results(results)
 
         # Update status to completed
         if self.api_host and self.job_id and self.server_token:

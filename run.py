@@ -283,9 +283,6 @@ def run_local_evaluation(config: EvalConfig) -> None:
                 tasks_mapper_dict=task_mapper,
                 category_name=category,
                 job_id=submit_results["jobs_ids"].get(category, None),
-                llm_judge_api_key=config.llm_judge_api_key,
-                llm_judge_model=config.llm_judge,
-                llm_judge_provider=config.llm_judge_provider,
                 server_token=config.server_token,
                 api_host=config.api_host,
                 benchmark_id=config.benchmark_id,
@@ -380,9 +377,6 @@ def run_remote_evaluation(config: EvalConfig) -> None:
                     server_token=config.server_token,
                     category_name=category,
                     benchmark_id=config.benchmark_id,
-                    llm_judge_api_key=config.llm_judge_api_key,
-                    llm_judge_model=config.llm_judge,
-                    llm_judge_provider=config.llm_judge_provider,
                 )
                 job()
                 logger.info("✅ Task '%s' completed successfully", task)

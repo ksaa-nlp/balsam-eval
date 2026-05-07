@@ -152,6 +152,9 @@ class LMHDataset:
         self.metric = task_dict.pop("metric", None)
         self.category_id = task_dict.pop("category", None)
 
+        # Extract task-level custom_prompt before it goes into task_kwargs
+        self.custom_prompt: str | None = task_dict.pop("custom_prompt", None)
+
         # Handle data splitting (Taking last X elements for dev)
         raw_data = task_dict.pop("data", [])
         self.data = raw_data
@@ -479,6 +482,12 @@ class LMHDataset:
                 it["output"] = it["output"][0]
             processed.append(it)
 
+        # Inject task-level custom_prompt into items that don't have their own
+        if self.custom_prompt:
+            for it in processed:
+                if not it.get("custom_prompt"):
+                    it["custom_prompt"] = self.custom_prompt
+
         # Normalize schema
         processed = self._normalize_schema(processed)
 
@@ -614,6 +623,17 @@ class LMHDataset:
             elif len(metric_objects) == 1 and metric_objects[0] is not None:
                 # Single custom metric - use its full config
                 final_yaml = metric_objects[0].get_yaml_config(base_yaml)
+
+                # Wire up process_results via the combined function wrapper
+                # so _write_yaml emits it as a !function tag
+                if metric_objects[0].config.process_results is not None:
+                    import src.metrics_combined as mc_module  # pylint: disable=import-outside-toplevel
+                    mc_module.CURRENT_COMBINED_FUNCTION = (
+                        metric_objects[0].config.process_results
+                    )
+                    final_yaml["process_results"] = (
+                        "!function src.metrics_combined._current_combined_process_results"
+                    )
 
         # Write YAML
         self._write_yaml(final_yaml)

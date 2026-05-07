@@ -106,17 +106,23 @@ class MetricsRegistry:
     def detect_metric_type(self, metric_name: str) -> Optional[str]:
         """Detect if a metric name matches any registered metric.
 
+        Tries exact match first, then falls back to longest substring match.
+
         Args:
             metric_name: Metric name to check
 
         Returns:
             Registered metric name if found, None otherwise
         """
-        metric_name_lower = metric_name.lower()
+        metric_name_lower = metric_name.lower().replace("-", "_")
+        if metric_name_lower in self._metrics:
+            return metric_name_lower
+        best: Optional[str] = None
         for registered in self._metrics:
             if registered in metric_name_lower:
-                return registered
-        return None
+                if best is None or len(registered) > len(best):
+                    best = registered
+        return best
 
 
 # Global singleton
