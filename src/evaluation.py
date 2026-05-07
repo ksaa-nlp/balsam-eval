@@ -76,9 +76,9 @@ class EvaluationJob:
         api_host: Optional[str] = None,
         server_token: Optional[str] = None,
         benchmark_id: Optional[str] = None,
-        llm_judge_model: Optional[str] = None,
-        llm_judge_provider: Optional[str] = None,
-        llm_judge_api_key: Optional[str] = None,
+        llm_judge_model: Optional[List[str]] = None,
+        llm_judge_provider: Optional[List[str]] = None,
+        llm_judge_api_key: Optional[List[str]] = None,
         task_id: Optional[str] = None,
     ):
         """Initialize evaluation job.
@@ -93,9 +93,9 @@ class EvaluationJob:
             api_host: Optional API host URL
             server_token: Optional server token for authentication
             benchmark_id: Optional benchmark ID
-            llm_judge_model: Optional LLM judge model name
-            llm_judge_provider: Optional LLM judge provider
-            llm_judge_api_key: Optional LLM judge API key
+            llm_judge_model: Optional list of LLM judge model names
+            llm_judge_provider: Optional list of LLM judge providers
+            llm_judge_api_key: Optional list of LLM judge API keys
             task_id: Optional explicit task ID
         """
         self.model_args = model_args or {}
@@ -119,9 +119,9 @@ class EvaluationJob:
         )
         self.llm_judge_processor = LLMJudgeProcessor(
             task_operations=self.task_ops,
-            llm_judge_api_key=llm_judge_api_key,
-            llm_judge_model=llm_judge_model,
-            llm_judge_provider=llm_judge_provider,
+            llm_judge_api_keys=llm_judge_api_key,
+            llm_judge_models=llm_judge_model,
+            llm_judge_providers=llm_judge_provider,
         )
 
         # Setup model args

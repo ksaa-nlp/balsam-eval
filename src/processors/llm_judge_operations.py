@@ -23,36 +23,69 @@ class LLMJudgeProcessor:
     def __init__(
         self,
         task_operations: "TaskOperations",
-        llm_judge_api_key: str | None = None,
-        llm_judge_model: str | None = None,
-        llm_judge_provider: str | None = None,
+        llm_judge_api_keys: list[str] | None = None,
+        llm_judge_models: list[str] | None = None,
+        llm_judge_providers: list[str] | None = None,
     ):
         """Initialize LLM judge processor.
 
         Args:
             task_operations: TaskOperations instance for task utilities
-            llm_judge_api_key: API key for LLM judge model
-            llm_judge_model: Name of LLM judge model
-            llm_judge_provider: Provider of LLM judge model
+            llm_judge_api_keys: API keys for LLM judge models (comma-separated in env)
+            llm_judge_models: Names of LLM judge models (comma-separated in env)
+            llm_judge_providers: Providers of LLM judge models (comma-separated in env)
         """
         self.task_operations = task_operations
-        self.llm_judge_api_key = llm_judge_api_key
-        self.llm_judge_model = llm_judge_model
-        self.llm_judge_provider = llm_judge_provider
+        self.model_configs = self._build_model_configs(
+            llm_judge_models or [],
+            llm_judge_providers or [],
+            llm_judge_api_keys or [],
+        )
+
+    @staticmethod
+    def _build_model_configs(
+        models: list[str],
+        providers: list[str],
+        api_keys: list[str],
+    ) -> list[ModelConfig]:
+        """Build ModelConfig list from parallel lists, broadcasting single values."""
+        if not models or not providers:
+            return []
+
+        n = max(len(models), len(providers))
+
+        if len(models) == 1 and n > 1:
+            models = models * n
+        if len(providers) == 1 and n > 1:
+            providers = providers * n
+
+        api_keys_resolved: list[str | None]
+        if not api_keys:
+            api_keys_resolved = [None] * n
+        elif len(api_keys) == 1 and n > 1:
+            api_keys_resolved = [api_keys[0]] * n
+        else:
+            api_keys_resolved = [k for k in api_keys]  # pylint: disable=unnecessary-comprehension
+
+        if len(models) != len(providers) or len(providers) != len(api_keys_resolved):
+            raise ValueError(
+                f"JUDGE_MODEL ({len(models)}), JUDGE_PROVIDER ({len(providers)}), "
+                f"and JUDGE_API_KEY ({len(api_keys_resolved)}) must have the same "
+                f"number of comma-separated values (or a single value to apply to all)"
+            )
+
+        return [
+            ModelConfig(name=m, provider=p, api_key=k)  # type: ignore[arg-type]
+            for m, p, k in zip(models, providers, api_keys_resolved)
+        ]
 
     def should_process_llm_judge(self) -> bool:
         """Check if LLM judge processing should be performed.
 
         Returns:
-            True if all required parameters are present
+            True if at least one model config is present
         """
-        return all(
-            [
-                self.llm_judge_api_key,
-                self.llm_judge_model,
-                self.llm_judge_provider,
-            ]
-        )
+        return bool(self.model_configs)
 
     def process_results_with_llm_judge(
         self,
@@ -336,14 +369,8 @@ class LLMJudgeProcessor:
         )
 
         llm_judge_generation = GenerativeLLMJudge(
-            model_configs=[
-                ModelConfig(
-                    name=self.llm_judge_model or "gpt-4",
-                    provider=self.llm_judge_provider or "openai",  # type: ignore[arg-type]
-                    api_key=self.llm_judge_api_key,
-                )
-            ],
-            custom_prompt=None,  # Use default prompt for generation (0-3 scale)
+            model_configs=self.model_configs,
+            custom_prompt=None,
             aggregation_method="mean",
             threshold=0.5,
         )
@@ -374,14 +401,8 @@ class LLMJudgeProcessor:
         logger.info("Processing %s MCQ tasks with MCQLLMJudge...", len(mcq_tasks))
 
         llm_judge_mcq = MCQLLMJudge(
-            model_configs=[
-                ModelConfig(
-                    name=self.llm_judge_model or "gpt-4",
-                    provider=self.llm_judge_provider or "openai",  # type: ignore[arg-type]
-                    api_key=self.llm_judge_api_key,
-                )
-            ],
-            custom_prompt=None,  # Use default MCQ prompt (binary 0-1 scoring)
+            model_configs=self.model_configs,
+            custom_prompt=None,
             aggregation_method="mean",
             threshold=0.5,
         )
