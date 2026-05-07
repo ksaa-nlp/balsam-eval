@@ -1,7 +1,7 @@
 """Configuration management for evaluation jobs."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -18,13 +18,21 @@ class EvalConfig:
     user_id: Optional[str]
     benchmark_id: Optional[str]
     evaluation_types: Optional[str]
-    llm_judge: Optional[str]
-    llm_judge_provider: Optional[str]
-    llm_judge_api_key: Optional[str]
-    category_id: Optional[str]
-    job_id: Optional[str]
-    temperature: Optional[str]
+    llm_judge: list[str] = field(default_factory=list)
+    llm_judge_provider: list[str] = field(default_factory=list)
+    llm_judge_api_key: list[str] = field(default_factory=list)
+    category_id: Optional[str] = None
+    job_id: Optional[str] = None
+    temperature: Optional[str] = None
     parallel_categories: bool = False
+
+    @staticmethod
+    def _parse_csv_env(var_name: str) -> list[str]:
+        """Parse a comma-separated environment variable into a list."""
+        value = os.getenv(var_name, "")
+        if not value:
+            return []
+        return [v.strip() for v in value.split(",") if v.strip()]
 
     @classmethod
     def from_env(cls) -> 'EvalConfig':
@@ -39,9 +47,9 @@ class EvalConfig:
             user_id=os.getenv("USER_ID"),
             benchmark_id=os.getenv("BENCHMARK_ID"),
             evaluation_types=os.getenv("EVALUATION_TYPES"),
-            llm_judge=os.getenv("JUDGE_MODEL"),
-            llm_judge_provider=os.getenv("JUDGE_PROVIDER"),
-            llm_judge_api_key=os.getenv("JUDGE_API_KEY"),
+            llm_judge=cls._parse_csv_env("JUDGE_MODEL"),
+            llm_judge_provider=cls._parse_csv_env("JUDGE_PROVIDER"),
+            llm_judge_api_key=cls._parse_csv_env("JUDGE_API_KEY"),
             category_id=os.getenv("CATEGORY"),
             job_id=os.getenv("JOB_ID"),
             temperature=os.getenv("TEMPERATURE"),

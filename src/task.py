@@ -152,6 +152,9 @@ class LMHDataset:
         self.metric = task_dict.pop("metric", None)
         self.category_id = task_dict.pop("category", None)
 
+        # Extract task-level custom_prompt before it goes into task_kwargs
+        self.custom_prompt: str | None = task_dict.pop("custom_prompt", None)
+
         # Handle data splitting (Taking last X elements for dev)
         raw_data = task_dict.pop("data", [])
         self.data = raw_data
@@ -478,6 +481,12 @@ class LMHDataset:
             if isinstance(it.get("output"), list) and it["output"]:
                 it["output"] = it["output"][0]
             processed.append(it)
+
+        # Inject task-level custom_prompt into items that don't have their own
+        if self.custom_prompt:
+            for it in processed:
+                if not it.get("custom_prompt"):
+                    it["custom_prompt"] = self.custom_prompt
 
         # Normalize schema
         processed = self._normalize_schema(processed)

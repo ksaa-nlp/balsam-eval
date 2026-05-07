@@ -152,16 +152,47 @@ class ResultProcessor:
             if not isinstance(task_samples, list):
                 continue
             for sample in task_samples:
-                # audio arrays live in arguments[i][2]["audio"]
                 for arg_tuple in sample.get("arguments", []):
                     if isinstance(arg_tuple, (list, tuple)) and len(arg_tuple) >= 3:
                         aux = arg_tuple[2]
                         if isinstance(aux, dict) and "audio" in aux:
                             del aux["audio"]
-                # also strip from doc["audio"] (file paths, small but noisy)
                 doc = sample.get("doc")
                 if isinstance(doc, dict) and "audio" in doc:
                     del doc["audio"]
+
+    @staticmethod
+    def _strip_multimodal_data(results: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove audio/image binary data from samples before serialization."""
+        if "samples" not in results:
+            return results
+
+        original_samples = results["samples"]
+        results = {**results, "samples": {}}
+        for task_name, task_samples in original_samples.items():
+            cleaned = []
+            for sample in task_samples:
+                sample = {**sample}
+                if "arguments" in sample and isinstance(sample["arguments"], list):
+                    new_args = []
+                    for arg_group in sample["arguments"]:
+                        if isinstance(arg_group, (list, tuple)):
+                            new_group = []
+                            for item in arg_group:
+                                if isinstance(item, dict):
+                                    item = {
+                                        k: v for k, v in item.items()
+                                        if k not in ("audio", "images", "visuals")
+                                    }
+                                new_group.append(item)
+                            new_args.append(new_group)
+                        else:
+                            new_args.append(arg_group)
+                    sample["arguments"] = new_args
+                cleaned.append(sample)
+            results["samples"][task_name] = cleaned
+
+        return results
 
     def export_results(self, results: Dict[str, Any]) -> None:
         """Export results to file and optionally to database.
@@ -171,6 +202,7 @@ class ResultProcessor:
         """
         average_scores = self.calculate_average_scores(results)
         results_with_averages = {**results, "average_scores": average_scores}
+        results_with_averages = self._strip_multimodal_data(results_with_averages)
 
         # Export to file
         filename = (

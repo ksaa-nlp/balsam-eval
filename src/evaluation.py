@@ -110,6 +110,7 @@ class EvaluationJob:
             benchmark_id=benchmark_id,
             task_id=task_id,
         )
+
         # Setup model args
         if "eos_string" not in self.model_args:
             self.model_args["eos_string"] = "<|endoftext|>"
