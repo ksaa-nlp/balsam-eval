@@ -17,6 +17,9 @@ from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
 from tqdm import tqdm
 
+from src.llm_judger.base_llm_judge import ModelConfig
+from src.llm_judger.generative_llm_judge import GenerativeLLMJudge
+from src.llm_judger.mcq_llm_judge import MCQLLMJudge
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 
 logger = logging.getLogger(__name__)
@@ -42,9 +45,6 @@ def _create_generative_judge():
         return None
     model, provider, api_key = env
 
-    from src.llm_judger.base_llm_judge import ModelConfig
-    from src.llm_judger.generative_llm_judge import GenerativeLLMJudge
-
     return GenerativeLLMJudge(
         model_configs=[ModelConfig(name=model, provider=provider, api_key=api_key)],
         aggregation_method="mean",
@@ -58,9 +58,6 @@ def _create_mcq_judge():
         return None
     model, provider, api_key = env
 
-    from src.llm_judger.base_llm_judge import ModelConfig
-    from src.llm_judger.mcq_llm_judge import MCQLLMJudge
-
     return MCQLLMJudge(
         model_configs=[ModelConfig(name=model, provider=provider, api_key=api_key)],
         aggregation_method="mean",
@@ -73,7 +70,7 @@ def _normalize_mcq_answer(answer: str, mcq_options: list) -> str:
     if not answer or not mcq_options:
         return answer or ""
     answer = str(answer).strip()
-    mapping = {chr(65 + i): opt for i, opt in enumerate(mcq_options)}
+    mapping: Dict[str, str] = {chr(65 + i): str(opt) for i, opt in enumerate(mcq_options)}
 
     if len(answer) == 1 and answer.upper() in mapping:
         return mapping[answer.upper()]
@@ -104,7 +101,7 @@ def compute_llm_judge_aggregation(items: List[Tuple[str, str, str]]) -> float:
                 question=question, reference_answer=gold, given_answer=str(pred),
             )
             scores.append(result["overall_score"])
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error("LLM judge failed on sample: %s", e)
 
     if not scores:
@@ -181,7 +178,7 @@ def compute_mcq_llm_judge_aggregation(items: List[Tuple[str, str, str, list]]) -
                 question=question, reference_answer=gold, given_answer=pred,
             )
             scores.append(result["overall_score"])
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error("MCQ LLM judge failed on sample: %s", e)
 
     if not scores:
