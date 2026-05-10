@@ -132,7 +132,7 @@ class NewMetric(BaseMetric):
             ...     }
         """
         # TODO: Adjust generation parameters  # pylint: disable=fixme
-        return {"do_sample": False, "until": [""]}
+        return {"do_sample": False, "until": []}
 
 
 # Register in custom registry

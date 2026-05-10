@@ -112,7 +112,7 @@ class RougeMetric(BaseMetric):
         Returns:
             Generation parameters
         """
-        return {"do_sample": False, "until": [""]}
+        return {"do_sample": False, "until": []}
 
 
 # Register in custom registry

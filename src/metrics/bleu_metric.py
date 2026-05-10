@@ -136,7 +136,7 @@ class BleuMetric(BaseMetric):
         Returns:
             Generation parameters (no sampling, stop on empty string)
         """
-        return {"do_sample": False, "until": [""]}
+        return {"do_sample": False, "until": []}
 
 
 # Register in custom registry
