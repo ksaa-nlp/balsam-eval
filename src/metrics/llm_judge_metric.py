@@ -143,7 +143,7 @@ class LLMJudgeMetric(BaseMetric):
         return original_doc_to_text
 
     def get_generation_kwargs(self) -> Dict[str, Any]:
-        return {"do_sample": False, "until": [""]}
+        return {"do_sample": False, "until": []}
 
 
 _llm_judge_config = MetricConfig(
@@ -221,7 +221,7 @@ class MCQLLMJudgeMetric(BaseMetric):
         return original_doc_to_text
 
     def get_generation_kwargs(self) -> Dict[str, Any]:
-        return {"do_sample": False, "until": [""]}
+        return {"do_sample": False, "until": []}
 
 
 _mcq_llm_judge_config = MetricConfig(

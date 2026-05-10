@@ -689,7 +689,7 @@ class LMHDataset:
             "doc_to_text": doc_to_text,
             "doc_to_target": "output",
             "output_type": "generate_until",
-            "generation_kwargs": {"do_sample": False, "until": [""]},
+            "generation_kwargs": {"do_sample": False, "until": []},
             "dataset_kwargs": {"data_files": data_files},
             "metadata": self.metadata,
             **self.task_kwargs,
