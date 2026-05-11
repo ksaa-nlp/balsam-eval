@@ -78,6 +78,11 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         if result:
             return result
 
+    # ASR adapters don't use max_tokens, return minimal config
+    asr_adapters = {"openai-asr", "google-stt", "azure-stt"}
+    if adapter in asr_adapters:
+        return {"max_tokens": 4096}
+
     # Adapter-specific defaults for non-thinking models
     adapter_defaults = {
         "gemini": 4096,

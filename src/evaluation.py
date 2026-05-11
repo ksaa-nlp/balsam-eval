@@ -27,6 +27,9 @@ from src.openai_adapter import OpenAIAudioLM  # noqa: F401  # pylint: disable=un
 from src.anthropic_adapter import AnthropicAudioLM  # noqa: F401  # pylint: disable=unused-import
 from src.cohere_adapter import CohereAudioLM  # noqa: F401  # pylint: disable=unused-import
 from src.local_adapter import LocalAudioLM  # noqa: F401  # pylint: disable=unused-import
+from src.openai_asr_adapter import OpenAIWhisperLM  # noqa: F401  # pylint: disable=unused-import
+from src.google_stt_adapter import GoogleSTTLM  # noqa: F401  # pylint: disable=unused-import
+from src.azure_stt_adapter import AzureSTTLM  # noqa: F401  # pylint: disable=unused-import
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -78,6 +81,9 @@ class EvaluationJob:
             "openai",
             "anthropic",
             "cohere",
+            "openai-asr",
+            "google-stt",
+            "azure-stt",
         ] = "local-chat-completions",
         job_id: Optional[str] = None,
         api_host: Optional[str] = None,
@@ -128,6 +134,7 @@ class EvaluationJob:
         api_key = os.getenv("API_KEY")
         if api_key and self.adapter in [
             "openai-chat-completions", "local-chat-completions", "openai",
+            "openai-asr",
         ]:
             os.environ["OPENAI_API_KEY"] = api_key
         if api_key and self.adapter in ["anthropic-chat-completions", "anthropic"]:
@@ -136,6 +143,8 @@ class EvaluationJob:
             os.environ["GOOGLE_API_KEY"] = api_key
         if api_key and self.adapter == "cohere":
             os.environ["CO_API_KEY"] = api_key
+        if api_key and self.adapter == "azure-stt":
+            os.environ["AZURE_SPEECH_KEY"] = api_key
 
     def __call__(self) -> None:
         """Run the evaluation job."""
