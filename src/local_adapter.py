@@ -1,12 +1,11 @@
-"""Cohere API adapter for LM Evaluation Harness with audio support.
+"""Local chat-completions adapter for LM Evaluation Harness with audio support.
 
-Extends lm-eval's built-in LocalChatCompletion (OpenAI-compatible chat format)
-to work with Cohere's v2 Chat API. Adds multimodal audio support by injecting
-base64-encoded audio content parts into messages.
-
+Extends lm-eval's built-in LocalChatCompletion to add multimodal audio support.
 For text-only requests, delegates entirely to the parent implementation.
 For audio requests, processes one at a time using inherited model_call()
 and parse_generations() machinery.
+
+Works with any OpenAI-compatible endpoint (vLLM, TGI, Ollama, etc.).
 
 Dependencies: lm-eval[api], numpy, soundfile
 """
@@ -17,7 +16,6 @@ import io
 import json
 import logging
 import os
-from functools import cached_property
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -52,11 +50,35 @@ def _audio_dicts_to_base64_wav(audio_dicts: List[dict]) -> List[str]:
 
 
 def _build_openai_audio_parts(audio_dicts: List[dict]) -> List[dict]:
-    """Build OpenAI-compatible input_audio content parts (used by Cohere v2)."""
+    """Build OpenAI-format input_audio content parts."""
     return [
         {"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}}
         for b64 in _audio_dicts_to_base64_wav(audio_dicts)
     ]
+
+
+def _inject_audio_into_messages(
+    messages: List[dict], audio_parts: List[dict]
+) -> List[dict]:
+    """Inject audio content parts into the last user message."""
+    messages = copy.deepcopy(messages)
+    last_user = None
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            last_user = msg
+            break
+    if last_user is None:
+        last_user = messages[-1]
+
+    content = last_user.get("content", "")
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}]
+    elif not isinstance(content, list):
+        content = [{"type": "text", "text": str(content)}]
+
+    last_user["content"] = audio_parts + content
+    last_user.pop("type", None)
+    return messages
 
 
 def _parse_chat_prompt(prompt_obj: Any) -> List[Dict[str, Any]]:
@@ -89,43 +111,18 @@ def _has_audio(requests: list) -> bool:
     )
 
 
-def _inject_audio_into_messages(
-    messages: List[dict], audio_parts: List[dict]
-) -> List[dict]:
-    """Inject audio content parts into the last user message."""
-    messages = copy.deepcopy(messages)
-    last_user = None
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            last_user = msg
-            break
-    if last_user is None:
-        last_user = messages[-1]
-
-    content = last_user.get("content", "")
-    if isinstance(content, str):
-        content = [{"type": "text", "text": content}]
-    elif not isinstance(content, list):
-        content = [{"type": "text", "text": str(content)}]
-
-    last_user["content"] = audio_parts + content
-    last_user.pop("type", None)
-    return messages
-
-
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
 
 
-@register_model("cohere")
-class CohereAudioLM(LocalChatCompletion):
-    """Cohere v2 chat adapter with audio support.
+@register_model("local-chat-completions")
+class LocalAudioLM(LocalChatCompletion):
+    """Local OpenAI-compatible chat-completions adapter with audio support.
 
     Inherits all text-only functionality from lm-eval's LocalChatCompletion
-    (OpenAI-compatible payload creation, response parsing, tenacity retry,
-    async batching). Overrides auth (Bearer token with CO_API_KEY) and
-    generate_until() when audio is present.
+    (payload creation, response parsing, tenacity retry, async batching).
+    Overrides generate_until() only when audio is present.
     """
 
     MULTIMODAL = True
@@ -137,9 +134,7 @@ class CohereAudioLM(LocalChatCompletion):
         tokenized_requests: bool = False,
         **kwargs: Any,
     ):
-        base_url = base_url or os.environ.get(
-            "BASE_URL", "https://api.cohere.com/v2/chat"
-        )
+        base_url = base_url or os.environ.get("BASE_URL")
         super().__init__(
             base_url=base_url,
             tokenizer_backend=tokenizer_backend,
@@ -147,27 +142,10 @@ class CohereAudioLM(LocalChatCompletion):
             **kwargs,
         )
         logger.info(
-            "Initialized CohereAudioLM with model '%s' at %s",
+            "Initialized LocalAudioLM with model '%s' at %s",
             self.model,
             self.base_url,
         )
-
-    # ------------------------------------------------------------------ #
-    # Auth — Cohere uses Bearer token with CO_API_KEY
-    # ------------------------------------------------------------------ #
-
-    @cached_property
-    def api_key(self) -> str:
-        key = os.environ.get("CO_API_KEY") or os.environ.get("API_KEY")
-        if not key:
-            raise ValueError(
-                "No API key found. Set CO_API_KEY or API_KEY environment variable."
-            )
-        return key
-
-    @cached_property
-    def header(self) -> dict:
-        return {"Authorization": f"Bearer {self.api_key}"}
 
     # ------------------------------------------------------------------ #
     # Generation
@@ -210,7 +188,7 @@ class CohereAudioLM(LocalChatCompletion):
                 parsed = self.parse_generations(response)
                 results.append(parsed[0] if parsed else "")
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.error("Cohere generation error: %s", e)
+                logger.error("Generation error: %s", e)
                 results.append("")
 
         assert len(results) == len(requests), (
@@ -226,7 +204,7 @@ class CohereAudioLM(LocalChatCompletion):
         self, requests: list, **kwargs: Any
     ) -> List[Tuple[float, bool]]:
         logger.warning(
-            "Cohere Chat API does not support loglikelihood. "
+            "Local Chat API does not support loglikelihood. "
             "Returning dummy values for %d requests.",
             len(requests),
         )
@@ -236,7 +214,7 @@ class CohereAudioLM(LocalChatCompletion):
         self, requests: list, disable_tqdm: bool = False
     ) -> List[List[Tuple[float, bool]]]:
         logger.warning(
-            "Cohere Chat API does not support loglikelihood_rolling. "
+            "Local Chat API does not support loglikelihood_rolling. "
             "Returning dummy values for %d requests.",
             len(requests),
         )

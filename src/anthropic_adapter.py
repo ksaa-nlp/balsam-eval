@@ -14,14 +14,14 @@ import io
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import requests as http_requests
 import soundfile as sf  # type: ignore[import-untyped]
 from tqdm import tqdm
 
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
-from lm_eval.models.api_models import JsonChatStr  # type: ignore[import-untyped]
 from lm_eval.models.anthropic_llms import AnthropicChat  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,8 @@ def _parse_chat_prompt(prompt_obj: Any) -> List[Dict[str, Any]]:
     """Parse a prompt object (JsonChatStr or string) into a chat message list."""
     if hasattr(prompt_obj, "prompt"):
         try:
-            return json.loads(prompt_obj.prompt)
+            parsed: List[Dict[str, Any]] = json.loads(prompt_obj.prompt)
+            return parsed
         except (json.JSONDecodeError, TypeError):
             return [{"role": "user", "content": str(prompt_obj.prompt)}]
     if isinstance(prompt_obj, str):
@@ -167,6 +168,7 @@ def _messages_to_anthropic_payload(
 
 
 @register_model("anthropic")
+@register_model("anthropic-chat-completions")
 class AnthropicAudioLM(AnthropicChat):
     """Anthropic Messages API adapter with audio support.
 
@@ -208,9 +210,8 @@ class AnthropicAudioLM(AnthropicChat):
             return []
 
         if not _has_audio(requests):
-            return super().generate_until(requests, disable_tqdm=disable_tqdm)
-
-        import requests as http_requests  # avoid name collision
+            result: List[str] = super().generate_until(requests, disable_tqdm=disable_tqdm)
+            return result
 
         results: List[str] = []
         for req in tqdm(
@@ -290,7 +291,7 @@ class AnthropicAudioLM(AnthropicChat):
         return [(0.0, True) for _ in requests]
 
     def loglikelihood_rolling(
-        self, requests: list, **kwargs: Any
+        self, requests: list, disable_tqdm: bool = False
     ) -> List[List[Tuple[float, bool]]]:
         logger.warning(
             "Anthropic Messages API does not support loglikelihood_rolling. "

@@ -26,6 +26,7 @@ from src.groq_adapter import GroqLM  # noqa: F401  # pylint: disable=unused-impo
 from src.openai_adapter import OpenAIAudioLM  # noqa: F401  # pylint: disable=unused-import
 from src.anthropic_adapter import AnthropicAudioLM  # noqa: F401  # pylint: disable=unused-import
 from src.cohere_adapter import CohereAudioLM  # noqa: F401  # pylint: disable=unused-import
+from src.local_adapter import LocalAudioLM  # noqa: F401  # pylint: disable=unused-import
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
