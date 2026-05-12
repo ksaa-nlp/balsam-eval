@@ -1,3 +1,4 @@
+"""Adapters for chat, ASR, and judge model integrations."""
 from src.adapters.chat.openai import OpenAIAudioLM  # noqa: F401
 from src.adapters.chat.anthropic import AnthropicAudioLM  # noqa: F401
 from src.adapters.chat.local import LocalAudioLM  # noqa: F401
