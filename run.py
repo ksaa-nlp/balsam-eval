@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from src.adapter_utils import process_adapter_and_url
+from src.adapters.utils import process_adapter_and_url
 from src.core.common import (
     copy_audio_to_temp,
     copy_images_to_temp,

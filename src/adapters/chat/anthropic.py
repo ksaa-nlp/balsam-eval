@@ -168,7 +168,7 @@ def _messages_to_anthropic_payload(
 
 
 @register_model("anthropic")
-@register_model("anthropic-chat-completions")
+# @register_model("anthropic-chat-completions")
 class AnthropicAudioLM(AnthropicChat):
     """Anthropic Messages API adapter with audio support.
 

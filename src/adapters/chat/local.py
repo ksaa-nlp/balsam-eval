@@ -1,12 +1,11 @@
-"""OpenAI API adapter for LM Evaluation Harness with audio support.
+"""Local chat-completions adapter for LM Evaluation Harness with audio support.
 
-Extends lm-eval's built-in OpenAIChatCompletion to add multimodal audio support.
-For text-only requests, delegates entirely to the parent implementation (retry,
-batching, collation, caching). For audio requests, processes one at a time using
-the inherited model_call() and parse_generations() machinery.
+Extends lm-eval's built-in LocalChatCompletion to add multimodal audio support.
+For text-only requests, delegates entirely to the parent implementation.
+For audio requests, processes one at a time using inherited model_call()
+and parse_generations() machinery.
 
-Also works as an OpenAI-compatible adapter — pass a custom base_url to target
-any OpenAI-compatible endpoint (Together, Fireworks, etc.).
+Works with any OpenAI-compatible endpoint (vLLM, TGI, Ollama, etc.).
 
 Dependencies: lm-eval[api], numpy, soundfile
 """
@@ -26,7 +25,7 @@ from tqdm import tqdm
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
 from lm_eval.models.api_models import JsonChatStr  # type: ignore[import-untyped]
 from lm_eval.models.openai_completions import (  # type: ignore[import-untyped]
-    OpenAIChatCompletion,
+    LocalChatCompletion,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,14 +116,13 @@ def _has_audio(requests: list) -> bool:
 # ---------------------------------------------------------------------------
 
 
-@register_model("openai")
-@register_model("openai-chat-completions")
-class OpenAIAudioLM(OpenAIChatCompletion):
-    """OpenAI chat-completions adapter with audio support.
+@register_model("local-adapter")
+class LocalAudioLM(LocalChatCompletion):
+    """Local OpenAI-compatible chat-completions adapter with audio support.
 
-    Inherits all text-only functionality from lm-eval's OpenAIChatCompletion
-    (payload creation, response parsing, tenacity retry, async batching,
-    caching). Overrides generate_until() only when audio is present.
+    Inherits all text-only functionality from lm-eval's LocalChatCompletion
+    (payload creation, response parsing, tenacity retry, async batching).
+    Overrides generate_until() only when audio is present.
     """
 
     MULTIMODAL = True
@@ -136,9 +134,7 @@ class OpenAIAudioLM(OpenAIChatCompletion):
         tokenized_requests: bool = False,
         **kwargs: Any,
     ):
-        base_url = base_url or os.environ.get(
-            "BASE_URL", "https://api.openai.com/v1/chat/completions"
-        )
+        base_url = base_url or os.environ.get("BASE_URL")
         super().__init__(
             base_url=base_url,
             tokenizer_backend=tokenizer_backend,
@@ -146,7 +142,7 @@ class OpenAIAudioLM(OpenAIChatCompletion):
             **kwargs,
         )
         logger.info(
-            "Initialized OpenAIAudioLM with model '%s' at %s",
+            "Initialized LocalAudioLM with model '%s' at %s",
             self.model,
             self.base_url,
         )
@@ -201,14 +197,14 @@ class OpenAIAudioLM(OpenAIChatCompletion):
         return results
 
     # ------------------------------------------------------------------ #
-    # Loglikelihood stubs (API does not expose token logprobs)
+    # Loglikelihood stubs
     # ------------------------------------------------------------------ #
 
     def loglikelihood(
         self, requests: list, **kwargs: Any
     ) -> List[Tuple[float, bool]]:
         logger.warning(
-            "OpenAI Chat API does not support loglikelihood. "
+            "Local Chat API does not support loglikelihood. "
             "Returning dummy values for %d requests.",
             len(requests),
         )
@@ -218,7 +214,7 @@ class OpenAIAudioLM(OpenAIChatCompletion):
         self, requests: list, disable_tqdm: bool = False
     ) -> List[List[Tuple[float, bool]]]:
         logger.warning(
-            "OpenAI Chat API does not support loglikelihood_rolling. "
+            "Local Chat API does not support loglikelihood_rolling. "
             "Returning dummy values for %d requests.",
             len(requests),
         )
