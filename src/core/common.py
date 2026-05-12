@@ -178,6 +178,8 @@ def set_api_key_for_adapter(adapter: str, api_key: str | None) -> None:
         "gemini": "GOOGLE_API_KEY",
         "groq": "GROQ_API_KEY",
         "humain": "HUMAIN_API_KEY",
+        "openai-asr": "OPENAI_API_KEY",
+        "azure-stt": "AZURE_SPEECH_KEY",
     }
 
     env_var = env_var_map.get(adapter)

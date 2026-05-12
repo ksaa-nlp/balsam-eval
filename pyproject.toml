@@ -18,6 +18,9 @@ dependencies = [
     "soundfile~=0.13.1",
 ]
 
+[project.optional-dependencies]
+google-stt = ["google-cloud-speech>=2.0.0"]
+
 [dependency-groups]
 dev = [
     "mypy~=1.20.2",

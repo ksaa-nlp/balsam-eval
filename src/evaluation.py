@@ -16,17 +16,12 @@ import requests
 # Import custom metrics package to auto-register all metrics
 import src.metrics  # Registers all metrics in src.metrics.impl.*  # pylint: disable=unused-import
 
-from src.adapter_utils import get_max_tokens_config
+from src.adapters.utils import get_max_tokens_config
 from src.db_operations import JobStatus, update_status
 from src.processors.result_processing import ResultProcessor
 from src.processors.task_operations import TaskOperations
 
-from src.gemini_adapter import GeminiLM  # noqa: F401  # pylint: disable=unused-import
-from src.groq_adapter import GroqLM  # noqa: F401  # pylint: disable=unused-import
-from src.openai_adapter import OpenAIAudioLM  # noqa: F401  # pylint: disable=unused-import
-from src.anthropic_adapter import AnthropicAudioLM  # noqa: F401  # pylint: disable=unused-import
-from src.cohere_adapter import CohereAudioLM  # noqa: F401  # pylint: disable=unused-import
-from src.local_adapter import LocalAudioLM  # noqa: F401  # pylint: disable=unused-import
+import src.adapters  # noqa: F401  # pylint: disable=unused-import  # Registers all adapters
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -78,6 +73,9 @@ class EvaluationJob:
             "openai",
             "anthropic",
             "cohere",
+            "openai-asr",
+            "google-stt",
+            "azure-stt",
         ] = "local-chat-completions",
         job_id: Optional[str] = None,
         api_host: Optional[str] = None,
@@ -128,6 +126,7 @@ class EvaluationJob:
         api_key = os.getenv("API_KEY")
         if api_key and self.adapter in [
             "openai-chat-completions", "local-chat-completions", "openai",
+            "openai-asr",
         ]:
             os.environ["OPENAI_API_KEY"] = api_key
         if api_key and self.adapter in ["anthropic-chat-completions", "anthropic"]:
@@ -136,6 +135,8 @@ class EvaluationJob:
             os.environ["GOOGLE_API_KEY"] = api_key
         if api_key and self.adapter == "cohere":
             os.environ["CO_API_KEY"] = api_key
+        if api_key and self.adapter == "azure-stt":
+            os.environ["AZURE_SPEECH_KEY"] = api_key
 
     def __call__(self) -> None:
         """Run the evaluation job."""
@@ -200,13 +201,16 @@ class EvaluationJob:
 
         logger.info("Calling lm_eval.evaluator.simple_evaluate...")
 
+        asr_adapters = {"openai-asr", "google-stt", "azure-stt"}
+        use_chat_template = self.adapter not in asr_adapters
+
         results = cast(
             dict[str, Any],
             lm_eval.evaluator.simple_evaluate(
                 model=self.adapter,
                 model_args=self.model_args,
                 tasks=self.tasks,
-                apply_chat_template=True,
+                apply_chat_template=use_chat_template,
                 task_manager=lm_eval.tasks.TaskManager(
                     include_path=str(temp_dir)
                 ),
