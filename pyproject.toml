@@ -4,7 +4,7 @@ version = "1.0.0"
 requires-python = ">=3.10,<4"
 dependencies = [
     "deepeval~=3.9.9",
-    "google-cloud-speech~=2.39.0"
+    "google-cloud-speech~=2.39.0",
     "google-cloud-storage~=3.10.1",
     "google-genai~=1.74.0",
     "groq~=1.2.0",
