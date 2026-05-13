@@ -19,7 +19,7 @@ from deepeval.models import AnthropicModel, GeminiModel, GPTModel, OllamaModel
 from deepeval.test_case import LLMTestCase
 from tqdm import tqdm
 
-from src.local_model import LocalModelEdited
+from src.adapters.judge.local_model import LocalModelEdited
 
 # Setup logging
 logger = logging.getLogger(__name__)

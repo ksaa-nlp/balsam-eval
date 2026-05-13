@@ -4,6 +4,7 @@ version = "1.0.0"
 requires-python = ">=3.10,<4"
 dependencies = [
     "deepeval~=3.9.9",
+    "google-cloud-speech~=2.39.0"
     "google-cloud-storage~=3.10.1",
     "google-genai~=1.74.0",
     "groq~=1.2.0",
@@ -17,6 +18,10 @@ dependencies = [
     "rouge-score~=0.1.2",
     "soundfile~=0.13.1",
 ]
+
+[project.optional-dependencies]
+hf-asr = ["huggingface-hub>=1.14.0"]
+ibm-stt = ["ibm-watson~=11.2.0", "ibm-cloud-sdk-core~=3.24.4"]
 
 [dependency-groups]
 dev = [
@@ -66,6 +71,9 @@ module = [
     "pyarabic.*",
     "evaluate.*",
     "soundfile.*",
+    "ibm_watson.*",
+    "ibm_cloud_sdk_core.*",
+    "huggingface_hub.*",
 ]
 ignore_missing_imports = true
 
