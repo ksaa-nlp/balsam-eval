@@ -125,8 +125,8 @@ class LMHDataset:
         category_part = task_dict.get("category", "Unknown_Category")
         type_part = task_dict.get("Type of result", "")
 
-        # Handle metric(s) - support both string and list formats
-        metric_value = task_dict.get("metric", "")
+        # Handle metric(s) - support both "metric" and "metrics" keys, string and list formats
+        metric_value = task_dict.get("metric") or task_dict.get("metrics", "")
         if isinstance(metric_value, list):
             metric_part = "_".join([sanitize_config_name(m) for m in metric_value])
         else:
@@ -149,7 +149,7 @@ class LMHDataset:
         # Extract core harness fields
         task_dict.pop("name", "Unknown Task")
         self.task_id = task_dict.pop("task", "unknown_task_id")
-        self.metric = task_dict.pop("metric", None)
+        self.metric = task_dict.pop("metric", None) or task_dict.pop("metrics", None)
         self.category_id = task_dict.pop("category", None)
 
         # Extract task-level custom_prompt before it goes into task_kwargs
