@@ -108,10 +108,12 @@ class HuggingFaceASRLM(LM):
 
     @property
     def max_sequence_length(self) -> int:
+        """Return max sequence length (unused for ASR)."""
         return 0
 
     @property
     def batch_size(self) -> int:
+        """Return batch size."""
         return 1
 
     # --------------------------------------------------------------------- #
@@ -152,7 +154,7 @@ class HuggingFaceASRLM(LM):
                 if isinstance(result, str):
                     text = result
                 elif isinstance(result, dict):
-                    text = result.get("text", "")
+                    text = str(result.get("text", ""))
                 elif hasattr(result, "text"):
                     text = str(result.text)
 
@@ -162,7 +164,7 @@ class HuggingFaceASRLM(LM):
                 if attempt < self.max_retries - 1:
                     logger.warning("Empty HF transcription, retrying...")
                     time.sleep(self.retry_timeout * (attempt + 1))
-            except Exception as e:  # noqa: BLE001
+            except (OSError, ValueError, RuntimeError) as e:
                 logger.error(
                     "HF ASR API error (attempt %d/%d): %s: %s",
                     attempt + 1, self.max_retries, type(e).__name__, e,

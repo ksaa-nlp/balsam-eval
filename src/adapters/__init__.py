@@ -8,4 +8,3 @@ from src.adapters.chat.groq import GroqLM  # noqa: F401
 from src.adapters.asr.openai_asr import OpenAIWhisperLM  # noqa: F401
 from src.adapters.asr.google_stt import GoogleSTTLM  # noqa: F401
 from src.adapters.asr.azure_stt import AzureSTTLM  # noqa: F401
-from src.adapters.judge.local_model import LocalModelEdited  # noqa: F401

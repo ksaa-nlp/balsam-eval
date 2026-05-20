@@ -107,10 +107,12 @@ class QwenASRLM(LM):
 
     @property
     def max_sequence_length(self) -> int:
+        """Return max sequence length (unused for ASR)."""
         return 0
 
     @property
     def batch_size(self) -> int:
+        """Return batch size."""
         return 1
 
     # --------------------------------------------------------------------- #
@@ -167,7 +169,7 @@ class QwenASRLM(LM):
             try:
                 response = self.client.chat.completions.create(
                     model=self.model_name,
-                    messages=messages,
+                    messages=messages,  # type: ignore[arg-type]
                 )
                 text = response.choices[0].message.content or ""
                 if text.strip():
@@ -176,7 +178,7 @@ class QwenASRLM(LM):
                 if attempt < self.max_retries - 1:
                     logger.warning("Empty Qwen ASR API response, retrying...")
                     time.sleep(self.retry_timeout * (attempt + 1))
-            except Exception as e:  # noqa: BLE001
+            except (OSError, ValueError, RuntimeError) as e:
                 logger.error(
                     "Qwen ASR API error (attempt %d/%d): %s: %s",
                     attempt + 1, self.max_retries, type(e).__name__, e,

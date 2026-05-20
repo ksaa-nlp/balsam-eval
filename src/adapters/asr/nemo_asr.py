@@ -101,10 +101,12 @@ class NeMoASRLM(LM):
 
     @property
     def max_sequence_length(self) -> int:
+        """Return max sequence length (unused for ASR)."""
         return 0
 
     @property
     def batch_size(self) -> int:
+        """Return batch size."""
         return 1
 
     # --------------------------------------------------------------------- #
@@ -165,7 +167,7 @@ class NeMoASRLM(LM):
                 if attempt < self.max_retries - 1:
                     logger.warning("Empty NIM transcription, retrying...")
                     time.sleep(self.retry_timeout * (attempt + 1))
-            except Exception as e:  # noqa: BLE001
+            except (OSError, ValueError, RuntimeError) as e:
                 logger.error(
                     "NVIDIA NIM ASR error (attempt %d/%d): %s: %s",
                     attempt + 1, self.max_retries, type(e).__name__, e,

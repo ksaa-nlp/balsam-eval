@@ -15,14 +15,43 @@ from dataclasses import dataclass
 from statistics import mean, median
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from deepeval.models import AnthropicModel, GeminiModel, GPTModel, OllamaModel
+from deepeval.models import (
+    AmazonBedrockModel,
+    AnthropicModel,
+    AzureOpenAIModel,
+    DeepSeekModel,
+    GeminiModel,
+    GPTModel,
+    GrokModel,
+    KimiModel,
+    LiteLLMModel,
+    LocalModel,
+    OllamaModel,
+    OpenRouterModel,
+    PortkeyModel,
+)
+from deepeval.models import DeepEvalBaseLLM
 from deepeval.test_case import LLMTestCase
 from tqdm import tqdm
 
-from src.adapters.judge.local_model import LocalModelEdited
-
 # Setup logging
 logger = logging.getLogger(__name__)
+
+PROVIDER_REGISTRY: Dict[str, type[DeepEvalBaseLLM]] = {
+    "openai": GPTModel,
+    "anthropic": AnthropicModel,
+    "gemini": GeminiModel,
+    "ollama": OllamaModel,
+    "local": LocalModel,
+    "azure": AzureOpenAIModel,
+    "amazon_bedrock": AmazonBedrockModel,
+    "deepseek": DeepSeekModel,
+    "grok": GrokModel,
+    "kimi": KimiModel,
+    "litellm": LiteLLMModel,
+    "openrouter": OpenRouterModel,
+    "portkey": PortkeyModel,
+}
 
 
 @dataclass
@@ -38,7 +67,11 @@ class EvaluationResult:
 class ModelConfig:
     """Configuration for a model to use with the LLMJudge."""
     name: str
-    provider: Literal["openai", "anthropic", "gemini", "ollama", "local_openai"] = "openai"
+    provider: Literal[
+        "openai", "anthropic", "gemini", "ollama", "local",
+        "azure", "amazon_bedrock", "deepseek", "grok", "kimi",
+        "litellm", "openrouter", "portkey",
+    ] = "openai"
     api_key: Optional[str] = None
     endpoint_url: Optional[str] = None
     other: Optional[Dict[str, Any]] = None
@@ -55,45 +88,21 @@ class TestCaseDict:
     metadata: Optional[Dict[str, Any]] = None
 
 
-def create_model_adapter(config: ModelConfig) -> Any:
+def create_model_adapter(config: ModelConfig) -> DeepEvalBaseLLM:
     """Create a model adapter based on the configuration."""
-    base_params = {}
-    if config.other:
-        base_params.update(config.other)
+    cls = PROVIDER_REGISTRY.get(config.provider)
+    if cls is None:
+        raise ValueError(f"Unsupported provider: {config.provider}")
 
-    if config.provider == "openai":
-        return GPTModel(
-            model=config.name,
-            _openai_api_key=config.api_key,
-            base_url=config.endpoint_url,
-            **base_params
-        )
-    if config.provider == "anthropic":
-        return AnthropicModel(
-            model=config.name,
-            _anthropic_api_key=config.api_key,
-            **base_params
-        )
-    if config.provider == "gemini":
-        return GeminiModel(
-            model=config.name,
-            api_key=config.api_key,
-            **base_params
-        )
-    if config.provider == "ollama":
-        return OllamaModel(
-            model=config.name,
-            base_url=config.endpoint_url,
-            **base_params
-        )
-    if config.provider == "local_openai":
-        return LocalModelEdited(
-            model_name=config.name,
-            local_model_api_key=config.api_key,
-            base_url=config.endpoint_url,
-            **base_params
-        )
-    raise ValueError(f"Unsupported provider: {config.provider}")
+    params: Dict[str, Any] = {"model": config.name}
+    if config.api_key:
+        params["api_key"] = config.api_key
+    if config.endpoint_url:
+        params["base_url"] = config.endpoint_url
+    if config.other:
+        params.update(config.other)
+
+    return cls(**params)
 
 
 def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) -> Dict[str, Any]:
