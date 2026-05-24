@@ -5,7 +5,7 @@ import os
 import unicodedata
 from typing import Any, cast
 
-from google.cloud import storage
+import google.cloud.storage as storage
 
 
 def normalize_string(text: str) -> str:
