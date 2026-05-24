@@ -27,6 +27,7 @@ ibm-stt = ["ibm-watson~=11.2.0", "ibm-cloud-sdk-core~=3.24.4"]
 dev = [
     "mypy~=1.20.2",
     "pylint[spelling]~=4.0.5",
+    "pyright~=1.1.409",
     "types-pyyaml~=6.0.12.20260408",
     "types-tqdm~=4.67.3.20260408",
     "types-requests~=2.33.0.20260408",
@@ -76,6 +77,24 @@ module = [
     "huggingface_hub.*",
 ]
 ignore_missing_imports = true
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src"]
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    ".venv",
+    ".git",
+    "build",
+    "dist",
+    "ignores",
+    "**/_api_models.temp.py",
+]
+reportMissingImports = "warning"
+reportMissingTypeStubs = false
 
 [tool.pylint.master]
 ignore = [".venv",".history",".mypy_cache","build","dist","__pycache__",".pytest_cache",".vscode",".idea",".git",".github",".balsam_eval_cache",".balsam_eval_logs",".balsam_eval_results",".temp","ignores","_api_models.temp.py"]
