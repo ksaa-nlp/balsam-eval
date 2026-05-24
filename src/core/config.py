@@ -2,9 +2,11 @@
 
 The runner is launched in two ways:
 
-* Remote (Cloud Build): the backend sets ``API_HOST``, ``SERVER_TOKEN``,
+* Remote (Cloud Build): the backend sets ``API_HOST``, ``FINALIZE_TOKEN``,
   ``JOB_ID``, ``GCLOUD_BUCKET``, ``RESULTS_PATH`` and ``POOL_FILES`` (a
-  comma-separated list of GCS object paths to evaluate).
+  comma-separated list of GCS object paths to evaluate). ``FINALIZE_TOKEN`` is
+  a per-job JWT (scope=``finalize``, ~1-week TTL) the runner sends back as a
+  Bearer token when calling ``POST /evaluation-jobs/:id/finalize``.
 * Local: only ``MODEL`` / ``ADAPTER`` (and optionally ``BASE_URL`` / ``API_KEY``)
   are needed. Input files are discovered from the ``.tasks/`` directory and
   result JSONs are written to ``.results/`` — no network calls are made.
@@ -26,7 +28,7 @@ class EvalConfig:
 
     # Backend coordinates (remote mode only)
     api_host: Optional[str] = None
-    server_token: Optional[str] = None
+    finalize_token: Optional[str] = None
     job_id: Optional[str] = None
     evaluation_id: Optional[str] = None
     benchmark_id: Optional[str] = None
@@ -57,7 +59,7 @@ class EvalConfig:
             model_name=os.getenv("MODEL", ""),
             adapter=os.getenv("ADAPTER", ""),
             api_host=os.getenv("API_HOST"),
-            server_token=os.getenv("SERVER_TOKEN"),
+            finalize_token=os.getenv("FINALIZE_TOKEN"),
             job_id=os.getenv("JOB_ID"),
             evaluation_id=os.getenv("EVALUATION_ID"),
             benchmark_id=os.getenv("BENCHMARK_ID"),
@@ -83,7 +85,7 @@ class EvalConfig:
 
     def is_remote_job(self) -> bool:
         """True when the runner should report status / upload to GCS."""
-        return bool(self.api_host and self.server_token and self.job_id)
+        return bool(self.api_host and self.finalize_token and self.job_id)
 
     def validate_local(self) -> None:
         """Ensure the minimum env vars for a local run are set."""
@@ -96,7 +98,7 @@ class EvalConfig:
         """Ensure all backend / GCS coordinates required for a remote run are set."""
         required = [
             "api_host",
-            "server_token",
+            "finalize_token",
             "job_id",
             "adapter",
             "model_name",
@@ -107,7 +109,7 @@ class EvalConfig:
         if missing:
             raise ValueError(
                 "Missing required environment variables for remote run: "
-                f"{', '.join(missing)}. Required: API_HOST, SERVER_TOKEN, JOB_ID, "
+                f"{', '.join(missing)}. Required: API_HOST, FINALIZE_TOKEN, JOB_ID, "
                 "ADAPTER, MODEL, GCLOUD_BUCKET, RESULTS_PATH"
             )
         if not self.pool_files:

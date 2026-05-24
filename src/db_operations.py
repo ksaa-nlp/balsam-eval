@@ -63,7 +63,7 @@ def _request_with_retry(
 def finalize_job(
     *,
     api_host: str,
-    server_token: str,
+    finalize_token: str,
     job_id: str,
     outcome: JobOutcome,
     error: Optional[str] = None,
@@ -72,7 +72,9 @@ def finalize_job(
 
     Args:
         api_host: Base URL of the backend (no trailing slash).
-        server_token: Shared secret sent as ``Authorization: Bearer <token>``.
+        finalize_token: Per-job JWT (scope=``finalize``, ~1-week TTL) issued by
+            the backend at job-launch time and passed in via the
+            ``FINALIZE_TOKEN`` env var. Sent as ``Authorization: Bearer <token>``.
         job_id: Numeric evaluation-job id.
         outcome: Terminal outcome to report.
         error: Optional error message. Only honoured for ``FAILED``.
@@ -84,7 +86,7 @@ def finalize_job(
     url = f"{api_host.rstrip('/')}/evaluation-jobs/{job_id}/finalize"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {server_token}",
+        "Authorization": f"Bearer {finalize_token}",
     }
 
     response = _request_with_retry("POST", url, headers=headers, json_data=payload)

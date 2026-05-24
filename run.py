@@ -210,7 +210,7 @@ def main() -> None:
         if is_remote:
             finalize_job(
                 api_host=config.api_host or "",
-                server_token=config.server_token or "",
+                finalize_token=config.finalize_token or "",
                 job_id=config.job_id or "",
                 outcome=JobOutcome.FAILED,
                 error=message,
@@ -248,14 +248,14 @@ def main() -> None:
         if succeeded:
             finalize_job(
                 api_host=config.api_host or "",
-                server_token=config.server_token or "",
+                finalize_token=config.finalize_token or "",
                 job_id=config.job_id or "",
                 outcome=JobOutcome.SUCCEEDED,
             )
         else:
             finalize_job(
                 api_host=config.api_host or "",
-                server_token=config.server_token or "",
+                finalize_token=config.finalize_token or "",
                 job_id=config.job_id or "",
                 outcome=JobOutcome.FAILED,
                 error=("; ".join(failures))[:4000],

@@ -145,7 +145,7 @@ def setup_environment() -> dict[str, str | None]:
         'API_KEY': os.getenv("API_KEY"),
         'MODEL_NAME': os.getenv("MODEL"),
         'ADAPTER': os.getenv("ADAPTER"),
-        'SERVER_TOKEN': os.getenv("SERVER_TOKEN"),
+        'FINALIZE_TOKEN': os.getenv("FINALIZE_TOKEN"),
         'API_HOST': os.getenv("API_HOST"),
         'USER_ID': os.getenv("USER_ID"),
         'BENCHMARK_ID': os.getenv("BENCHMARK_ID"),
