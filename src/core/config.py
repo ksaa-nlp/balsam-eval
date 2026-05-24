@@ -50,6 +50,7 @@ class EvalConfig:
 
     @classmethod
     def from_env(cls) -> "EvalConfig":
+        """Build a config from process environment variables."""
         return cls(
             base_url=os.getenv("BASE_URL"),
             api_key=os.getenv("API_KEY"),
@@ -85,12 +86,14 @@ class EvalConfig:
         return bool(self.api_host and self.server_token and self.job_id)
 
     def validate_local(self) -> None:
+        """Ensure the minimum env vars for a local run are set."""
         if not self.model_name:
             raise ValueError("MODEL is required")
         if not self.adapter:
             raise ValueError("ADAPTER is required")
 
     def validate_remote(self) -> None:
+        """Ensure all backend / GCS coordinates required for a remote run are set."""
         required = [
             "api_host",
             "server_token",
@@ -111,6 +114,7 @@ class EvalConfig:
             raise ValueError("POOL_FILES is required for remote run")
 
     def get_model_args(self, base_url: Optional[str] = None) -> dict[str, str]:
+        """Return the kwargs to pass to the adapter constructor."""
         args: dict[str, str] = {"model": self.model_name}
         if base_url:
             args["base_url"] = base_url
@@ -119,6 +123,7 @@ class EvalConfig:
         return args
 
     def get_evaluation_types_list(self) -> list[str]:
+        """Split the comma-separated EVALUATION_TYPES env value into a list."""
         if not self.evaluation_types:
             return []
         return [t.strip() for t in self.evaluation_types.split(",") if t.strip()]

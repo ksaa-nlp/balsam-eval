@@ -4,7 +4,7 @@ import logging
 import os
 import unicodedata
 
-import google.cloud.storage as storage
+from google.cloud import storage  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 

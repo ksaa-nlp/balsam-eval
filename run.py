@@ -181,6 +181,7 @@ def _evaluate_one_file(
 
 
 def main() -> None:
+    """Entrypoint for the runner: loads config, executes the job, and reports results."""
     _setup_logging()
     setup_directories(TEMP_DIR, RESULTS_DIR)
     copy_multimodal_utils_to_temp(TEMP_DIR)
