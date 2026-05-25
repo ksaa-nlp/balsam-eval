@@ -28,7 +28,9 @@ from .llm_judge_metric import (
     process_results as llm_judge_process_results,
     mcq_process_results as mcq_llm_judge_process_results,
 )
-from .new_metric import NewMetric, process_results as new_metric_process_results
+# ``new_metric.py`` is a template — intentionally NOT imported here, otherwise
+# its registration side-effects pollute every evaluation result with a
+# ``new_metric: 0.0`` row. Copy it to a new file and import that instead.
 from .rouge_metric import RougeMetric, process_results as rouge_process_results
 from .wer_metric import WERMetric, process_results as wer_process_results
 
