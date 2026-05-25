@@ -78,6 +78,7 @@ class SingleFileEvaluationJob:
         adapter: str,
         model_args: dict[str, Any],
         result_filename: str,
+        results_dir: str,
     ):
         """
         Args:
@@ -88,7 +89,12 @@ class SingleFileEvaluationJob:
                 (preserved in the result file as ``pool_file``).
             adapter: lm_eval adapter id (after any pre-processing).
             model_args: Arguments passed to ``simple_evaluate``.
-            result_filename: Name of the result JSON in ``.results/``.
+            result_filename: Name of the result JSON written into ``results_dir``.
+            results_dir: Local directory where result JSONs are written.
+
+        Adapter-specific API-key env vars are populated by
+        ``core.common.set_api_key_for_adapter`` in ``run.py`` before this job
+        is constructed — we don't re-stamp them here.
         """
         self.task_name = task_name
         self.category = category
@@ -97,6 +103,7 @@ class SingleFileEvaluationJob:
         self.adapter = adapter
         self.model_args = dict(model_args)
         self.result_filename = result_filename
+        self.results_dir = results_dir
 
         if "eos_string" not in self.model_args:
             self.model_args["eos_string"] = "<|endoftext|>"
@@ -115,7 +122,8 @@ class SingleFileEvaluationJob:
 
         results = self._run_lm_eval()
         if not results:
-            raise RuntimeError(f"lm_eval returned no results for {self.task_name}")
+            raise RuntimeError(
+                f"lm_eval returned no results for {self.task_name}")
 
         self._sanitize_results(results)
         self._stamp_category_and_task(results)
@@ -124,6 +132,7 @@ class SingleFileEvaluationJob:
             category=self.category,
             task_id=self.task_id,
             source_pool_path=self.source_pool_path,
+            results_dir=self.results_dir,
         ).export(results, filename=self.result_filename)
 
     # -- internal helpers ----------------------------------------------------
@@ -139,9 +148,11 @@ class SingleFileEvaluationJob:
                 model_args=self.model_args,
                 tasks=[self.task_name],
                 apply_chat_template=use_chat_template,
-                task_manager=lm_eval.tasks.TaskManager(include_path=str(temp_dir)),
+                task_manager=lm_eval.tasks.TaskManager(
+                    include_path=str(temp_dir)),
                 batch_size=1,
-                gen_kwargs=get_max_tokens_config(self.adapter, self.model_args["model"]),
+                gen_kwargs=get_max_tokens_config(
+                    self.adapter, self.model_args["model"]),
             ),
         )
 

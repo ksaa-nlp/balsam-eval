@@ -15,8 +15,6 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-RESULTS_DIR = ".results"
-
 
 class _NumpyEncoder(json.JSONEncoder):
     """JSON encoder that emits plain ints / floats / lists for numpy types."""
@@ -32,7 +30,7 @@ class _NumpyEncoder(json.JSONEncoder):
 
 
 class ResultProcessor:
-    """Writes a per-file result JSON to ``.results/`` and returns the path."""
+    """Writes a per-file result JSON to ``results_dir`` and returns the path."""
 
     def __init__(
         self,
@@ -40,13 +38,15 @@ class ResultProcessor:
         category: str,
         task_id: str,
         source_pool_path: str,
+        results_dir: str,
     ):
         self.category = category
         self.task_id = task_id
         self.source_pool_path = source_pool_path
+        self.results_dir = results_dir
 
     def export(self, results: Dict[str, Any], *, filename: str) -> str:
-        """Persist ``results`` to ``.results/<filename>``."""
+        """Persist ``results`` to ``<results_dir>/<filename>``."""
         results = self._strip_multimodal_data(results)
         average_scores = self._calculate_average_scores(results)
         enriched = {
@@ -58,8 +58,8 @@ class ResultProcessor:
         }
         self._strip_audio_data(enriched)
 
-        os.makedirs(RESULTS_DIR, exist_ok=True)
-        path = os.path.join(RESULTS_DIR, filename)
+        os.makedirs(self.results_dir, exist_ok=True)
+        path = os.path.join(self.results_dir, filename)
         with open(path, "w", encoding="utf-8") as fp:
             json.dump(enriched, fp, ensure_ascii=False, cls=_NumpyEncoder)
         logger.info("Wrote result file: %s", path)
@@ -85,7 +85,8 @@ class ResultProcessor:
                 metric_name = key.replace(",none", "")
                 if isinstance(value, dict):
                     if "rougeLsum" in value:
-                        collected.setdefault(metric_name, []).append(value["rougeLsum"])
+                        collected.setdefault(metric_name, []).append(
+                            value["rougeLsum"])
                     continue
                 if isinstance(value, (int, float)):
                     collected.setdefault(metric_name, []).append(float(value))

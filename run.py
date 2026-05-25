@@ -12,6 +12,7 @@ single result JSON tagged with its category and task.
   picked up instead. No status calls are made; results stay in ``.results/``.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -101,15 +102,27 @@ def resolve_pool_files(config: EvalConfig) -> list[str]:
     return found
 
 
+def _slugify_source(source: str) -> str:
+    """Derive a unique filename stem from a pool-file source path.
+
+    The runner can be handed multiple pool files whose basenames collide
+    (e.g. ``cat-A/dataset-7.json`` and ``cat-B/dataset-7.json`` after GCS
+    prefixing). We hash the full path so each gets a distinct local
+    materialisation under ``.temp/`` and a distinct result filename in GCS,
+    while still keeping a human-readable suffix.
+    """
+    stem = Path(source).stem or "pool-file"
+    digest = hashlib.sha1(source.encode("utf-8")).hexdigest()[:8]
+    return f"{stem}-{digest}"
+
+
 def _materialise_pool_file(source: str, is_remote: bool, bucket: Optional[str]) -> str:
     """Place a pool file into TEMP_DIR in the flat format LMHDataset expects.
 
     Returns the basename (without extension) of the file inside TEMP_DIR.
     """
-    basename = Path(source).name
-    if not basename.endswith(".json"):
-        basename = f"{basename}.json"
-    dest_path = os.path.join(TEMP_DIR, basename)
+    file_stem = _slugify_source(source)
+    dest_path = os.path.join(TEMP_DIR, f"{file_stem}.json")
 
     if is_remote:
         if not bucket:
@@ -158,11 +171,14 @@ def _evaluate_one_file(
     dataset.export()
 
     # Materialise any referenced media into TEMP_DIR for lm_eval's loader.
+    # Remote mode passes the GCS bucket so references stored as object paths
+    # (e.g. ``cat-1/dataset-7/img.png``) can be pulled down on demand.
+    media_bucket = config.bucket if is_remote else None
     for split in ("test", "dev"):
         split_file = os.path.join(TEMP_DIR, f"{dataset.file_name}_{split}.json")
         if os.path.exists(split_file):
-            copy_images_to_temp(split_file, TEMP_DIR)
-            copy_audio_to_temp(split_file, TEMP_DIR)
+            copy_images_to_temp(split_file, TEMP_DIR, bucket=media_bucket)
+            copy_audio_to_temp(split_file, TEMP_DIR, bucket=media_bucket)
 
     category = str(dataset.category_id or config.category_id or "")
     task_id = str(dataset.task_id or "")
@@ -176,12 +192,38 @@ def _evaluate_one_file(
         adapter=processed_adapter,
         model_args=model_args,
         result_filename=result_filename,
+        results_dir=RESULTS_DIR,
     )
     return job(), result_filename
 
 
-def main() -> None:
-    """Entrypoint for the runner: loads config, executes the job, and reports results."""
+def _try_finalize(config: EvalConfig, outcome: JobOutcome, error: Optional[str] = None) -> None:
+    """Best-effort POST to ``/evaluation-jobs/:id/finalize``.
+
+    Swallows network failures so the caller can continue with ``sys.exit`` —
+    a finalize failure is logged but shouldn't replace the original error.
+    """
+    if not config.is_remote_job():
+        return
+    try:
+        finalize_job(
+            api_host=config.api_host or "",
+            finalize_token=config.finalize_token or "",
+            job_id=config.job_id or "",
+            outcome=outcome,
+            error=(error or None) and (error or "")[:4000],
+        )
+    except Exception as finalize_exc:  # pylint: disable=broad-exception-caught
+        logger.error("Finalize call failed (%s): %s", outcome.value, finalize_exc)
+
+
+def _run() -> int:
+    """Execute the job. Returns a process exit code.
+
+    All preparation (config load, validation, dir setup) happens here so
+    failures are caught by the top-level handler in ``main`` and reported
+    back to the backend via ``finalize``.
+    """
     _setup_logging()
     setup_directories(TEMP_DIR, RESULTS_DIR)
     copy_multimodal_utils_to_temp(TEMP_DIR)
@@ -207,15 +249,8 @@ def main() -> None:
     if not pool_files:
         message = "No pool files to evaluate."
         logger.error(message)
-        if is_remote:
-            finalize_job(
-                api_host=config.api_host or "",
-                finalize_token=config.finalize_token or "",
-                job_id=config.job_id or "",
-                outcome=JobOutcome.FAILED,
-                error=message,
-            )
-        sys.exit(1)
+        _try_finalize(config, JobOutcome.FAILED, message)
+        return 1
 
     failures: list[str] = []
 
@@ -244,25 +279,37 @@ def main() -> None:
     succeeded = not failures
     _log_job_end(succeeded)
 
-    if is_remote:
-        if succeeded:
-            finalize_job(
-                api_host=config.api_host or "",
-                finalize_token=config.finalize_token or "",
-                job_id=config.job_id or "",
-                outcome=JobOutcome.SUCCEEDED,
-            )
-        else:
-            finalize_job(
-                api_host=config.api_host or "",
-                finalize_token=config.finalize_token or "",
-                job_id=config.job_id or "",
-                outcome=JobOutcome.FAILED,
-                error=("; ".join(failures))[:4000],
-            )
+    if succeeded:
+        _try_finalize(config, JobOutcome.SUCCEEDED)
+        return 0
 
-    if not succeeded:
+    _try_finalize(config, JobOutcome.FAILED, "; ".join(failures))
+    return 1
+
+
+def main() -> None:
+    """Top-level entry point.
+
+    A bare ``try/except`` here is what stops the backend from sitting on a
+    stuck job: any unexpected exception (config validation failure, GCS auth
+    error, import-time crash, etc.) is reported via ``finalize`` instead of
+    letting the runner exit silently.
+    """
+    try:
+        exit_code = _run()
+    except SystemExit:
+        raise
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("Fatal error in runner: %s", exc)
+        logger.error("Traceback:\n%s", traceback.format_exc())
+        # Best-effort: rebuild minimum config from env to report the failure.
+        try:
+            config = EvalConfig.from_env()
+            _try_finalize(config, JobOutcome.FAILED, f"runner crashed: {exc}")
+        except Exception as cfg_exc:  # pylint: disable=broad-exception-caught
+            logger.error("Could not load config to report crash: %s", cfg_exc)
         sys.exit(1)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
