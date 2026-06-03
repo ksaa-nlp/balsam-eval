@@ -22,6 +22,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # Create virtual environment and install dependencies with uv
+ENV VIRTUAL_ENV=/opt/venv
 RUN uv venv /opt/venv && \
     uv sync --frozen --no-editable
 
