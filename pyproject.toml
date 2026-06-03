@@ -1,9 +1,10 @@
 [project]
 name = "balsam-lm-evaluation"
 version = "1.0.0"
-requires-python = ">=3.10,<4"
+requires-python = ">=3.11,<4"
 dependencies = [
     "deepeval~=3.9.9",
+    "evaluate~=0.4.6",
     "google-cloud-speech~=2.39.0",
     "google-cloud-storage~=3.10.1",
     "google-genai~=1.74.0",
@@ -11,12 +12,17 @@ dependencies = [
     "jiwer~=4.0.0",
     "librosa~=0.11.0",
     "lm-eval[api]~=0.4.11",
+    "numpy~=2.4.6",
+    "openai~=2.40.0",
     "pillow~=12.2.0",
     "pyarabic~=0.6.15",
     "python-dotenv~=1.2.2",
     "pyyaml~=6.0.3",
+    "rapidfuzz~=3.14.5",
+    "requests~=2.34.2",
     "rouge-score~=0.1.2",
     "soundfile~=0.13.1",
+    "tqdm~=4.67.3",
 ]
 
 [project.optional-dependencies]
