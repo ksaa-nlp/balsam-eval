@@ -205,6 +205,10 @@ def _try_finalize(config: EvalConfig, outcome: JobOutcome, error: Optional[str] 
     """
     if not config.is_remote_job():
         return
+    api_host = config.api_host or ""
+    if "localhost" in api_host or "127.0.0.1" in api_host:
+        logger.info("Skipping finalize call: API_HOST points at localhost (%s)", api_host)
+        return
     try:
         finalize_job(
             api_host=config.api_host or "",

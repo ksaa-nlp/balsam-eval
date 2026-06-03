@@ -665,6 +665,7 @@ class LMHDataset:
         has_images = any(
             _is_image_file(str(input_item))
             for items in self.data.values()
+            if items
             for item in items
             if isinstance(item.get("input"), list)
             for input_item in item["input"]
@@ -674,6 +675,7 @@ class LMHDataset:
         has_audio = any(
             _is_audio_file(str(input_item))
             for items in self.data.values()
+            if items
             for item in items
             if isinstance(item.get("input"), list)
             for input_item in item["input"]
