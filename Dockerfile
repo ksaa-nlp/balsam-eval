@@ -1,20 +1,9 @@
-FROM python:3.11-slim AS build
+FROM python:3.13-slim AS build
 
 ENV PYTHONUNBUFFERED=1
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
-# Install build dependencies and git
-RUN mkdir -p /tmp && chmod 1777 /tmp && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        build-essential \
-        gcc \
-        git \
-        zlib1g-dev && \
-    apt-get purge -y --auto-remove && \
-    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -22,12 +11,11 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # Create virtual environment and install dependencies with uv
-ENV VIRTUAL_ENV=/opt/venv
-RUN uv venv /opt/venv && \
-    uv sync --frozen --no-editable
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Final stage
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
