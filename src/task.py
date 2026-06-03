@@ -65,26 +65,36 @@ class LMHDataset:
     standardized JSON and YAML configurations.
     """
 
-    # Metadata keys from templates to exclude from final YAML
+    # Metadata keys from templates to exclude from final YAML.
+    # Matching is case-insensitive and treats spaces/underscores as equivalent —
+    # the backend emits "Type Of Result", the JSON template uses "Type of result",
+    # and the CSV/XML emit "type_of_result". All variants must be filtered so
+    # lm_eval's TaskConfig doesn't reject unknown kwargs.
     IGNORED_METADATA = {
         "author",
         "organization",
         "category",
         "version",
-        "Guidelines_creating_data",
-        "List_possible_outputs",
-        "Type of Data",
-        "Type of result",
-        "image_note",
-        "Type of input",
-        "Type of output",
-        "source",
-        "type_of_input",
-        "type_of_output",
-        "type_of_result",
+        "description",
         "guidelines_creating_data",
         "guidelines_creating_dataset",
+        "list_possible_outputs",
+        "type_of_data",
+        "type_of_result",
+        "type_of_input",
+        "type_of_output",
+        "image_note",
+        "source",
     }
+
+    @classmethod
+    def _normalize_meta_key(cls, key: str) -> str:
+        """Lowercase and collapse spaces to underscores for IGNORED_METADATA matching."""
+        return key.strip().lower().replace(" ", "_")
+
+    @classmethod
+    def _is_ignored_key(cls, key: str) -> bool:
+        return cls._normalize_meta_key(key) in cls.IGNORED_METADATA
 
     def __init__(
         self, file_name: str = "dataset-n", directory: str | None = None
@@ -123,7 +133,13 @@ class LMHDataset:
         # Generate unique task name
         task_part = task_dict.get("task", "Unknown_Task")
         category_part = task_dict.get("category", "Unknown_Category")
-        type_part = task_dict.get("Type of result", "")
+        type_part = next(
+            (
+                v for k, v in task_dict.items()
+                if self._normalize_meta_key(k) == "type_of_result"
+            ),
+            "",
+        )
 
         # Handle metric(s) - support both "metric" and "metrics" keys, string and list formats
         metric_value = task_dict.get("metric") or task_dict.get("metrics", "")
@@ -161,7 +177,7 @@ class LMHDataset:
 
         # Filter remaining metadata to keep YAML clean
         self.task_kwargs = {
-            k: v for k, v in task_dict.items() if k not in self.IGNORED_METADATA
+            k: v for k, v in task_dict.items() if not self._is_ignored_key(k)
         }
 
     def _resolve_file_path(self, directory: str, file_name: str) -> Tuple[str, str]:
