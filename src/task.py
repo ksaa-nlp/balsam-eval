@@ -244,7 +244,7 @@ class LMHDataset:
             raise ValueError("CSV data section missing 'id' column header.")
 
         keys = reader[data_header_idx]
-        data_rows = []
+        splits: dict[str, list[dict[str, Any]]] = {"dev": [], "test": [], "train": []}
         for row in reader[data_header_idx + 1 :]:
             if not row or not any(row):
                 continue
@@ -267,50 +267,89 @@ class LMHDataset:
             mcq = [v for k, v in row_dict.items() if k.startswith("mcq_") and v]
             if mcq:
                 item["mcq"] = mcq
-            data_rows.append(item)
 
-        task["data"] = data_rows  # type: ignore[assignment]
+            # Backend writes split_type per row (defaults to "test"); bucket
+            # so downstream code can iterate self.data["test"]/self.data["dev"].
+            split = (row_dict.get("split_type") or "test").strip().lower()
+            if split not in splits:
+                split = "test"
+            splits[split].append(item)
+
+        task["data"] = splits  # type: ignore[assignment]
         return task
 
     def _load_xml(self, path: str) -> Dict[str, Any]:
         """Load XML file.
 
-        Args:
-            path: Path to XML file
+        Backend XML structure (see Benchmarks-Platform-backend
+        dataset-file-builder.util.ts):
+            <dataset>
+              <name/><version/>... <metrics><metric/>...</metrics>
+              <type_of_result/> <type_of_input/> <type_of_output/>
+              <guidelines_creating_data><guideline/>...</guidelines_creating_data>
+              <data>
+                <dev><item>...</item></dev>
+                <test><item>...</item></test>
+                <train><item>...</item></train>
+              </data>
+            </dataset>
 
-        Returns:
-            Task dictionary
+        Each <item> has:
+            <id/> <instruction/> <output/> <source/>
+            <experimental_prompts><prompt/>...</experimental_prompts>
+            <inputs><input/>...</inputs>
+            <mcq><option/>...</mcq>
         """
         tree = ET.parse(path)
         root = tree.getroot()
-        task = {
-            child.tag: child.text
-            for child in root
-            if child.tag not in ["data", "guidelines_creating_data"]
-        }
 
-        data_rows = []
+        task: Dict[str, Any] = {}
+        for child in root:
+            if child.tag in ("data", "guidelines_creating_data"):
+                continue
+            if child.tag == "metrics":
+                metrics = [m.text for m in child.findall("metric") if m.text]
+                if metrics:
+                    task["metrics"] = metrics
+            else:
+                task[child.tag] = child.text
+
+        def _parse_item(item_node: ET.Element) -> Dict[str, Any]:
+            item: Dict[str, Any] = {}
+            for child in item_node:
+                if child.tag == "experimental_prompts":
+                    item["Experimental prompts"] = [
+                        p.text for p in child.findall("prompt") if p.text
+                    ]
+                elif child.tag == "inputs":
+                    item["input"] = [
+                        v.text for v in child.findall("input") if v.text
+                    ]
+                elif child.tag == "mcq":
+                    item["mcq"] = [
+                        o.text for o in child.findall("option") if o.text
+                    ]
+                else:
+                    item[child.tag] = child.text
+            return item
+
+        splits: Dict[str, list[Dict[str, Any]]] = {"dev": [], "test": [], "train": []}
         data_node = root.find("data")
         if data_node is not None:
-            for item_node in data_node.findall("item"):
-                item: dict[str, Any] = {}
-                for child in item_node:
-                    if child.tag == "experimental_prompts":
-                        item["Experimental prompts"] = [
-                            p.text for p in child.findall("prompt") if p.text
-                        ]
-                    elif child.tag == "input":
-                        item["input"] = [
-                            v.text for v in child.findall("value") if v.text
-                        ]
-                    elif child.tag == "mcq":
-                        item["mcq"] = [
-                            o.text for o in child.findall("option") if o.text
-                        ]
-                    else:
-                        item[child.tag] = child.text
-                data_rows.append(item)
-        task["data"] = data_rows  # type: ignore[assignment]
+            for split_node in data_node:
+                split = split_node.tag.lower()
+                if split not in splits:
+                    continue
+                for item_node in split_node.findall("item"):
+                    splits[split].append(_parse_item(item_node))
+
+            # Fallback for legacy XML files that put <item> directly under <data>
+            # without a per-split wrapper — route them all into "test".
+            if not any(splits.values()):
+                for item_node in data_node.findall("item"):
+                    splits["test"].append(_parse_item(item_node))
+
+        task["data"] = splits  # type: ignore[assignment]
         return task
 
     def _escape_newline(self, task: Any) -> Any:

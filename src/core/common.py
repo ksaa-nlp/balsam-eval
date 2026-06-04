@@ -5,6 +5,7 @@ import os
 import shutil
 
 from dotenv import load_dotenv
+from google.cloud import storage
 
 load_dotenv()
 
@@ -97,7 +98,8 @@ def _materialise_media(
     media_dir = os.path.join(temp_dir, sub_dir)
     os.makedirs(media_dir, exist_ok=True)
 
-    storage_client = None  # Lazy-init: avoid the import / auth cost when no media is needed.
+    # Lazy-init: avoid the import / auth cost when no media is needed.
+    storage_client = None
 
     changed = False
     for item in data:
@@ -119,21 +121,21 @@ def _materialise_media(
             if bucket:
                 if storage_client is None:
                     try:
-                        # Import-local so local mode doesn't require google-cloud-storage.
-                        from google.cloud import storage  # type: ignore[attr-defined]
-
                         storage_client = storage.Client()
                     except Exception as e:  # pylint: disable=broad-exception-caught
-                        print(f"[WARN] Could not init GCS client for media: {e}")
+                        print(
+                            f"[WARN] Could not init GCS client for media: {e}")
                         new_refs.append(ref_str)
                         continue
                 try:
-                    storage_client.bucket(bucket).blob(ref_str).download_to_filename(dst_path)
+                    storage_client.bucket(bucket).blob(
+                        ref_str).download_to_filename(dst_path)
                     new_refs.append(dst_path)
                     changed = True
                     continue
                 except Exception as e:  # pylint: disable=broad-exception-caught
-                    print(f"[WARN] Could not fetch gs://{bucket}/{ref_str}: {e}")
+                    print(
+                        f"[WARN] Could not fetch gs://{bucket}/{ref_str}: {e}")
 
             # Couldn't resolve — leave the reference as-is. Downstream lm_eval
             # will fail loudly with FileNotFound, which is more debuggable than

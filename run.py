@@ -301,8 +301,6 @@ def main() -> None:
     """
     try:
         exit_code = _run()
-    except SystemExit:
-        raise
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("Fatal error in runner: %s", exc)
         logger.error("Traceback:\n%s", traceback.format_exc())
