@@ -1,8 +1,8 @@
-"""LLM-as-judge metrics for evaluation (generative and MCQ).
+"""Unified LLM-as-judge metric for evaluation.
 
-Integrates the src/llm_judger system as proper lm-eval metrics.
-- llm-as-judge:     uses GenerativeLLMJudge (0-3 scale, normalized to 0-1)
-- mcq-llm-as-judge: uses MCQLLMJudge (binary 0/1, with MCQ answer normalization)
+Auto-detects MCQ vs generative based on the dataset doc's ``mcq`` field
+and selects the appropriate judge prompt. Also forwards per-doc
+``custom_prompt`` to the judge when present in the dataset file.
 
 Requires env vars: JUDGE_MODEL, JUDGE_PROVIDER, JUDGE_API_KEY.
 """
@@ -11,7 +11,7 @@ import logging
 import os
 import re
 from statistics import mean
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
@@ -23,6 +23,9 @@ from src.llm_judger.mcq_llm_judge import MCQLLMJudge
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 
 logger = logging.getLogger(__name__)
+
+# (question, gold, pred, mcq_options | None, custom_prompt | None)
+JudgeItem = Tuple[str, str, str, Optional[list], Optional[str]]
 
 
 def _parse_csv_env(name: str) -> list[str]:
@@ -66,28 +69,32 @@ def _get_judge_configs() -> list[ModelConfig]:
     ]
 
 
-def _create_generative_judge():
-    configs = _get_judge_configs()
-    if not configs:
-        return None
-
-    return GenerativeLLMJudge(
-        model_configs=configs,
-        aggregation_method="mean",
-        threshold=0.5,
-    )
+_GENERATIVE_JUDGE: Optional[GenerativeLLMJudge] = None
+_MCQ_JUDGE: Optional[MCQLLMJudge] = None
 
 
-def _create_mcq_judge():
-    configs = _get_judge_configs()
-    if not configs:
-        return None
+def _get_generative_judge() -> Optional[GenerativeLLMJudge]:
+    global _GENERATIVE_JUDGE  # pylint: disable=global-statement
+    if _GENERATIVE_JUDGE is None:
+        configs = _get_judge_configs()
+        if not configs:
+            return None
+        _GENERATIVE_JUDGE = GenerativeLLMJudge(
+            model_configs=configs, aggregation_method="mean", threshold=0.5,
+        )
+    return _GENERATIVE_JUDGE
 
-    return MCQLLMJudge(
-        model_configs=configs,
-        aggregation_method="mean",
-        threshold=0.5,
-    )
+
+def _get_mcq_judge() -> Optional[MCQLLMJudge]:
+    global _MCQ_JUDGE  # pylint: disable=global-statement
+    if _MCQ_JUDGE is None:
+        configs = _get_judge_configs()
+        if not configs:
+            return None
+        _MCQ_JUDGE = MCQLLMJudge(
+            model_configs=configs, aggregation_method="mean", threshold=0.5,
+        )
+    return _MCQ_JUDGE
 
 
 def _normalize_mcq_answer(answer: str, mcq_options: list) -> str:
@@ -108,22 +115,44 @@ def _normalize_mcq_answer(answer: str, mcq_options: list) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Generative LLM-as-judge
+# Unified LLM-as-judge
 # ---------------------------------------------------------------------------
 
-def compute_llm_judge_aggregation(items: List[Tuple[str, str, str]]) -> float:
-    """Score (question, gold, prediction) tuples with GenerativeLLMJudge."""
-    judge = _create_generative_judge()
-    if judge is None:
-        return 0.0
-
+def compute_llm_judge_aggregation(items: List[JudgeItem]) -> float:
+    """Score items with the appropriate judge based on MCQ presence."""
     scores: list[float] = []
-    for question, gold, pred in tqdm(items, desc="LLM-as-judge", unit="sample"):
+    for question, gold, pred, mcq_options, custom_prompt in tqdm(
+        items, desc="LLM-as-judge", unit="sample"
+    ):
         if not gold or not pred:
             continue
-        result = judge.evaluate_answer(
-            question=question, reference_answer=gold, given_answer=str(pred),
-        )
+
+        ref = gold
+        answer = str(pred)
+
+        if mcq_options:
+            mcq_judge = _get_mcq_judge()
+            if mcq_judge is None:
+                continue
+            ref = _normalize_mcq_answer(ref, mcq_options)
+            answer = _normalize_mcq_answer(answer, mcq_options)
+            result = mcq_judge.evaluate_answer(
+                question=question,
+                reference_answer=ref,
+                given_answer=answer,
+                custom_prompt=custom_prompt,
+            )
+        else:
+            gen_judge = _get_generative_judge()
+            if gen_judge is None:
+                continue
+            result = gen_judge.evaluate_answer(
+                question=question,
+                reference_answer=ref,
+                given_answer=answer,
+                custom_prompt=custom_prompt,
+            )
+
         scores.append(result["overall_score"])
 
     if not scores:
@@ -148,18 +177,20 @@ if "llm_as_judge" not in le_registry.METRIC_REGISTRY:
 
 
 def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, Any]:
-    """Collect (question, gold, prediction) for generative judge."""
+    """Collect judge data, auto-detecting MCQ vs generative from the doc."""
     pred = results[0] if isinstance(results, list) else results
     gold = doc.get("output", "")
     question = doc.get("input", "")
     instruction = doc.get("instruction", "")
     if instruction:
         question = f"{instruction}\n{question}"
-    return {"llm_as_judge": (question, gold, pred)}
+    mcq_options = doc.get("mcq") or None
+    custom_prompt = doc.get("custom_prompt") or None
+    return {"llm_as_judge": (question, gold, pred, mcq_options, custom_prompt)}
 
 
 class LLMJudgeMetric(BaseMetric):
-    """Generative LLM-as-judge metric class."""
+    """Unified LLM-as-judge metric class."""
 
     def get_doc_to_text(self, original_doc_to_text: str) -> str:
         return original_doc_to_text
@@ -175,80 +206,3 @@ _llm_judge_config = MetricConfig(
     process_results=process_results,
 )
 get_metrics_registry().register("llm_as_judge", LLMJudgeMetric(_llm_judge_config))
-
-
-# ---------------------------------------------------------------------------
-# MCQ LLM-as-judge
-# ---------------------------------------------------------------------------
-
-def compute_mcq_llm_judge_aggregation(items: List[Tuple[str, str, str, list]]) -> float:
-    """Score (question, gold, prediction, mcq_options) tuples with MCQLLMJudge."""
-    judge = _create_mcq_judge()
-    if judge is None:
-        return 0.0
-
-    scores: list[float] = []
-    for question, gold, pred, mcq_options in tqdm(
-        items, desc="MCQ-LLM-as-judge", unit="sample"
-    ):
-        if not gold or not pred:
-            continue
-        gold = _normalize_mcq_answer(gold, mcq_options)
-        pred = _normalize_mcq_answer(str(pred), mcq_options)
-        result = judge.evaluate_answer(
-            question=question, reference_answer=gold, given_answer=pred,
-        )
-        scores.append(result["overall_score"])
-
-    if not scores:
-        logger.warning("MCQ LLM judge produced no scores.")
-        return 0.0
-
-    avg = round(mean(scores), 4)
-    logger.info("MCQ-LLM-as-judge average: %.4f (%d samples)", avg, len(scores))
-    return avg
-
-
-if "mcq_llm_as_judge_agg" not in le_registry.AGGREGATION_REGISTRY:
-    register_aggregation("mcq_llm_as_judge_agg")(compute_mcq_llm_judge_aggregation)
-
-if "mcq_llm_as_judge" not in le_registry.METRIC_REGISTRY:
-    register_metric(
-        metric="mcq_llm_as_judge",
-        higher_is_better=True,
-        output_type="generate_until",
-        aggregation="mcq_llm_as_judge_agg",
-    )(lambda items: items)
-
-
-def mcq_process_results(doc: Dict[str, Any], results: Any) -> Dict[str, Any]:
-    """Collect (question, gold, prediction, mcq_options) for MCQ judge."""
-    pred = results[0] if isinstance(results, list) else results
-    gold = doc.get("output", "")
-    question = doc.get("input", "")
-    instruction = doc.get("instruction", "")
-    if instruction:
-        question = f"{instruction}\n{question}"
-    mcq_options = doc.get("mcq", [])
-    return {"mcq_llm_as_judge": (question, gold, pred, mcq_options)}
-
-
-class MCQLLMJudgeMetric(BaseMetric):
-    """MCQ LLM-as-judge metric class."""
-
-    def get_doc_to_text(self, original_doc_to_text: str) -> str:
-        return original_doc_to_text
-
-    def get_generation_kwargs(self) -> Dict[str, Any]:
-        return {"do_sample": False, "until": []}
-
-
-_mcq_llm_judge_config = MetricConfig(
-    name="mcq_llm_as_judge",
-    higher_is_better=True,
-    aggregation_name="mcq_llm_as_judge_agg",
-    process_results=mcq_process_results,
-)
-get_metrics_registry().register(
-    "mcq_llm_as_judge", MCQLLMJudgeMetric(_mcq_llm_judge_config)
-)

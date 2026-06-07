@@ -24,9 +24,7 @@ from .bleu_metric import BleuMetric, process_results as bleu_process_results
 from .cer_metric import CERMetric, process_results as cer_process_results
 from .llm_judge_metric import (
     LLMJudgeMetric,
-    MCQLLMJudgeMetric,
     process_results as llm_judge_process_results,
-    mcq_process_results as mcq_llm_judge_process_results,
 )
 # ``new_metric.py`` is a template — intentionally NOT imported here, otherwise
 # its registration side-effects pollute every evaluation result with a
@@ -48,7 +46,6 @@ __all__ = [
     "WERMetric",
     "CERMetric",
     "LLMJudgeMetric",
-    "MCQLLMJudgeMetric",
     # Process results functions
     "accuracy_process_results",
     "bleu_process_results",
@@ -56,7 +53,6 @@ __all__ = [
     "wer_process_results",
     "cer_process_results",
     "llm_judge_process_results",
-    "mcq_llm_judge_process_results",
     # Shared utilities (only truly shared)
     "prepare_text_with_punctuation",
     "all_punctuations",
