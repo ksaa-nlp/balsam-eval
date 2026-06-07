@@ -293,7 +293,7 @@ class GroqLM(LM):
             Generated text (or empty string on failure)
         """
         final_response = ""
-        last_error = None
+        last_error: Optional[Exception] = None
 
         for attempt in range(self.max_retries):
             try:

@@ -180,7 +180,7 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
         logger.info("Retrying after %d seconds...", wait_time)
         time.sleep(wait_time)
 
-    raise RuntimeError("LLM judge: unable to get a valid response after %d retries" % max_retries)
+    raise RuntimeError(f"LLM judge: unable to get a valid response after {max_retries} retries")
 
 
 class BaseLLMJudge(ABC):

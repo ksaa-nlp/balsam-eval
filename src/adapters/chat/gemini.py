@@ -236,7 +236,7 @@ class GeminiLM(LM):
                 contents = self._audio_dicts_to_parts(audio_dicts) + [prompt]
 
             final_response = ""
-            last_error = None
+            last_error: Optional[Exception] = None
             for attempt in range(self.max_retries):
                 try:
                     response = self.client.models.generate_content(
@@ -263,7 +263,8 @@ class GeminiLM(LM):
 
             if last_error is not None:
                 raise RuntimeError(
-                    f"Generation failed for idx={idx} after {self.max_retries} retries: {last_error}"
+                    f"Generation failed for idx={idx} after"
+                    f" {self.max_retries} retries: {last_error}"
                 ) from last_error
 
             results.append(final_response)
