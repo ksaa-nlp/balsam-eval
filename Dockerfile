@@ -12,7 +12,7 @@ COPY pyproject.toml uv.lock ./
 
 # Create virtual environment and install dependencies with uv
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
-RUN uv sync --frozen --no-install-project --no-dev --no-cache
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Final stage
 FROM python:3.13-slim
