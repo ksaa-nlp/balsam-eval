@@ -236,6 +236,7 @@ class GeminiLM(LM):
                 contents = self._audio_dicts_to_parts(audio_dicts) + [prompt]
 
             final_response = ""
+            last_error = None
             for attempt in range(self.max_retries):
                 try:
                     response = self.client.models.generate_content(
@@ -246,13 +247,24 @@ class GeminiLM(LM):
                     response_text = response.text or ""
                     if response_text.strip():
                         final_response = response_text
+                        last_error = None
                         break
                     if attempt < self.max_retries - 1:
                         time.sleep(self.retry_timeout * (attempt + 1))
+                    else:
+                        last_error = RuntimeError(
+                            f"All {self.max_retries} attempts returned empty response for idx={idx}"
+                        )
                 except Exception as e:  # pylint: disable=broad-exception-caught
                     logger.error("Generation error idx=%d attempt=%d: %s", idx, attempt + 1, e)
+                    last_error = e
                     if attempt < self.max_retries - 1:
                         time.sleep(self.retry_timeout * (attempt + 1))
+
+            if last_error is not None:
+                raise RuntimeError(
+                    f"Generation failed for idx={idx} after {self.max_retries} retries: {last_error}"
+                ) from last_error
 
             results.append(final_response)
 
@@ -400,12 +412,9 @@ class GeminiLM(LM):
                         time.sleep(self.retry_timeout * (attempt + 1))
                         continue
 
-                    logger.error(
-                        "All %d attempts returned empty response. Returning empty string.",
-                        self.max_retries,
+                    raise RuntimeError(
+                        f"All {self.max_retries} attempts returned empty response"
                     )
-                    final_response = ""
-                    break
 
                 final_response = response_text
                 break
@@ -420,11 +429,8 @@ class GeminiLM(LM):
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_timeout * (attempt + 1))
                 else:
-                    logger.error(
-                        "All attempts failed. Last error: %s. Returning empty string.",
-                        e,
-                    )
-                    final_response = ""
-                    break
+                    raise RuntimeError(
+                        f"Gemini completion failed after {self.max_retries} retries: {e}"
+                    ) from e
 
         return final_response

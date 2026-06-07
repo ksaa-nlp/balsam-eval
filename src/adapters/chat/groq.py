@@ -293,6 +293,7 @@ class GroqLM(LM):
             Generated text (or empty string on failure)
         """
         final_response = ""
+        last_error = None
 
         for attempt in range(self.max_retries):
             try:
@@ -310,6 +311,7 @@ class GroqLM(LM):
 
                 if response_text.strip():
                     final_response = response_text
+                    last_error = None
                     logger.debug("Got valid response: %d chars", len(response_text))
                     break
 
@@ -317,19 +319,23 @@ class GroqLM(LM):
                     logger.warning("Empty response, retrying...")
                     time.sleep(self.retry_timeout * (attempt + 1))
                 else:
-                    logger.error("All retries returned empty response")
-                    final_response = ""
+                    last_error = RuntimeError(
+                        f"All {self.max_retries} retries returned empty response"
+                    )
 
             except Exception as e:  # noqa: BLE001  # pylint: disable=broad-exception-caught
                 logger.error("API error (attempt %d): %s: %s", attempt + 1, type(e).__name__, e)
+                last_error = e
 
                 if attempt < self.max_retries - 1:
                     wait_time = self.retry_timeout * (attempt + 1)
                     logger.info("Waiting %.0fs before retry...", wait_time)
                     time.sleep(wait_time)
-                else:
-                    logger.error("All attempts failed. Using empty string.")
-                    final_response = ""
+
+        if last_error is not None:
+            raise RuntimeError(
+                f"Groq API call failed after {self.max_retries} retries: {last_error}"
+            ) from last_error
 
         return final_response
 

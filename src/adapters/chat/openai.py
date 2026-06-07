@@ -183,17 +183,13 @@ class OpenAIAudioLM(OpenAIChatCompletion):
                 messages = _inject_audio_into_messages(messages, audio_parts)
 
             chat_str = JsonChatStr(json.dumps(messages))
-            try:
-                response = self.model_call(
-                    messages=[chat_str],
-                    generate=True,
-                    gen_kwargs=copy.deepcopy(gen_kwargs),
-                )
-                parsed = self.parse_generations(response)
-                results.append(parsed[0] if parsed else "")
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.error("Generation error: %s", e)
-                results.append("")
+            response = self.model_call(
+                messages=[chat_str],
+                generate=True,
+                gen_kwargs=copy.deepcopy(gen_kwargs),
+            )
+            parsed = self.parse_generations(response)
+            results.append(parsed[0] if parsed else "")
 
         assert len(results) == len(requests), (
             f"Result count mismatch: {len(results)} vs {len(requests)}"

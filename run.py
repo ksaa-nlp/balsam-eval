@@ -256,8 +256,6 @@ def _run() -> int:
         _try_finalize(config, JobOutcome.FAILED, message)
         return 1
 
-    failures: list[str] = []
-
     for source in pool_files:
         logger.info("--- Evaluating: %s ---", source)
         try:
@@ -278,17 +276,13 @@ def _run() -> int:
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Failed to evaluate %s: %s", source, exc)
             logger.error("Traceback:\n%s", traceback.format_exc())
-            failures.append(f"{source}: {exc}")
+            _log_job_end(False)
+            _try_finalize(config, JobOutcome.FAILED, f"{source}: {exc}")
+            return 1
 
-    succeeded = not failures
-    _log_job_end(succeeded)
-
-    if succeeded:
-        _try_finalize(config, JobOutcome.SUCCEEDED)
-        return 0
-
-    _try_finalize(config, JobOutcome.FAILED, "; ".join(failures))
-    return 1
+    _log_job_end(True)
+    _try_finalize(config, JobOutcome.SUCCEEDED)
+    return 0
 
 
 def main() -> None:

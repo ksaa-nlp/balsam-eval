@@ -121,13 +121,10 @@ def compute_llm_judge_aggregation(items: List[Tuple[str, str, str]]) -> float:
     for question, gold, pred in tqdm(items, desc="LLM-as-judge", unit="sample"):
         if not gold or not pred:
             continue
-        try:
-            result = judge.evaluate_answer(
-                question=question, reference_answer=gold, given_answer=str(pred),
-            )
-            scores.append(result["overall_score"])
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("LLM judge failed on sample: %s", e)
+        result = judge.evaluate_answer(
+            question=question, reference_answer=gold, given_answer=str(pred),
+        )
+        scores.append(result["overall_score"])
 
     if not scores:
         logger.warning("LLM judge produced no scores.")
@@ -198,13 +195,10 @@ def compute_mcq_llm_judge_aggregation(items: List[Tuple[str, str, str, list]]) -
             continue
         gold = _normalize_mcq_answer(gold, mcq_options)
         pred = _normalize_mcq_answer(str(pred), mcq_options)
-        try:
-            result = judge.evaluate_answer(
-                question=question, reference_answer=gold, given_answer=pred,
-            )
-            scores.append(result["overall_score"])
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("MCQ LLM judge failed on sample: %s", e)
+        result = judge.evaluate_answer(
+            question=question, reference_answer=gold, given_answer=pred,
+        )
+        scores.append(result["overall_score"])
 
     if not scores:
         logger.warning("MCQ LLM judge produced no scores.")

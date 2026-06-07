@@ -180,10 +180,7 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
         logger.info("Retrying after %d seconds...", wait_time)
         time.sleep(wait_time)
 
-    return {
-        "score": None,
-        "explanation": "Error: Unable to parse a valid response after retries"
-    }
+    raise RuntimeError("LLM judge: unable to get a valid response after %d retries" % max_retries)
 
 
 class BaseLLMJudge(ABC):
@@ -274,16 +271,9 @@ class BaseLLMJudge(ABC):
                 "explanation": explanation
             }
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Error evaluating with %s: %s", config.name, e)
-            return {
-                "model": config.name,
-                "provider": config.provider,
-                "score": 0,
-                "raw_score": 0,
-                "passed": False,
-                "explanation": f"Error: {str(e)}"
-            }
+        except Exception:
+            logger.error("Error evaluating with %s", config.name, exc_info=True)
+            raise
 
     def evaluate_answer(
         self,
