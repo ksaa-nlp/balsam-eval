@@ -172,8 +172,8 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                 logger.warning("JSON parsing or structure error (attempt %d): %s", attempt+1, e)
                 logger.debug("Raw response: %s", response_text)
 
-        except Exception:  # pylint: disable=broad-exception-caught
-            logger.error("Model call error (attempt %d)", attempt+1)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Model call error (attempt %d): %s", attempt+1, e)
 
         # Wait before retry with exponential backoff
         wait_time = min(2 ** attempt, 30)
@@ -338,8 +338,12 @@ class BaseLLMJudge(ABC):
                 "aggregated_explanation": "No valid scores"
             }
 
-        agg_score = median(scores) if self.aggregation_method == "median" else mean(scores)
-        agg_raw = median(raw_scores) if self.aggregation_method == "median" else mean(raw_scores)
+        use_median = self.aggregation_method == "median"
+        agg_score = median(scores) if use_median else mean(scores)
+        agg_raw = (
+            (median(raw_scores) if use_median else mean(raw_scores))
+            if raw_scores else 0
+        )
 
         explanation = (f"Aggregated ({self.aggregation_method}) score: {agg_score:.4f}. " +
                       "; ".join(f"{res['model']}: {res['explanation']}" for res in model_results))

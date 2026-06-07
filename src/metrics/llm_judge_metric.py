@@ -25,41 +25,66 @@ from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 logger = logging.getLogger(__name__)
 
 
-def _get_judge_env():
-    """Read judge config from env vars. Returns (model, provider, api_key) or None."""
-    model = os.getenv("JUDGE_MODEL")
-    provider = os.getenv("JUDGE_PROVIDER")
-    api_key = os.getenv("JUDGE_API_KEY")
-    if not all([model, provider, api_key]):
+def _parse_csv_env(name: str) -> list[str]:
+    """Split a comma-separated env var into a trimmed list."""
+    raw = os.getenv(name, "")
+    return [v.strip() for v in raw.split(",") if v.strip()] if raw else []
+
+
+def _get_judge_configs() -> list[ModelConfig]:
+    """Build ModelConfig list from env vars.
+
+    Supports comma-separated values for multiple judges.
+    A single API key is broadcast to all judges.
+    """
+    models = _parse_csv_env("JUDGE_MODEL")
+    providers = _parse_csv_env("JUDGE_PROVIDER")
+    api_keys = _parse_csv_env("JUDGE_API_KEY")
+
+    if not models or not providers:
         logger.warning(
             "LLM judge not configured — set JUDGE_MODEL, JUDGE_PROVIDER, "
             "JUDGE_API_KEY env vars."
         )
-        return None
-    return model, provider, api_key
+        return []
+
+    n = max(len(models), len(providers))
+    if len(models) == 1:
+        models *= n
+    if len(providers) == 1:
+        providers *= n
+    if len(api_keys) <= 1:
+        api_keys = (api_keys or [""]) * n
+
+    return [
+        ModelConfig(
+            name=models[i],
+            provider=providers[i],  # type: ignore[arg-type]
+            api_key=api_keys[i] or None,
+        )
+        for i in range(n)
+    ]
 
 
 def _create_generative_judge():
-    env = _get_judge_env()
-    if env is None:
+    configs = _get_judge_configs()
+    if not configs:
         return None
-    model, provider, api_key = env
 
     return GenerativeLLMJudge(
-        model_configs=[ModelConfig(name=model, provider=provider, api_key=api_key)],
+        model_configs=configs,
         aggregation_method="mean",
         threshold=0.5,
     )
 
 
 def _create_mcq_judge():
-    env = _get_judge_env()
-    if env is None:
+    configs = _get_judge_configs()
+    if not configs:
         return None
-    model, provider, api_key = env
 
     return MCQLLMJudge(
-        model_configs=[ModelConfig(name=model, provider=provider, api_key=api_key)],
+        model_configs=configs,
         aggregation_method="mean",
         threshold=0.5,
     )
