@@ -21,16 +21,18 @@ WORKDIR /app
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Create virtual environment and install dependencies with uv
-RUN uv venv /opt/venv && \
-    uv sync --frozen --no-editable --no-install-project
+# Tell uv to use /opt/venv as the target environment
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+
+# Synchronize dependencies (uv will now populate /opt/venv directly)
+RUN uv sync --frozen --no-editable --no-install-project
 
 # Final stage
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy virtual environment from build stage
+# Copy the populated virtual environment from the build stage
 COPY --from=build /opt/venv /opt/venv
 
 # Copy application code
