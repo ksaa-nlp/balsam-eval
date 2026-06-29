@@ -3,6 +3,7 @@ steps:
     id: 'PREPARING_BUILD'
     args:
       - '--destination=gcr.io/${PROJECT_ID}/benchmark:latest'
+      - '--custom-platform=linux/amd64'
       - '--cache=true'
       - '--single-snapshot'
       - '--compressed-caching=false'
