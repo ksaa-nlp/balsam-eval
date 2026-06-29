@@ -237,16 +237,16 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             final_results["nGramScore"] = extracted_value
         else:
             final_results["nGramScore"] = rouge_result
-            print(f"[DEBUG] Using rouge_result directly: {final_results["nGramScore"]}")
+            print(f"[DEBUG] Using rouge_result directly: {final_results['nGramScore']}")
     # Handle BLEU metric (returns a float)
     elif "bleu,none" in result:
         final_results["nGramScore"] = result["bleu,none"]
-        print(f"[DEBUG] Found bleu,none: {final_results["nGramScore"]}")
+        print(f"[DEBUG] Found bleu,none: {final_results['nGramScore']}")
 
     # Handle accuracy metric
     if "accuracy,none" in result:
         final_results["mcqScore"] = result["accuracy,none"]
-        print(f"[DEBUG] Found accuracy,none: {final_results["mcqScore"]}")
+        print(f"[DEBUG] Found accuracy,none: {final_results['mcqScore']}")
 
     # Handle LLM as judge metrics (dict format with average_score)
     # These are set by process_results_with_llm_judge for task-level summaries
@@ -254,13 +254,13 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
         final_results["llmAsJudgeScore"] = result["llm_as_judge"].get(
             "average_score", 0
         )
-        print(f"[DEBUG] Found llm_as_judge: {final_results["llmAsJudgeScore"]}")
+        print(f"[DEBUG] Found llm_as_judge: {final_results['llmAsJudgeScore']}")
 
     if "mcq_llm_as_judge" in result:
         final_results["MCQllmAsJudgeScore"] = result["mcq_llm_as_judge"].get(
             "average_score", 0
         )
-        print(f"[DEBUG] Found mcq_llm_as_judge: {final_results["MCQllmAsJudgeScore"]}")
+        print(f"[DEBUG] Found mcq_llm_as_judge: {final_results['MCQllmAsJudgeScore']}")
 
     # Handle LLM judge scores in numeric format (set by process_results_with_llm_judge)
     # These are the actual score values (not dict summaries)
@@ -271,7 +271,7 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             if "llmAsJudgeScore" not in final_results:
                 final_results["llmAsJudgeScore"] = float(value)
                 print(
-                    f"[DEBUG] Found llm_judge_score,none: {final_results["llmAsJudgeScore"]}"
+                    f"[DEBUG] Found llm_judge_score,none: {final_results['llmAsJudgeScore']}"
                 )
 
     if "mcq_llm_judge_score,none" in result:
@@ -281,7 +281,7 @@ def get_avrage_scores(result: dict[str, Any]) -> dict[str, Any]:
             if "MCQllmAsJudgeScore" not in final_results:
                 final_results["MCQllmAsJudgeScore"] = float(value)
                 print(
-                    f"[DEBUG] Found mcq_llm_judge_score,none: {final_results["MCQllmAsJudgeScore"]}"
+                    f"[DEBUG] Found mcq_llm_judge_score,none: {final_results['MCQllmAsJudgeScore']}"
                 )
 
     print(f"[DEBUG] Final results: {final_results}")
