@@ -23,18 +23,89 @@ def copy_multimodal_utils_to_temp(temp_dir: str = ".temp") -> str | None:
         temp_dir: Directory to copy the file to
 
     Returns:
-        Path to the copied file, or None if source not found
+        Path to the copied or generated file.
     """
-    multimodal_utils_src = "src/core/multimodal_utils.py"
     multimodal_utils_dst = os.path.join(temp_dir, "multimodal_utils.py")
+    source_candidates = [
+        "src/core/multimodal_utils.py",
+        os.path.join(os.path.dirname(__file__), "multimodal_utils.py"),
+    ]
 
-    if os.path.exists(multimodal_utils_src):
-        os.makedirs(temp_dir, exist_ok=True)
+    os.makedirs(temp_dir, exist_ok=True)
+    for multimodal_utils_src in source_candidates:
+        if not os.path.exists(multimodal_utils_src):
+            continue
         shutil.copy2(multimodal_utils_src, multimodal_utils_dst)
         print(f"Copied multimodal_utils.py to {multimodal_utils_dst}")
         return multimodal_utils_dst
-    print(f"Warning: {multimodal_utils_src} not found")
+
+    fallback_content = '''"""Standalone multimodal helpers for lm_eval YAML imports."""
+
+import os
+
+from PIL import Image
+
+
+def doc_to_image(doc):
+    images = []
+    for path in doc.get("images", []):
+        try:
+            images.append(Image.open(path))
+        except (OSError, IOError) as exc:
+            print(f"Warning: Failed to load image {path}: {exc}")
+    return images
+
+
+def doc_to_audio(doc):
+    audios = []
+    for path in doc.get("audio", []):
+        if not os.path.exists(path):
+            print(f"Warning: Audio file not found: {path}")
+            continue
+        audio = load_audio_file(path)
+        if audio is not None:
+            audios.append(audio)
+    return audios
+
+
+def load_audio_file(file_path):
+    try:
+        import librosa
+
+        audio_array, sampling_rate = librosa.load(file_path, sr=None)
+        return {"array": audio_array, "sampling_rate": sampling_rate}
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        print(f"Warning: Failed to load audio with librosa: {exc}")
+
+    try:
+        import numpy as np
+        import soundfile as sf
+
+        audio_array, sampling_rate = sf.read(file_path)
+        if audio_array.dtype != np.float32:
+            audio_array = audio_array.astype(np.float32)
+        if len(audio_array.shape) > 1:
+            audio_array = audio_array[:, 0]
+        return {"array": audio_array, "sampling_rate": sampling_rate}
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        print(f"Warning: Failed to load audio with soundfile: {exc}")
+
     return None
+'''
+    with open(multimodal_utils_dst, "w", encoding="utf-8") as f:
+        f.write(fallback_content)
+    print(f"Wrote fallback multimodal_utils.py to {multimodal_utils_dst}")
+    return multimodal_utils_dst
+
+
+def _normalise_remote_media_ref(ref_str: str) -> str:
+    """Convert backend file URIs/absolute paths into bucket object names."""
+    if ref_str.startswith("gs://"):
+        parts = ref_str.removeprefix("gs://").split("/", 1)
+        return parts[1] if len(parts) > 1 else parts[0]
+    if "file:" in ref_str:
+        ref_str = ref_str.split("file:", 1)[1]
+    return ref_str.lstrip("/")
 
 
 def copy_metrics_combined_to_temp(temp_dir: str = ".temp") -> str | None:
@@ -119,6 +190,7 @@ def _materialise_media(
                 continue
 
             if bucket:
+                object_ref = _normalise_remote_media_ref(ref_str)
                 if storage_client is None:
                     try:
                         storage_client = storage.Client()
@@ -128,14 +200,14 @@ def _materialise_media(
                         new_refs.append(ref_str)
                         continue
                 try:
-                    storage_client.bucket(bucket).blob(
-                        ref_str).download_to_filename(dst_path)
+                    storage_client.bucket(bucket).blob(object_ref).download_to_filename(
+                        dst_path
+                    )
                     new_refs.append(dst_path)
                     changed = True
                     continue
                 except Exception as e:  # pylint: disable=broad-exception-caught
-                    print(
-                        f"[WARN] Could not fetch gs://{bucket}/{ref_str}: {e}")
+                    print(f"[WARN] Could not fetch gs://{bucket}/{object_ref}: {e}")
 
             # Couldn't resolve — leave the reference as-is. Downstream lm_eval
             # will fail loudly with FileNotFound, which is more debuggable than
