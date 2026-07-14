@@ -21,7 +21,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
 
     Returns:
         Dict with the appropriate parameter name and value
-        Example: {"max_tokens": 4096} or {"max_completion_tokens": 8192}
+        Example: {"max_tokens": 1024} or {"max_completion_tokens": 8192}
     """
     # Check if IS_REASONING environment variable is set to 1
     is_reasoning_env = os.getenv("IS_REASONING", "0").strip() == "1"
@@ -70,16 +70,17 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         if result:
             return result
 
-    # Adapter-specific defaults for non-thinking models
+    # Adapter-specific output defaults for non-thinking models. Keep these below
+    # small 4096-token context windows so the prompt still fits.
     adapter_defaults = {
-        "gemini": 4096,
-        "groq": 4096,
-        "openai-chat-completions": 4096,
-        "anthropic-chat-completions": 4096,
-        "local-chat-completions": 4096,
+        "gemini": 1024,
+        "groq": 1024,
+        "openai-chat-completions": 1024,
+        "anthropic-chat-completions": 1024,
+        "local-chat-completions": 1024,
     }
 
-    default_value = adapter_defaults.get(adapter, 4096)
+    default_value = adapter_defaults.get(adapter, 1024)
     return {"max_tokens": default_value}
 
 
