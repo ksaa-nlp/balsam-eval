@@ -216,7 +216,7 @@ class GroqLM(LM):
                     until = getattr(args, "until", [])
                     if until and not isinstance(until, list):
                         until = [until] if until else []
-                    return prompt, until
+                    return prompt, [value for value in until if value != ""]
                 if hasattr(args, "context"):
                     return args.context, []
             return str(instance), []
@@ -227,7 +227,7 @@ class GroqLM(LM):
                 stop = instance[1]
                 if not isinstance(stop, list):
                     stop = [stop] if stop else []
-                return instance[0], stop
+                return instance[0], [value for value in stop if value != ""]
             return instance[0], []
         
         # Handle dict format
@@ -236,7 +236,7 @@ class GroqLM(LM):
             stop = instance.get("until", [])
             if not isinstance(stop, list):
                 stop = [stop] if stop else []
-            return prompt, stop
+            return prompt, [value for value in stop if value != ""]
         
         # Fallback: convert to string
         return str(instance), []

@@ -117,7 +117,7 @@ class NewMetric(BaseMetric):
         """Get generation kwargs for this metric.
 
         TODO: Adjust generation parameters if needed.
-        Most metrics use default parameters (no sampling, stop on empty).
+        Most metrics use default parameters with sampling disabled.
 
         Returns:
             Generation parameters
@@ -132,7 +132,7 @@ class NewMetric(BaseMetric):
             ...     }
         """
         # TODO: Adjust generation parameters  # pylint: disable=fixme
-        return {"do_sample": False, "until": [""]}
+        return {"do_sample": False}
 
 
 # Register in custom registry

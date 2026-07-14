@@ -109,7 +109,7 @@ class GeminiLM(LM):
                     until = getattr(args, "until", [])
                     if until and not isinstance(until, list):
                         until = [until]
-                    return args.prompt, until
+                    return args.prompt, [value for value in until if value != ""]
                 if hasattr(args, "context"):
                     return args.context, []
             return str(instance), []
@@ -119,14 +119,16 @@ class GeminiLM(LM):
                 stop = instance[1]
                 if not isinstance(stop, list):
                     stop = [stop] if stop else []
-                return instance[0], stop
+                return instance[0], [value for value in stop if value != ""]
             return instance[0], []
 
         if isinstance(instance, dict):
             stop = instance.get("until", [])
             if not isinstance(stop, list):
                 stop = [stop] if stop else []
-            return instance.get("prompt", ""), stop
+            return instance.get("prompt", ""), [
+                value for value in stop if value != ""
+            ]
 
         return str(instance), []
 

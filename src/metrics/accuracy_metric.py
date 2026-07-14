@@ -282,9 +282,9 @@ class AccuracyMetric(BaseMetric):
         """Get generation kwargs for accuracy metric.
 
         Returns:
-            Generation parameters (no sampling, stop on empty string)
+            Generation parameters with sampling disabled
         """
-        return {"do_sample": False, "until": [""]}
+        return {"do_sample": False}
 
 
 # Register in custom registry
