@@ -23,6 +23,8 @@ import traceback
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
+from dotenv import load_dotenv
+
 from src.adapters.utils import process_adapter_and_url
 from src.core.common import (
     copy_audio_to_temp,
@@ -293,6 +295,7 @@ def main() -> None:
     error, import-time crash, etc.) is reported via ``finalize`` instead of
     letting the runner exit silently.
     """
+    load_dotenv(Path.cwd() / ".env")
     try:
         exit_code = _run()
     except Exception as exc:  # pylint: disable=broad-exception-caught
