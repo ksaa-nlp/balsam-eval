@@ -94,16 +94,103 @@ metadata at the top level:
 `pool_file` is the exact string the backend put in `POOL_FILES`; the backend
 uses it to map results back to `pool_dataset_files.file_path`.
 
-## Local development
+## Usage
 
-1. Drop pool files under `./.tasks/` — either the legacy
-   `{name, task, category, json: {...}}` envelope or the flat format the
-   backend generates.
-2. Export `MODEL` and `ADAPTER` (and `API_KEY` / `BASE_URL` as needed).
-3. `uv run python run.py` (or `python -u run.py` inside an activated venv).
-4. Result JSONs land in `./.results/`.
+### Run with Python
 
-For GCS-backed local runs (rare), point `GOOGLE_APPLICATION_CREDENTIALS` at a
+The standard runner keeps the original repository workflow:
+
+1. Put pool dataset JSON files in `./.tasks/`.
+2. Configure `MODEL` and `ADAPTER` in `./.env`.
+3. Add `API_KEY` and `BASE_URL` when required by the adapter.
+4. Run `python3 run.py` or `uv run python run.py`.
+
+Example `.env`:
+
+```dotenv
+MODEL=gpt-4o-mini
+ADAPTER=openai-chat-completions
+API_KEY=your-model-api-key
+```
+
+The runner loads `.env` from the current working directory, discovers
+`./.tasks/*.json`, and writes result files to `./.results/`.
+
+### Run with the CLI
+
+The CLI accepts dataset paths directly:
+
+```bash
+balsam-eval \
+  --model gpt-4o-mini \
+  --adapter openai-chat-completions \
+  --api-key "$OPENAI_API_KEY" \
+  ./pool-dataset.json
+```
+
+Pass multiple files to evaluate them in one invocation:
+
+```bash
+balsam-eval --model gpt-4o-mini --adapter openai-chat-completions \
+  ./dataset-1.json ./dataset-2.json
+```
+
+`MODEL` and `ADAPTER` are required. `API_KEY` and `BASE_URL` are optional at
+the runner level but may be required by the selected adapter. A dataset must
+be passed to the CLI or available under `./.tasks/`.
+
+CLI options override existing process environment variables, which override
+values from `./.env`.
+
+```text
+usage: balsam-eval [-h] [--model MODEL] [--adapter ADAPTER]
+                   [--api-key API_KEY] [--base-url BASE_URL]
+                   [--judge-model JUDGE_MODEL]
+                   [--judge-provider JUDGE_PROVIDER]
+                   [--judge-api-key JUDGE_API_KEY]
+                   [FILE ...]
+```
+
+### Run without cloning
+
+Use `uvx` to install the package into a temporary isolated environment and run
+it directly from GitHub:
+
+```bash
+uvx --from git+https://github.com/ksaa-nlp/balsam-eval.git balsam-eval \
+  --model gpt-4o-mini \
+  --adapter openai-chat-completions \
+  --api-key "$OPENAI_API_KEY" \
+  ./pool-dataset.json
+```
+
+After publishing the package to PyPI, use:
+
+```bash
+uvx --from balsam-lm-evaluation balsam-eval ...
+```
+
+### Optional LLM judge
+
+Judge configuration is optional. It is needed only when a dataset uses an
+LLM-as-judge metric:
+
+```bash
+balsam-eval --model gpt-4o-mini --adapter openai-chat-completions \
+  --judge-model gemini-2.5-flash \
+  --judge-provider gemini \
+  --judge-api-key "$GEMINI_API_KEY" \
+  ./pool-dataset.json
+```
+
+For multiple judges, provide comma-separated model, provider, and key values
+in matching order. A single provider or API key may be shared when supported
+by the judge configuration.
+
+API keys can appear in shell history when passed as arguments. Prefer `.env`
+or environment variables on shared systems.
+
+For GCS-backed local runs, point `GOOGLE_APPLICATION_CREDENTIALS` at a
 service-account key or run `gcloud auth application-default login` first.
 
 ## Cloud Build / Docker
