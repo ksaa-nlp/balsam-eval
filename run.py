@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 from src.adapter_utils import process_adapter_and_url
 from src.core.common import (
     copy_audio_to_temp,
@@ -84,17 +86,24 @@ def load_local_tasks() -> tuple[dict[str, list[str]], dict[str, str]]:
     tasks_temp: dict[str, list[str]] = {}
     task_mapper: dict[str, str] = {}
 
-    logger.info("Reading tasks from directory '%s'", TASKS_DIR)
+    pool_files = os.getenv("POOL_FILES")
+    if pool_files:
+        sources = [Path(path.strip()) for path in pool_files.split(",") if path.strip()]
+        logger.info("Reading %d task file(s) from the CLI", len(sources))
+    else:
+        logger.info("Reading tasks from directory '%s'", TASKS_DIR)
+        sources = [Path(TASKS_DIR, file) for file in os.listdir(f"./{TASKS_DIR}")]
 
-    for file in os.listdir(f"./{TASKS_DIR}"):
-        if not file.endswith("json"):
+    for source in sources:
+        file = source.name
+        if source.suffix.lower() != ".json":
             continue
 
         # Skip exported data files (they are lists, not task definitions)
         if file.endswith("_test.json") or file.endswith("_dev.json"):
             continue
 
-        with open(f"./{TASKS_DIR}/{file}", "r", encoding="utf-8") as f:
+        with open(source, "r", encoding="utf-8") as f:
             content = f.read()
             d = json.loads(content)
 
@@ -399,6 +408,8 @@ def run_remote_evaluation(config: EvalConfig) -> None:
 
 def main() -> None:
     """Main entry point."""
+    load_dotenv(Path.cwd() / ".env")
+
     # Setup directories
     setup_directories(TEMP_DIR, RESULTS_DIR)
 
