@@ -54,6 +54,10 @@ class AzureSTTLM(LM):
             language
             or os.environ.get("ASR_LANGUAGE", "ar-SA")
         )
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
+            raise ValueError("max_retries must be a positive integer")
+        if not np.isfinite(retry_timeout) or retry_timeout < 0:
+            raise ValueError("retry_timeout must be finite and non-negative")
         self.retry_timeout = retry_timeout
         self.max_retries = max_retries
         self._tokenizer_name = self.model_name
@@ -156,9 +160,15 @@ class AzureSTTLM(LM):
 
                 status = data.get("RecognitionStatus", "")
                 if status == "Success":
-                    text = str(data.get("DisplayText", ""))
+                    nbest = data.get("NBest") or []
+                    text = (
+                        str(nbest[0].get("Display", ""))
+                        if nbest and isinstance(nbest[0], dict)
+                        else ""
+                    )
                     if text.strip():
                         return text.strip()
+                    raise RuntimeError("Azure STT returned Success without an NBest hypothesis")
 
                 if status == "NoMatch":
                     logger.warning("Azure STT: no speech detected in audio")
@@ -177,7 +187,7 @@ class AzureSTTLM(LM):
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_timeout * (attempt + 1))
 
-        return ""
+        raise RuntimeError("Azure STT transcription failed after retries")
 
     # --------------------------------------------------------------------- #
     # Generation (lm_eval interface)

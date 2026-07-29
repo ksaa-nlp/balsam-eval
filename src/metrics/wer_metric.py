@@ -26,19 +26,17 @@ def compute_wer_score(
         Average WER score (lower is better)
     """
 
+    if len(references) != len(predictions):
+        raise ValueError("references and predictions must have the same length")
+
     total_wer = 0.0
     valid = 0
 
     for ref, pred in zip(references, predictions):
-        if not pred or not ref:
+        if not ref:
             continue
-
-        try:
-            wer = jiwer.wer(ref, pred)
-            total_wer += wer
-            valid += 1
-        except (TypeError, ValueError, RuntimeError):
-            continue
+        total_wer += jiwer.wer(ref, pred or "")
+        valid += 1
 
     return total_wer / valid if valid else 1.0
 
@@ -52,8 +50,10 @@ def compute_wer_aggregation(items: List[Any]) -> float:
     Returns:
         Average WER score
     """
-    refs = [r[0] if isinstance(r, (list, tuple)) else r for r in items]
-    preds = [p[1] if isinstance(p, (list, tuple)) else p for p in items]
+    if not all(isinstance(item, (list, tuple)) and len(item) == 2 for item in items):
+        raise ValueError("WER aggregation items must be [reference, prediction] pairs")
+    refs = [item[0] for item in items]
+    preds = [item[1] for item in items]
 
     return compute_wer_score(references=refs, predictions=preds)
 

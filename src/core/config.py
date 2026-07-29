@@ -84,8 +84,17 @@ class EvalConfig:
         return [v.strip() for v in raw.split(",") if v.strip()]
 
     def is_remote_job(self) -> bool:
-        """True when the runner should report status / upload to GCS."""
-        return bool(self.api_host and self.finalize_token and self.job_id)
+        """True when any remote-job configuration has been supplied."""
+        return any(
+            (
+                self.api_host,
+                self.finalize_token,
+                self.job_id,
+                self.bucket,
+                self.results_path,
+                self.pool_files,
+            )
+        )
 
     def validate_local(self) -> None:
         """Ensure the minimum env vars for a local run are set."""
@@ -118,8 +127,9 @@ class EvalConfig:
     def get_model_args(self, base_url: Optional[str] = None) -> dict[str, str]:
         """Return the kwargs to pass to the adapter constructor."""
         args: dict[str, str] = {"model": self.model_name}
-        if base_url:
-            args["base_url"] = base_url
+        resolved_base_url = base_url or self.base_url
+        if resolved_base_url:
+            args["base_url"] = resolved_base_url
         if self.api_key:
             args["api_key"] = self.api_key
         return args

@@ -1,11 +1,12 @@
 """Common utility functions shared across the project."""
 
+import hashlib
 import json
 import os
 import shutil
 
 from dotenv import load_dotenv
-from google.cloud import storage
+from google.cloud import storage  # type: ignore[attr-defined]
 
 load_dotenv()
 
@@ -98,14 +99,16 @@ def load_audio_file(file_path):
     return multimodal_utils_dst
 
 
-def _normalise_remote_media_ref(ref_str: str) -> str:
-    """Convert backend file URIs/absolute paths into bucket object names."""
+def _normalise_remote_media_ref(ref_str: str, default_bucket: str) -> tuple[str, str]:
+    """Return the bucket and object name for a backend media reference."""
     if ref_str.startswith("gs://"):
         parts = ref_str.removeprefix("gs://").split("/", 1)
-        return parts[1] if len(parts) > 1 else parts[0]
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError(f"GCS media URI must include a bucket and object: {ref_str}")
+        return parts[0], parts[1]
     if "file:" in ref_str:
         ref_str = ref_str.split("file:", 1)[1]
-    return ref_str.lstrip("/")
+    return default_bucket, ref_str.lstrip("/")
 
 
 def copy_metrics_combined_to_temp(temp_dir: str = ".temp") -> str | None:
@@ -180,7 +183,9 @@ def _materialise_media(
         new_refs: list[str] = []
         for ref in refs:
             ref_str = str(ref)
-            dst_path = os.path.join(media_dir, os.path.basename(ref_str))
+            filename = os.path.basename(ref_str) or "media"
+            digest = hashlib.sha256(ref_str.encode("utf-8")).hexdigest()[:16]
+            dst_path = os.path.join(media_dir, f"{digest}-{filename}")
 
             if os.path.exists(ref_str):
                 if not os.path.exists(dst_path):
@@ -190,7 +195,12 @@ def _materialise_media(
                 continue
 
             if bucket:
-                object_ref = _normalise_remote_media_ref(ref_str)
+                try:
+                    media_bucket, object_ref = _normalise_remote_media_ref(ref_str, bucket)
+                except ValueError as exc:
+                    print(f"[WARN] Could not resolve media reference {ref_str!r}: {exc}")
+                    new_refs.append(ref_str)
+                    continue
                 if storage_client is None:
                     try:
                         storage_client = storage.Client()
@@ -200,14 +210,14 @@ def _materialise_media(
                         new_refs.append(ref_str)
                         continue
                 try:
-                    storage_client.bucket(bucket).blob(object_ref).download_to_filename(
+                    storage_client.bucket(media_bucket).blob(object_ref).download_to_filename(
                         dst_path
                     )
                     new_refs.append(dst_path)
                     changed = True
                     continue
                 except Exception as e:  # pylint: disable=broad-exception-caught
-                    print(f"[WARN] Could not fetch gs://{bucket}/{object_ref}: {e}")
+                    print(f"[WARN] Could not fetch gs://{media_bucket}/{object_ref}: {e}")
 
             # Couldn't resolve — leave the reference as-is. Downstream lm_eval
             # will fail loudly with FileNotFound, which is more debuggable than

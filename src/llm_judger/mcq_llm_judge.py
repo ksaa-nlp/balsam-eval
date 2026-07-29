@@ -52,8 +52,11 @@ Return only a JSON object with:
         """
         if raw_score is None:
             return 0.0
-        # Clamp to 0-1 range
-        return max(0.0, min(1.0, float(raw_score)))
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            return 0.0
+        return score if score in (0.0, 1.0) else 0.0
 
     def get_max_score(self) -> float:
         """MCQ uses binary scoring, max is 1."""

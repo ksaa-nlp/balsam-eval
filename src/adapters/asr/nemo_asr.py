@@ -61,6 +61,10 @@ class NeMoASRLM(LM):
         )
         self.language = language or os.environ.get("ASR_LANGUAGE")
         self.temperature = temperature
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
+            raise ValueError("max_retries must be a positive integer")
+        if not np.isfinite(retry_timeout) or retry_timeout < 0:
+            raise ValueError("retry_timeout must be finite and non-negative")
         self.retry_timeout = retry_timeout
         self.max_retries = max_retries
         self._tokenizer_name = self.model_name
@@ -79,8 +83,7 @@ class NeMoASRLM(LM):
         resolved_base = base_url or os.environ.get("BASE_URL", NVIDIA_NIM_BASE_URL)
         resolved_base = resolved_base.rstrip("/")
         if not resolved_base.endswith("/v1"):
-            if "/v1" not in resolved_base:
-                resolved_base = f"{resolved_base}/v1"
+            resolved_base = f"{resolved_base}/v1"
 
         self.client = OpenAI(api_key=resolved_key, base_url=resolved_base)
 
@@ -139,6 +142,7 @@ class NeMoASRLM(LM):
 
     def _transcribe_audio(self, wav_bytes: bytes) -> str:
         """Send audio to the NVIDIA NIM transcription endpoint with retry."""
+        last_error: Exception | None = None
         for attempt in range(self.max_retries):
             try:
                 buf = io.BytesIO(wav_bytes)
@@ -167,7 +171,8 @@ class NeMoASRLM(LM):
                 if attempt < self.max_retries - 1:
                     logger.warning("Empty NIM transcription, retrying...")
                     time.sleep(self.retry_timeout * (attempt + 1))
-            except (OSError, ValueError, RuntimeError) as e:
+            except Exception as e:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+                last_error = e
                 logger.error(
                     "NVIDIA NIM ASR error (attempt %d/%d): %s: %s",
                     attempt + 1, self.max_retries, type(e).__name__, e,
@@ -175,7 +180,9 @@ class NeMoASRLM(LM):
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_timeout * (attempt + 1))
 
-        return ""
+        if last_error is not None:
+            raise RuntimeError("NVIDIA NIM ASR transcription failed after retries") from last_error
+        raise RuntimeError("NVIDIA NIM ASR returned empty transcriptions after retries")
 
     # --------------------------------------------------------------------- #
     # Generation (lm_eval interface)

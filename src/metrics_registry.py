@@ -75,6 +75,11 @@ class MetricsRegistry:
     def __init__(self):
         self._metrics: Dict[str, BaseMetric] = {}
 
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        """Normalize external metric names to registry keys."""
+        return name.lower().replace("-", "_")
+
     def register(self, name: str, metric: BaseMetric) -> None:
         """Register a metric in the registry.
 
@@ -82,7 +87,7 @@ class MetricsRegistry:
             name: Metric name
             metric: Metric instance
         """
-        self._metrics[name.lower()] = metric
+        self._metrics[self._normalize_name(name)] = metric
 
     def get(self, name: str) -> Optional[BaseMetric]:
         """Get a metric by name.
@@ -93,7 +98,7 @@ class MetricsRegistry:
         Returns:
             Metric instance or None if not found
         """
-        return self._metrics.get(name.lower())
+        return self._metrics.get(self._normalize_name(name))
 
     def list_metrics(self) -> list[str]:
         """List all registered metric names.
@@ -114,12 +119,12 @@ class MetricsRegistry:
         Returns:
             Registered metric name if found, None otherwise
         """
-        metric_name_lower = metric_name.lower().replace("-", "_")
+        metric_name_lower = self._normalize_name(metric_name)
         if metric_name_lower in self._metrics:
             return metric_name_lower
         best: Optional[str] = None
         for registered in self._metrics:
-            if registered in metric_name_lower:
+            if registered in metric_name_lower.split("_"):
                 if best is None or len(registered) > len(best):
                     best = registered
         return best

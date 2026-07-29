@@ -26,8 +26,9 @@ def doc_to_image(doc: Dict[str, Any]) -> List[Image.Image]:
     image_paths = doc.get("images", [])
     for path in image_paths:
         try:
-            img = Image.open(path)
-            images.append(img)
+            with Image.open(path) as img:
+                img.load()
+                images.append(img.copy())
         except (OSError, IOError) as e:
             print(f"Warning: Failed to load image {path}: {e}")
             continue
@@ -85,9 +86,11 @@ def load_audio_file(file_path: str) -> Union[Dict[str, Any], None]:
             if audio_array.dtype != np.float32:
                 audio_array = audio_array.astype(np.float32)
 
-            # Handle multi-channel audio by taking first channel
-            if len(audio_array.shape) > 1:
-                audio_array = audio_array[:, 0]
+            # Match librosa's default mono downmix semantics.
+            if audio_array.ndim > 1:
+                audio_array = np.asarray(
+                    np.mean(audio_array, axis=1, dtype=np.float32), dtype=np.float32
+                )
 
             return {"array": audio_array, "sampling_rate": sampling_rate}
         except (OSError, ValueError, RuntimeError) as e2:

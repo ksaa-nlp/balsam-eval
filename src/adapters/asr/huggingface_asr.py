@@ -66,6 +66,10 @@ class HuggingFaceASRLM(LM):
             or os.environ.get("MODEL", "openai/whisper-large-v3")
         )
         self.language = language or os.environ.get("ASR_LANGUAGE")
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
+            raise ValueError("max_retries must be a positive integer")
+        if not np.isfinite(retry_timeout) or retry_timeout < 0:
+            raise ValueError("retry_timeout must be finite and non-negative")
         self.retry_timeout = retry_timeout
         self.max_retries = max_retries
         self._tokenizer_name = self.model_name
@@ -148,7 +152,10 @@ class HuggingFaceASRLM(LM):
         """Transcribe audio via the HuggingFace Inference API with retry."""
         for attempt in range(self.max_retries):
             try:
-                result = self.client.automatic_speech_recognition(wav_bytes)
+                kwargs: dict[str, Any] = {}
+                if self.language:
+                    kwargs["extra_body"] = {"language": self.language}
+                result = self.client.automatic_speech_recognition(wav_bytes, **kwargs)
 
                 text = ""
                 if isinstance(result, str):

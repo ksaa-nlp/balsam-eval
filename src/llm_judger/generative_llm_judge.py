@@ -53,8 +53,13 @@ Your output must be *only* a JSON object containing two keys:
         """
         if raw_score is None:
             return 0.0
-        # Normalize by dividing by max score (3)
-        return round(float(raw_score) / 3.0, 5)
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            return 0.0
+        if not 0.0 <= score <= self.get_max_score():
+            return 0.0
+        return round(score / self.get_max_score(), 5)
 
     def get_max_score(self) -> float:
         """Generative uses 0-3 scoring scale."""

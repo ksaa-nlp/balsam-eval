@@ -46,13 +46,20 @@ def main(argv: Optional[list[str]] = None) -> None:
         "JUDGE_PROVIDER": args.judge_provider,
         "JUDGE_API_KEY": args.judge_api_key,
     }
-    for name, value in cli_env.items():
-        if value is not None:
-            os.environ[name] = value
+    overrides = {name: value for name, value in cli_env.items() if value is not None}
     if args.pool_files:
-        os.environ["POOL_FILES"] = ",".join(args.pool_files)
+        overrides["POOL_FILES"] = ",".join(args.pool_files)
 
-    runner.main()
+    previous = {name: os.environ.get(name) for name in overrides}
+    try:
+        os.environ.update(overrides)
+        runner.main()
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 if __name__ == "__main__":

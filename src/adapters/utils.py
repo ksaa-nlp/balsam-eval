@@ -28,10 +28,16 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
 
     # If IS_REASONING=1, use MAX_TOKENS if exists, otherwise default to 8192
     if is_reasoning_env:
-        max_tokens = int(os.getenv("MAX_TOKENS", "8192"))
+        raw_max_tokens = os.getenv("MAX_TOKENS", "8192")
+        try:
+            max_tokens = int(raw_max_tokens)
+        except ValueError as exc:
+            raise ValueError("MAX_TOKENS must be an integer") from exc
+        if max_tokens <= 0:
+            raise ValueError("MAX_TOKENS must be greater than zero")
         # For OpenAI reasoning models, use max_completion_tokens
         if adapter in ("openai-chat-completions", "openai"):
-            return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
+            return {"max_completion_tokens": max_tokens}
         return {"max_tokens": max_tokens}
 
     # Otherwise, use the current logic (IS_REASONING=0 or not set)
@@ -112,9 +118,9 @@ def _get_thinking_model_config(adapter: str, model_lower: str) -> dict | None:
     if adapter in ("openai-chat-completions", "openai"):
         # GPT-5.2 supports up to 128,000 output tokens
         if "gpt-5.2" in model_lower or "gpt5.2" in model_lower:
-            return {"max_completion_tokens": 128000, "max_tokens": 128000}
+            return {"max_completion_tokens": 128000}
         # GPT-5 and o-series models
-        return {"max_completion_tokens": 8192, "max_tokens": 8192}
+        return {"max_completion_tokens": 8192}
 
     if adapter == "local-chat-completions":
         # DeepSeek R1, QwQ, Skywork-o1, etc.
@@ -154,7 +160,7 @@ def convert_anthropic_url(url: str | None) -> str:
     url = url.strip()
 
     # If it's already the chat/completions endpoint, return as-is
-    if "/chat/completions" in url:
+    if url.split("?", 1)[0].rstrip("/").endswith("/chat/completions"):
         return url
 
     # Convert /v1/messages to /v1/chat/completions

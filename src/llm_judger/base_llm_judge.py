@@ -9,6 +9,7 @@ The main improvement is separating concerns:
 
 import json
 import logging
+import math
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -105,7 +106,9 @@ def create_model_adapter(config: ModelConfig) -> DeepEvalBaseLLM:
     return cls(**params)
 
 
-def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) -> Dict[str, Any]:
+def call_model_adapter_with_retry(
+    adapter, prompt: str, max_retries: int = 3, max_score: float = 1.0
+) -> Dict[str, Any]:
     """Call model adapter with retry logic."""
 
     for attempt in range(max_retries):
@@ -161,10 +164,18 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                 raw_text = response_text.strip().replace("```json", "").replace("```", "").strip()
                 parsed = json.loads(raw_text)
 
-                if "score" in parsed and "explanation" in parsed:
+                score = parsed.get("score") if isinstance(parsed, dict) else None
+                explanation = parsed.get("explanation") if isinstance(parsed, dict) else None
+                if (
+                    isinstance(explanation, str)
+                    and not isinstance(score, bool)
+                    and isinstance(score, (int, float))
+                    and math.isfinite(score)
+                    and 0 <= score <= max_score
+                ):
                     return {
-                        "score": parsed["score"],
-                        "explanation": parsed["explanation"],
+                        "score": score,
+                        "explanation": explanation,
                     }
 
                 logger.warning("Missing keys in parsed output (attempt %d): %s", attempt+1, parsed)
@@ -206,6 +217,12 @@ class BaseLLMJudge(ABC):
         custom_prompt: Optional[str] = None,
         threshold: float = 0.7
     ):
+        if not model_configs:
+            raise ValueError("At least one judge model configuration is required")
+        if aggregation_method not in {"mean", "median"}:
+            raise ValueError("aggregation_method must be 'mean' or 'median'")
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1")
         self.model_configs = model_configs
         self.model_adapters = [create_model_adapter(config) for config in model_configs]
         self.aggregation_method = aggregation_method
@@ -253,7 +270,9 @@ class BaseLLMJudge(ABC):
 
         try:
             # Call the model with retry logic
-            result = call_model_adapter_with_retry(adapter, prompt)
+            result = call_model_adapter_with_retry(
+                adapter, prompt, max_score=self.get_max_score()
+            )
 
             raw_score = result["score"]
             explanation = result["explanation"]

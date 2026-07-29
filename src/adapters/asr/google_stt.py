@@ -68,6 +68,10 @@ class GoogleSTTLM(LM):
             language
             or os.environ.get("ASR_LANGUAGE", "ar-SA")
         )
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
+            raise ValueError("max_retries must be a positive integer")
+        if not np.isfinite(retry_timeout) or retry_timeout < 0:
+            raise ValueError("retry_timeout must be finite and non-negative")
         self.retry_timeout = retry_timeout
         self.max_retries = max_retries
         self._tokenizer_name = self.model_name
@@ -135,6 +139,7 @@ class GoogleSTTLM(LM):
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
             sample_rate_hertz=sample_rate,
             language_code=self.language,
+            model=self.model_name,
             enable_automatic_punctuation=True,
         )
 

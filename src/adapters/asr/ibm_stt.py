@@ -67,6 +67,10 @@ class IBMSTTLM(LM):
             or os.environ.get("MODEL", "ar-MS_Telephony")
         )
         self.language = language or os.environ.get("ASR_LANGUAGE")
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
+            raise ValueError("max_retries must be a positive integer")
+        if not np.isfinite(retry_timeout) or retry_timeout < 0:
+            raise ValueError("retry_timeout must be finite and non-negative")
         self.retry_timeout = retry_timeout
         self.max_retries = max_retries
         self._tokenizer_name = self.model_name
@@ -172,7 +176,7 @@ class IBMSTTLM(LM):
                 if attempt < self.max_retries - 1:
                     logger.warning("Empty transcription from IBM STT, retrying...")
                     time.sleep(self.retry_timeout * (attempt + 1))
-            except (OSError, ValueError, RuntimeError) as e:
+            except Exception as e:  # noqa: BLE001  # pylint: disable=broad-exception-caught
                 logger.error(
                     "IBM STT error (attempt %d/%d): %s: %s",
                     attempt + 1, self.max_retries, type(e).__name__, e,

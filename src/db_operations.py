@@ -1,6 +1,7 @@
 """Backend API client used by the evaluation runner."""
 
 import logging
+import hashlib
 import time
 from enum import Enum
 from typing import Any, Dict, Optional
@@ -27,33 +28,36 @@ def _request_with_retry(
     initial_timeout: float = 30.0,
     max_timeout: float = 120.0,
 ) -> requests.Response:
-    """HTTP request with retry on timeout / connection errors."""
+    """HTTP request with retry on transient transport and server failures."""
     last_exc: Optional[Exception] = None
     timeout = initial_timeout
 
     for attempt in range(max_retries):
         try:
-            return requests.request(
+            response = requests.request(
                 method=method,
                 url=url,
                 headers=headers,
                 json=json_data,
                 timeout=timeout,
             )
+            if response.status_code not in {429, 502, 503, 504}:
+                return response
+            last_exc = requests.HTTPError(f"HTTP {response.status_code}")
         except (requests.Timeout, requests.ConnectionError) as e:
             last_exc = e
-            if attempt < max_retries - 1:
-                wait = min(2 ** attempt, 30)
-                timeout = min(timeout * 1.5, max_timeout)
-                logger.warning(
-                    "Request to %s failed (%d/%d); retrying in %ds with timeout=%.1fs",
-                    url,
-                    attempt + 1,
-                    max_retries,
-                    wait,
-                    timeout,
-                )
-                time.sleep(wait)
+        if attempt < max_retries - 1:
+            wait = min(2 ** attempt, 30)
+            timeout = min(timeout * 1.5, max_timeout)
+            logger.warning(
+                "Request to %s failed (%d/%d); retrying in %ds with timeout=%.1fs",
+                url,
+                attempt + 1,
+                max_retries,
+                wait,
+                timeout,
+            )
+            time.sleep(wait)
 
     raise requests.RequestException(
         f"Failed to call {url} after {max_retries} attempts: {last_exc}"
@@ -87,6 +91,9 @@ def finalize_job(
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {finalize_token}",
+        "Idempotency-Key": hashlib.sha256(
+            f"{job_id}:{outcome.value}".encode("utf-8")
+        ).hexdigest(),
     }
 
     response = _request_with_retry("POST", url, headers=headers, json_data=payload)

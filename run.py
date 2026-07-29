@@ -199,18 +199,18 @@ def _evaluate_one_file(
     return job(), result_filename
 
 
-def _try_finalize(config: EvalConfig, outcome: JobOutcome, error: Optional[str] = None) -> None:
+def _try_finalize(config: EvalConfig, outcome: JobOutcome, error: Optional[str] = None) -> bool:
     """Best-effort POST to ``/evaluation-jobs/:id/finalize``.
 
     Swallows network failures so the caller can continue with ``sys.exit`` —
     a finalize failure is logged but shouldn't replace the original error.
     """
     if not config.is_remote_job():
-        return
+        return True
     api_host = config.api_host or ""
     if "localhost" in api_host or "127.0.0.1" in api_host:
         logger.info("Skipping finalize call: API_HOST points at localhost (%s)", api_host)
-        return
+        return True
     try:
         finalize_job(
             api_host=config.api_host or "",
@@ -219,8 +219,10 @@ def _try_finalize(config: EvalConfig, outcome: JobOutcome, error: Optional[str] 
             outcome=outcome,
             error=(error or None) and (error or "")[:4000],
         )
+        return True
     except Exception as finalize_exc:  # pylint: disable=broad-exception-caught
         logger.error("Finalize call failed (%s): %s", outcome.value, finalize_exc)
+        return False
 
 
 def _run() -> int:
@@ -283,7 +285,8 @@ def _run() -> int:
             return 1
 
     _log_job_end(True)
-    _try_finalize(config, JobOutcome.SUCCEEDED)
+    if not _try_finalize(config, JobOutcome.SUCCEEDED):
+        return 1
     return 0
 
 
@@ -295,8 +298,8 @@ def main() -> None:
     error, import-time crash, etc.) is reported via ``finalize`` instead of
     letting the runner exit silently.
     """
-    load_dotenv(Path.cwd() / ".env")
     try:
+        load_dotenv(Path.cwd() / ".env")
         exit_code = _run()
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("Fatal error in runner: %s", exc)

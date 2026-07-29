@@ -6,6 +6,7 @@ and produces exactly one result JSON.
 
 import logging
 import os
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
@@ -25,26 +26,31 @@ logger.setLevel(logging.INFO)
 
 # --- Compatibility patches ---------------------------------------------------
 
-_original_relative_to = Path.relative_to
+@contextmanager
+def _lm_eval_compatibility_patches():
+    """Apply legacy lm_eval workarounds only while it is executing."""
+    original_relative_to = Path.relative_to
+    original_post = requests.post
 
+    def safe_relative_to(self, *args, **kwargs):
+        try:
+            return original_relative_to(self, *args, **kwargs)
+        except ValueError as exc:
+            if "not in the subpath of" in str(exc):
+                return self
+            raise
 
-def _safe_relative_to(self, *args, **kwargs):
-    """``Path.relative_to`` that returns the original path on ValueError."""
+    def post_with_default_timeout(url, *args, **kwargs):
+        kwargs.setdefault("timeout", 5000)
+        return original_post(url, *args, **kwargs)
+
+    Path.relative_to = safe_relative_to  # type: ignore[method-assign]
+    requests.post = post_with_default_timeout  # type: ignore[assignment]
     try:
-        return _original_relative_to(self, *args, **kwargs)
-    except ValueError as e:
-        if "not in the subpath of" in str(e):
-            return self
-        raise
-
-
-Path.relative_to = _safe_relative_to  # type: ignore[method-assign]
-
-# lm_eval clients occasionally call ``requests.post`` without a timeout — give
-# them a generous default so we don't hang indefinitely on a stuck connection.
-requests.post = lambda url, timeout=5000, **kwargs: requests.request(  # type: ignore[assignment]
-    method="POST", url=url, timeout=timeout, **kwargs
-)
+        yield
+    finally:
+        Path.relative_to = original_relative_to  # type: ignore[method-assign]
+        requests.post = original_post  # type: ignore[assignment]
 
 
 _ASR_ADAPTERS = {"openai-asr", "google-stt", "azure-stt"}
@@ -141,20 +147,21 @@ class SingleFileEvaluationJob:
         temp_dir = Path(".temp").resolve()
         use_chat_template = self.adapter not in _ASR_ADAPTERS
 
-        return cast(
-            dict[str, Any],
-            lm_eval.evaluator.simple_evaluate(
-                model=self.adapter,
-                model_args=self.model_args,
-                tasks=[self.task_name],
-                apply_chat_template=use_chat_template,
-                task_manager=lm_eval.tasks.TaskManager(
-                    include_path=str(temp_dir)),
-                batch_size=1,
-                gen_kwargs=get_max_tokens_config(
-                    self.adapter, self.model_args["model"]),
-            ),
-        )
+        with _lm_eval_compatibility_patches():
+            return cast(
+                dict[str, Any],
+                lm_eval.evaluator.simple_evaluate(
+                    model=self.adapter,
+                    model_args=self.model_args,
+                    tasks=[self.task_name],
+                    apply_chat_template=use_chat_template,
+                    task_manager=lm_eval.tasks.TaskManager(
+                        include_path=str(temp_dir)),
+                    batch_size=1,
+                    gen_kwargs=get_max_tokens_config(
+                        self.adapter, self.model_args["model"]),
+                ),
+            )
 
     @staticmethod
     def _sanitize_results(results: Dict[str, Any]) -> None:

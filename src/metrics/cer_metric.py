@@ -24,19 +24,17 @@ def compute_cer_score(
     Returns:
         Average CER score (lower is better)
     """
+    if len(references) != len(predictions):
+        raise ValueError("references and predictions must have the same length")
+
     total_cer = 0.0
     valid = 0
 
     for ref, pred in zip(references, predictions):
-        if not pred or not ref:
+        if not ref:
             continue
-
-        try:
-            cer = jiwer.cer(ref, pred)
-            total_cer += cer
-            valid += 1
-        except (TypeError, ValueError, RuntimeError):
-            continue
+        total_cer += jiwer.cer(ref, pred or "")
+        valid += 1
 
     return total_cer / valid if valid else 1.0
 
@@ -50,8 +48,10 @@ def compute_cer_aggregation(items: List[Any]) -> float:
     Returns:
         Average CER score
     """
-    refs = [r[0] if isinstance(r, (list, tuple)) else r for r in items]
-    preds = [p[1] if isinstance(p, (list, tuple)) else p for p in items]
+    if not all(isinstance(item, (list, tuple)) and len(item) == 2 for item in items):
+        raise ValueError("CER aggregation items must be [reference, prediction] pairs")
+    refs = [item[0] for item in items]
+    preds = [item[1] for item in items]
 
     return compute_cer_score(references=refs, predictions=preds)
 

@@ -123,7 +123,7 @@ def normalize_text(
 def compute_accuracy(
     items: List[Tuple[Any, Any]],
     fuzzy_threshold: float = 0.85,
-    use_fuzzy: bool = True,
+    use_fuzzy: bool = False,
 ) -> float:
     """Compute accuracy score from reference and prediction pairs.
 
@@ -139,16 +139,18 @@ def compute_accuracy(
     correct = 0
 
     for ref, pred in items:
-        if ref is None or pred is None:
+        if ref is None:
             continue
 
         # Normalize both for comparison
         ref_norm = normalize_text(ref)
         pred_norm = normalize_text(pred)
 
-        if ref_norm and pred_norm:
-            total += 1
+        if not ref_norm:
+            continue
+        total += 1
 
+        if pred_norm:
             if use_fuzzy:
                 # Use fuzzy matching with RapidFuzz
                 similarity_ratio = fuzz.ratio(ref_norm, pred_norm) / 100.0
@@ -227,7 +229,7 @@ def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     Returns:
         Dictionary with accuracy data containing [reference, prediction]
     """
-    preds = results[0] if isinstance(results, list) else results
+    preds = results[0] if isinstance(results, list) and results else ""
     golds = doc["output"]
 
     # Extract first word/line for MCQ answers
@@ -250,7 +252,7 @@ def process_results_fuzzy(doc: Dict[str, Any], results: Any) -> Dict[str, List[s
     Returns:
         Dictionary with fuzzy_accuracy data containing [reference, prediction]
     """
-    preds = results[0] if isinstance(results, list) else results
+    preds = results[0] if isinstance(results, list) and results else ""
     golds = doc["output"]
 
     # Extract first word/line for MCQ answers

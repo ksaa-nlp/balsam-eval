@@ -57,6 +57,10 @@ class QwenASRLM(LM):
             or os.environ.get("MODEL", "qwen3-asr-flash")
         )
         self.language = language or os.environ.get("ASR_LANGUAGE")
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
+            raise ValueError("max_retries must be a positive integer")
+        if not np.isfinite(retry_timeout) or retry_timeout < 0:
+            raise ValueError("retry_timeout must be finite and non-negative")
         self.retry_timeout = retry_timeout
         self.max_retries = max_retries
         self._tokenizer_name = self.model_name
@@ -85,8 +89,7 @@ class QwenASRLM(LM):
             )
         resolved_base = resolved_base.rstrip("/")
         if not resolved_base.endswith("/v1"):
-            if "/v1" not in resolved_base:
-                resolved_base = f"{resolved_base}/v1"
+            resolved_base = f"{resolved_base}/v1"
 
         self.client = OpenAI(api_key=resolved_key, base_url=resolved_base)
 
@@ -145,6 +148,7 @@ class QwenASRLM(LM):
 
     def _transcribe_audio(self, audio_dict: dict) -> str:
         """Transcribe by sending audio to the Qwen ASR API endpoint."""
+        last_error: Exception | None = None
         audio_b64 = self._audio_dict_to_base64_wav(audio_dict)
         data_uri = f"data:audio/wav;base64,{audio_b64}"
 
@@ -171,14 +175,17 @@ class QwenASRLM(LM):
                     model=self.model_name,
                     messages=messages,  # type: ignore[arg-type]
                 )
-                text = response.choices[0].message.content or ""
+                if not response.choices or not isinstance(response.choices[0].message.content, str):
+                    raise ValueError("Qwen ASR response has no text choice")
+                text = response.choices[0].message.content
                 if text.strip():
                     return text.strip()
 
                 if attempt < self.max_retries - 1:
                     logger.warning("Empty Qwen ASR API response, retrying...")
                     time.sleep(self.retry_timeout * (attempt + 1))
-            except (OSError, ValueError, RuntimeError) as e:
+            except Exception as e:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+                last_error = e
                 logger.error(
                     "Qwen ASR API error (attempt %d/%d): %s: %s",
                     attempt + 1, self.max_retries, type(e).__name__, e,
@@ -186,7 +193,9 @@ class QwenASRLM(LM):
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_timeout * (attempt + 1))
 
-        return ""
+        if last_error is not None:
+            raise RuntimeError("Qwen ASR transcription failed after retries") from last_error
+        raise RuntimeError("Qwen ASR returned empty transcriptions after retries")
 
     # --------------------------------------------------------------------- #
     # Generation (lm_eval interface)

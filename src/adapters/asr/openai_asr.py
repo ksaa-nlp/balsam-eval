@@ -57,6 +57,10 @@ class OpenAIWhisperLM(LM):
         )
         self.language = language or os.environ.get("ASR_LANGUAGE")
         self.temperature = temperature
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
+            raise ValueError("max_retries must be a positive integer")
+        if not np.isfinite(retry_timeout) or retry_timeout < 0:
+            raise ValueError("retry_timeout must be finite and non-negative")
         self.retry_timeout = retry_timeout
         self.max_retries = max_retries
         self._tokenizer_name = self.model_name
@@ -120,8 +124,7 @@ class OpenAIWhisperLM(LM):
                 url = url[: -len(suffix)]
                 break
         if not url.endswith("/v1"):
-            if "/v1" not in url:
-                url = f"{url}/v1"
+            url = f"{url}/v1"
         return url
 
     # --------------------------------------------------------------------- #
@@ -154,6 +157,7 @@ class OpenAIWhisperLM(LM):
 
     def _transcribe_audio(self, wav_bytes: bytes) -> str:
         """Send audio to the transcription endpoint with retry."""
+        last_error: Exception | None = None
         for attempt in range(self.max_retries):
             try:
                 buf = io.BytesIO(wav_bytes)
@@ -183,6 +187,7 @@ class OpenAIWhisperLM(LM):
                     logger.warning("Empty transcription, retrying...")
                     time.sleep(self.retry_timeout * (attempt + 1))
             except Exception as e:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+                last_error = e
                 logger.error(
                     "Transcription error (attempt %d/%d): %s: %s",
                     attempt + 1, self.max_retries, type(e).__name__, e,
@@ -190,7 +195,9 @@ class OpenAIWhisperLM(LM):
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_timeout * (attempt + 1))
 
-        return ""
+        if last_error is not None:
+            raise RuntimeError("OpenAI ASR transcription failed after retries") from last_error
+        raise RuntimeError("OpenAI ASR returned empty transcriptions after retries")
 
     # --------------------------------------------------------------------- #
     # Generation (lm_eval interface)

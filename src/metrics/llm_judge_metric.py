@@ -52,6 +52,19 @@ def _get_judge_configs() -> list[ModelConfig]:
         return []
 
     n = max(len(models), len(providers))
+    invalid = [
+        name
+        for name, values in (
+            ("JUDGE_MODEL", models),
+            ("JUDGE_PROVIDER", providers),
+            ("JUDGE_API_KEY", api_keys),
+        )
+        if values and len(values) not in (1, n)
+    ]
+    if invalid:
+        raise ValueError(
+            f"Judge configuration lengths must be 1 or {n}: {', '.join(invalid)}"
+        )
     if len(models) == 1:
         models *= n
     if len(providers) == 1:
@@ -178,7 +191,7 @@ if "llm_as_judge" not in le_registry.METRIC_REGISTRY:
 
 def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, Any]:
     """Collect judge data, auto-detecting MCQ vs generative from the doc."""
-    pred = results[0] if isinstance(results, list) else results
+    pred = results[0] if isinstance(results, list) and results else ""
     gold = doc.get("output", "")
     question = doc.get("input", "")
     instruction = doc.get("instruction", "")

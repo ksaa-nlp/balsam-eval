@@ -29,6 +29,9 @@ def compute_bleu_score(
     Returns:
         Average BLEU score
     """
+    if len(references) != len(predictions):
+        raise ValueError("references and predictions must have the same length")
+
     bleu = evaluate.load("bleu")
 
     def tokenizer(x):
@@ -44,7 +47,6 @@ def compute_bleu_score(
     ]
 
     total = 0.0
-    valid = 0
     for ref, pred in zip(refs, preds):
         if not pred or not ref:
             continue
@@ -53,10 +55,9 @@ def compute_bleu_score(
                 references=[ref], predictions=[pred], tokenizer=tokenizer
             )
             total += score["bleu"]
-            valid += 1
         except ZeroDivisionError:
             continue
-    return total / valid if valid else 0.0
+    return total / len(refs) if refs else 0.0
 
 
 def compute_bleu_aggregation(items: List[Tuple[Any, Any]]) -> float:
@@ -68,8 +69,10 @@ def compute_bleu_aggregation(items: List[Tuple[Any, Any]]) -> float:
     Returns:
         Average BLEU score
     """
-    refs = [r[0] if isinstance(r, (list, tuple)) else r for r, _ in items]
-    preds = [p for _, p in items]
+    if not all(isinstance(item, (list, tuple)) and len(item) == 2 for item in items):
+        raise ValueError("BLEU aggregation items must be [reference, prediction] pairs")
+    refs = [item[0] for item in items]
+    preds = [item[1] for item in items]
 
     return compute_bleu_score(
         references=refs,
@@ -107,7 +110,7 @@ def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     Returns:
         Dictionary with BLEU data containing [reference, prediction]
     """
-    preds = results[0] if isinstance(results, list) else results
+    preds = results[0] if isinstance(results, list) and results else ""
     golds = doc["output"]
     return {"bleu": [golds, preds]}
 
