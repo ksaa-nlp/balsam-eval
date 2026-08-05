@@ -4,9 +4,12 @@ Auto-detects MCQ vs generative based on the dataset doc's ``mcq`` field
 and selects the appropriate judge prompt. Also forwards per-doc
 ``custom_prompt`` to the judge when present in the dataset file.
 
-Requires env vars: JUDGE_MODEL, JUDGE_PROVIDER, JUDGE_API_KEY.
+Cloud builds use JUDGE_CONFIGS_B64. Local runs may use the legacy
+JUDGE_MODEL, JUDGE_PROVIDER, and JUDGE_API_KEY variables.
 """
 
+import base64
+import json
 import logging
 import os
 import re
@@ -40,6 +43,49 @@ def _get_judge_configs() -> list[ModelConfig]:
     Supports comma-separated values for multiple judges.
     A single API key is broadcast to all judges.
     """
+    encoded_configs = os.getenv("JUDGE_CONFIGS_B64")
+    if encoded_configs:
+        try:
+            raw_configs = json.loads(base64.b64decode(encoded_configs, validate=True))
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("JUDGE_CONFIGS_B64 must contain valid base64 JSON") from exc
+
+        if not isinstance(raw_configs, list) or not raw_configs:
+            raise ValueError("JUDGE_CONFIGS_B64 must contain a non-empty JSON array")
+
+        configs: list[ModelConfig] = []
+        for index, raw_config in enumerate(raw_configs):
+            if not isinstance(raw_config, dict):
+                raise ValueError(f"Judge config at index {index} must be an object")
+
+            model = raw_config.get("model")
+            provider = raw_config.get("provider")
+            if not isinstance(model, str) or not model.strip():
+                raise ValueError(f"Judge config at index {index} requires model")
+            if not isinstance(provider, str) or not provider.strip():
+                raise ValueError(f"Judge config at index {index} requires provider")
+
+            api_key_env = raw_config.get("apiKeyEnv")
+            if api_key_env is not None and not isinstance(api_key_env, str):
+                raise ValueError(f"Judge config at index {index} has invalid apiKeyEnv")
+            base_url = raw_config.get("baseUrl")
+            if base_url is not None and not isinstance(base_url, str):
+                raise ValueError(f"Judge config at index {index} has invalid baseUrl")
+            custom_prompt = raw_config.get("customPrompt")
+            if custom_prompt is not None and not isinstance(custom_prompt, str):
+                raise ValueError(f"Judge config at index {index} has invalid customPrompt")
+
+            configs.append(
+                ModelConfig(
+                    name=model.strip(),
+                    provider=provider.strip(),  # type: ignore[arg-type]
+                    api_key=os.getenv(api_key_env) if api_key_env else None,
+                    endpoint_url=base_url,
+                    custom_prompt=custom_prompt,
+                )
+            )
+        return configs
+
     models = _parse_csv_env("JUDGE_MODEL")
     providers = _parse_csv_env("JUDGE_PROVIDER")
     api_keys = _parse_csv_env("JUDGE_API_KEY")

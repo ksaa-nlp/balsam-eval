@@ -75,6 +75,7 @@ class ModelConfig:
     ] = "openai"
     api_key: Optional[str] = None
     endpoint_url: Optional[str] = None
+    custom_prompt: Optional[str] = None
     other: Optional[Dict[str, Any]] = None
 
 
@@ -261,7 +262,12 @@ class BaseLLMJudge(ABC):
     ) -> Dict[str, Any]:
         """Evaluate using a single model with proper error handling."""
         # Create the prompt (per-call > instance-level > default)
-        prompt = custom_prompt or self.custom_prompt or self.get_evaluation_prompt()
+        prompt = (
+            custom_prompt
+            or config.custom_prompt
+            or self.custom_prompt
+            or self.get_evaluation_prompt()
+        )
         prompt += f'\n\n[PROMPT]\n{question}\n[/PROMPT]\n'
         if context:
             prompt += f'\n[CONTEXT]\n{context}\n[/CONTEXT]\n'
