@@ -48,6 +48,7 @@ class ResultProcessor:
     def export(self, results: Dict[str, Any], *, filename: str) -> str:
         """Persist ``results`` to ``<results_dir>/<filename>``."""
         results = self._strip_multimodal_data(results)
+        self._add_question_scores(results)
         average_scores = self._calculate_average_scores(results)
         enriched = {
             **results,
@@ -66,6 +67,43 @@ class ResultProcessor:
         return path
 
     # -- score aggregation ----------------------------------------------------
+
+    @staticmethod
+    def _add_question_scores(results: Dict[str, Any]) -> None:
+        """Calculate each sample's metrics instead of storing only raw inputs."""
+        from lm_eval.api.registry import get_metric_aggregation
+
+        samples = results.get("samples")
+        if not isinstance(samples, dict):
+            return
+
+        for task_samples in samples.values():
+            if not isinstance(task_samples, list):
+                continue
+            for sample in task_samples:
+                if not isinstance(sample, dict):
+                    continue
+                question_scores: dict[str, Any] = {}
+                for metric_name in sample.get("metrics", []):
+                    if metric_name not in sample:
+                        continue
+                    aggregation = get_metric_aggregation(metric_name)
+                    if aggregation is None:
+                        logger.warning(
+                            "Cannot calculate question score for metric %s",
+                            metric_name,
+                        )
+                        continue
+                    try:
+                        question_scores[metric_name] = aggregation(
+                            [sample[metric_name]]
+                        )
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        logger.exception(
+                            "Failed to calculate question score for metric %s",
+                            metric_name,
+                        )
+                sample["scores"] = question_scores
 
     def _calculate_average_scores(self, results: Dict[str, Any]) -> Dict[str, float]:
         """Average ``key,none`` metrics across every per-task result block."""

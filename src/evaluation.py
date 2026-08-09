@@ -158,6 +158,7 @@ class SingleFileEvaluationJob:
                     task_manager=lm_eval.tasks.TaskManager(
                         include_path=str(temp_dir)),
                     batch_size=1,
+                    log_samples=True,
                     gen_kwargs=get_max_tokens_config(
                         self.adapter, self.model_args["model"]),
                 ),
