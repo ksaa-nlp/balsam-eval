@@ -36,8 +36,8 @@ ibm-stt = ["ibm-watson~=11.2.0", "ibm-cloud-sdk-core~=3.25.0"]
 dev = [
     "mypy~=2.3.0",
     "pylint[spelling]~=4.0.7",
-    "pytest~=9.0",
-    "pytest-cov~=7.0",
+    "pytest~=9.1.1",
+    "pytest-cov~=7.1.0",
     "pyright~=1.1.411",
     "types-pyyaml~=6.0.12.20260724",
     "types-tqdm~=4.70.0.20260805",
@@ -73,7 +73,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 check_untyped_defs = true
-exclude = ["_api_models\\.temp\\.py$"]
+exclude = ["^tests/", "_api_models\\.temp\\.py$"]
 
 # Ignore external dependencies that don't have stubs
 [[tool.mypy.overrides]]
@@ -107,7 +107,7 @@ reportMissingImports = "warning"
 reportMissingTypeStubs = false
 
 [tool.pylint.master]
-ignore = [".venv",".history",".mypy_cache","build","dist","__pycache__",".pytest_cache",".vscode",".idea",".git",".github",".balsam_eval_cache",".balsam_eval_logs",".balsam_eval_results",".temp","ignores","_api_models.temp.py"]
+ignore = [".venv",".history",".mypy_cache","build","dist","__pycache__",".pytest_cache",".vscode",".idea",".git",".github",".balsam_eval_cache",".balsam_eval_logs",".balsam_eval_results",".temp","ignores","tests","_api_models.temp.py"]
 
 [tool.pylint.messages_control]
 # Disable specific messages for entire project
