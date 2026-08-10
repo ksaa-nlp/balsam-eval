@@ -22,7 +22,7 @@ from deepeval.models import (
     AzureOpenAIModel,
     DeepSeekModel,
     GeminiModel,
-    GPTModel,
+    OpenAIModel,
     GrokModel,
     KimiModel,
     LiteLLMModel,
@@ -39,7 +39,7 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 PROVIDER_REGISTRY: Dict[str, type[DeepEvalBaseLLM]] = {
-    "openai": GPTModel,
+    "openai": OpenAIModel,
     "anthropic": AnthropicModel,
     "gemini": GeminiModel,
     "ollama": OllamaModel,
@@ -100,7 +100,15 @@ def create_model_adapter(config: ModelConfig) -> DeepEvalBaseLLM:
     if config.api_key:
         params["api_key"] = config.api_key
     if config.endpoint_url:
-        params["base_url"] = config.endpoint_url
+        base_url = config.endpoint_url
+        if config.provider == "openai":
+            base_url = base_url.rstrip("/")
+            path, separator, query = base_url.partition("?")
+            endpoint_suffix = "/chat/completions"
+            if path.endswith(endpoint_suffix):
+                path = path[:-len(endpoint_suffix)]
+            base_url = separator.join((path, query)) if separator else path
+        params["base_url"] = base_url
     if config.other:
         params.update(config.other)
 
@@ -108,22 +116,22 @@ def create_model_adapter(config: ModelConfig) -> DeepEvalBaseLLM:
 
 
 def call_model_adapter_with_retry(
-    adapter, prompt: str, max_retries: int = 3, max_score: float = 1.0
+    adapter: Any, prompt: str, max_retries: int = 3, max_score: float = 1.0
 ) -> Dict[str, Any]:
     """Call model adapter with retry logic."""
 
     for attempt in range(max_retries):
         try:
             # Try different methods to call the model based on its type
-            model_response = None
+            model_response: Any = None
 
             # For DeepEval models, use the appropriate method
             if hasattr(adapter, 'generate'):
-                model_response = adapter.generate(prompt)
+                model_response = getattr(adapter, 'generate')(prompt)
             elif hasattr(adapter, '_call'):  # pylint: disable=protected-access
-                model_response = adapter._call(prompt)
+                model_response = getattr(adapter, '_call')(prompt)
             elif hasattr(adapter, 'invoke'):
-                model_response = adapter.invoke(prompt)
+                model_response = getattr(adapter, 'invoke')(prompt)
             elif callable(adapter):
                 model_response = adapter(prompt)
             else:

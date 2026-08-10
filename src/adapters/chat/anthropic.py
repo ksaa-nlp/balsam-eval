@@ -14,7 +14,7 @@ import io
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, cast
 
 import numpy as np
 import requests as http_requests
@@ -25,6 +25,17 @@ from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
 from lm_eval.models.anthropic_llms import AnthropicChat  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
+
+
+class _AnthropicRuntime(Protocol):
+    """Runtime members omitted by lm-eval's incomplete type declarations."""
+
+    model: str
+    base_url: str
+    header: dict
+    verify_certificate: bool
+    timeout: float
+    _max_gen_toks: int
 
 
 # ---------------------------------------------------------------------------
@@ -189,14 +200,15 @@ class AnthropicAudioLM(AnthropicChat):
             "BASE_URL", "https://api.anthropic.com/v1/messages"
         )
         super().__init__(
-            base_url=base_url,
-            tokenizer_backend=tokenizer_backend,
+            base_url=base_url,  # pyright: ignore[reportCallIssue]
+            tokenizer_backend=tokenizer_backend,  # pyright: ignore[reportCallIssue]
             **kwargs,
         )
+        runtime = cast(_AnthropicRuntime, self)
         logger.info(
             "Initialized AnthropicAudioLM with model '%s' at %s",
-            self.model,
-            self.base_url,
+            runtime.model,
+            runtime.base_url,
         )
 
     # ------------------------------------------------------------------ #
@@ -210,13 +222,17 @@ class AnthropicAudioLM(AnthropicChat):
             return []
 
         if not _has_audio(requests):
-            result: List[str] = super().generate_until(requests, disable_tqdm=disable_tqdm)
+            result: List[str] = super().generate_until(
+                requests,
+                disable_tqdm=disable_tqdm,  # pyright: ignore[reportCallIssue]
+            )
             return result
 
+        runtime = cast(_AnthropicRuntime, self)
         results: List[str] = []
         for req in tqdm(
             requests,
-            desc=f"Generating {self.model}",
+            desc=f"Generating {runtime.model}",
             disable=disable_tqdm,
         ):
             prompt_obj = req.args[0]
@@ -236,7 +252,7 @@ class AnthropicAudioLM(AnthropicChat):
             gen_kwargs.pop("do_sample", None)
             max_tokens = gen_kwargs.pop(
                 "max_tokens",
-                gen_kwargs.pop("max_gen_toks", self._max_gen_toks),
+                gen_kwargs.pop("max_gen_toks", runtime._max_gen_toks),
             )
             temperature = gen_kwargs.pop("temperature", 0)
             until = gen_kwargs.pop("until", ["\n\nHuman:"])
@@ -245,7 +261,7 @@ class AnthropicAudioLM(AnthropicChat):
 
             payload = _messages_to_anthropic_payload(
                 messages=messages,
-                model=self.model,
+                model=runtime.model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stop_sequences=until,
@@ -253,11 +269,11 @@ class AnthropicAudioLM(AnthropicChat):
 
             try:
                 resp = http_requests.post(
-                    self.base_url,
+                    runtime.base_url,
                     json=payload,
-                    headers=self.header,
-                    verify=self.verify_certificate,
-                    timeout=self.timeout,
+                    headers=runtime.header,
+                    verify=runtime.verify_certificate,
+                    timeout=runtime.timeout,
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -292,10 +308,10 @@ class AnthropicAudioLM(AnthropicChat):
 
     def loglikelihood_rolling(
         self, requests: list, disable_tqdm: bool = False
-    ) -> List[List[Tuple[float, bool]]]:
+    ) -> List[float]:
         logger.warning(
             "Anthropic Messages API does not support loglikelihood_rolling. "
             "Returning dummy values for %d requests.",
             len(requests),
         )
-        return [[(0.0, True)] for _ in requests]
+        return [0.0 for _ in requests]

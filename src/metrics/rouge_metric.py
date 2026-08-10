@@ -58,6 +58,8 @@ if "rouge" not in le_registry.AGGREGATION_REGISTRY:
         total = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
         for ref, pred in zip(refs, preds):
             score = rouge.compute(references=[ref], predictions=[pred], tokenizer=tokenizer)
+            if score is None:
+                continue
             for k in total:
                 total[k] += score[k]
         count = len(refs) if refs else 1

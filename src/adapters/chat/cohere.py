@@ -18,7 +18,7 @@ import json
 import logging
 import os
 from functools import cached_property
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, cast
 
 import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
@@ -31,6 +31,21 @@ from lm_eval.models.openai_completions import (  # type: ignore[import-untyped]
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _LocalChatRuntime(Protocol):
+    """Runtime members omitted by lm-eval's incomplete type declarations."""
+
+    model: str
+    base_url: str
+
+    def model_call(self, **kwargs: Any) -> Any:
+        """Call chat-completions endpoint."""
+        raise NotImplementedError
+
+    def parse_generations(self, response: Any) -> List[str]:
+        """Extract generated text from endpoint response."""
+        raise NotImplementedError
 
 
 # ---------------------------------------------------------------------------
@@ -141,15 +156,16 @@ class CohereAudioLM(LocalChatCompletion):
             "BASE_URL", "https://api.cohere.com/v2/chat"
         )
         super().__init__(
-            base_url=base_url,
-            tokenizer_backend=tokenizer_backend,
-            tokenized_requests=tokenized_requests,
+            base_url=base_url,  # pyright: ignore[reportCallIssue]
+            tokenizer_backend=tokenizer_backend,  # pyright: ignore[reportCallIssue]
+            tokenized_requests=tokenized_requests,  # pyright: ignore[reportCallIssue]
             **kwargs,
         )
+        runtime = cast(_LocalChatRuntime, self)
         logger.info(
             "Initialized CohereAudioLM with model '%s' at %s",
-            self.model,
-            self.base_url,
+            runtime.model,
+            runtime.base_url,
         )
 
     # ------------------------------------------------------------------ #
@@ -180,13 +196,17 @@ class CohereAudioLM(LocalChatCompletion):
             return []
 
         if not _has_audio(requests):
-            result: List[str] = super().generate_until(requests, disable_tqdm=disable_tqdm)
+            result: List[str] = super().generate_until(
+                requests,
+                disable_tqdm=disable_tqdm,  # pyright: ignore[reportCallIssue]
+            )
             return result
 
+        runtime = cast(_LocalChatRuntime, self)
         results: List[str] = []
         for req in tqdm(
             requests,
-            desc=f"Generating {self.model}",
+            desc=f"Generating {runtime.model}",
             disable=disable_tqdm,
         ):
             prompt_obj = req.args[0]
@@ -202,12 +222,12 @@ class CohereAudioLM(LocalChatCompletion):
 
             chat_str = JsonChatStr(json.dumps(messages))
             try:
-                response = self.model_call(
+                response = runtime.model_call(
                     messages=[chat_str],
                     generate=True,
                     gen_kwargs=copy.deepcopy(gen_kwargs),
                 )
-                parsed = self.parse_generations(response)
+                parsed = runtime.parse_generations(response)
                 results.append(parsed[0] if parsed else "")
             except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.error("Cohere generation error: %s", e)
@@ -234,10 +254,10 @@ class CohereAudioLM(LocalChatCompletion):
 
     def loglikelihood_rolling(
         self, requests: list, disable_tqdm: bool = False
-    ) -> List[List[Tuple[float, bool]]]:
+    ) -> List[float]:
         logger.warning(
             "Cohere Chat API does not support loglikelihood_rolling. "
             "Returning dummy values for %d requests.",
             len(requests),
         )
-        return [[(0.0, True)] for _ in requests]
+        return [0.0 for _ in requests]

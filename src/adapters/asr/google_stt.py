@@ -133,6 +133,9 @@ class GoogleSTTLM(LM):
 
     def _transcribe_audio(self, wav_bytes: bytes, sample_rate: int) -> str:
         """Transcribe audio using Google Cloud Speech-to-Text with retry."""
+        if speech is None:
+            raise RuntimeError("google-cloud-speech became unavailable after initialization")
+
         audio = speech.RecognitionAudio(content=wav_bytes)
 
         config = speech.RecognitionConfig(
@@ -215,10 +218,10 @@ class GoogleSTTLM(LM):
 
     def loglikelihood_rolling(
         self, requests: List[Any]
-    ) -> List[List[Tuple[float, bool]]]:
+    ) -> List[float]:
         logger.warning(
             "ASR models do not support loglikelihood_rolling. "
             "Returning dummy values for %d requests.",
             len(requests),
         )
-        return [[(0.0, True)] for _ in requests]
+        return [0.0 for _ in requests]

@@ -12,6 +12,7 @@ from statistics import mean
 from typing import Any, Dict
 
 import numpy as np
+from lm_eval.api.registry import get_metric_aggregation
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +72,6 @@ class ResultProcessor:
     @staticmethod
     def _add_question_scores(results: Dict[str, Any]) -> None:
         """Calculate each sample's metrics instead of storing only raw inputs."""
-        from lm_eval.api.registry import get_metric_aggregation
-
         samples = results.get("samples")
         if not isinstance(samples, dict):
             return

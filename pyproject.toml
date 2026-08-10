@@ -3,17 +3,17 @@ name = "balsam-lm-evaluation"
 version = "1.0.0"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "deepeval~=4.1.0",
+    "deepeval~=4.1.7",
     "evaluate~=0.4.6",
     "google-cloud-speech~=2.40.0",
-    "google-cloud-storage~=3.13.0",
-    "google-genai~=2.11.0",
-    "groq~=1.5.0",
+    "google-cloud-storage~=3.13.1",
+    "google-genai~=2.17.0",
+    "groq~=1.6.0",
     "jiwer~=4.0.0",
     "librosa~=0.11.0",
     "lm-eval[api]~=0.4.12",
-    "numpy~=2.4.6",
-    "openai~=2.45.0",
+    "numpy>=2.4.6,<2.5",
+    "openai~=2.53.0",
     "pillow~=12.3.0",
     "pyarabic~=0.6.15",
     "python-dotenv~=1.2.2",
@@ -22,7 +22,7 @@ dependencies = [
     "requests~=2.34.2",
     "rouge-score~=0.1.2",
     "soundfile~=0.14.0",
-    "tqdm~=4.68.4",
+    "tqdm~=4.70.0",
 ]
 
 [project.scripts]
@@ -35,10 +35,10 @@ ibm-stt = ["ibm-watson~=11.2.0", "ibm-cloud-sdk-core~=3.25.0"]
 [dependency-groups]
 dev = [
     "mypy~=2.3.0",
-    "pylint[spelling]~=4.0.6",
+    "pylint[spelling]~=4.0.7",
     "pyright~=1.1.411",
-    "types-pyyaml~=6.0.12.20260518",
-    "types-tqdm~=4.68.0.20260608",
+    "types-pyyaml~=6.0.12.20260724",
+    "types-tqdm~=4.70.0.20260805",
     "types-requests~=2.33.0.20260712",
 ]
 

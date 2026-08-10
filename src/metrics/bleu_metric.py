@@ -54,7 +54,8 @@ def compute_bleu_score(
             score = bleu.compute(
                 references=[ref], predictions=[pred], tokenizer=tokenizer
             )
-            total += score["bleu"]
+            if score is not None:
+                total += score["bleu"]
         except ZeroDivisionError:
             continue
     return total / len(refs) if refs else 0.0

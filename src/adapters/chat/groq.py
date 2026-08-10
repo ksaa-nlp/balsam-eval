@@ -12,7 +12,7 @@ import io
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
@@ -237,10 +237,11 @@ class GroqLM(LM):
             return prompt_str, until, audio
 
         if isinstance(instance, tuple):
-            stop = instance[1] if len(instance) >= 2 else []
+            tuple_instance = cast(Sequence[Any], instance)
+            stop = tuple_instance[1] if len(tuple_instance) >= 2 else []
             if not isinstance(stop, list):
                 stop = [stop] if stop else []
-            return instance[0], stop, None
+            return tuple_instance[0], stop, None
 
         if isinstance(instance, dict):
             stop = instance.get("until", [])
@@ -432,7 +433,7 @@ class GroqLM(LM):
 
     def loglikelihood_rolling(
         self, requests: List[Any]
-    ) -> List[List[Tuple[float, bool]]]:
+    ) -> List[float]:
         """
         Groq API does not support rolling loglikelihood computation.
         Returns dummy values.
@@ -442,7 +443,7 @@ class GroqLM(LM):
             "Returning dummy values for %d requests.",
             len(requests),
         )
-        return [[(0.0, True)] for _ in requests]
+        return [0.0 for _ in requests]
 
     # ---------------------------------------------------------------------
     # Chat template support

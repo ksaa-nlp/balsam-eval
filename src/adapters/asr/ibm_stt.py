@@ -232,10 +232,10 @@ class IBMSTTLM(LM):
 
     def loglikelihood_rolling(
         self, requests: List[Any]
-    ) -> List[List[Tuple[float, bool]]]:
+    ) -> List[float]:
         logger.warning(
             "ASR models do not support loglikelihood_rolling. "
             "Returning dummy values for %d requests.",
             len(requests),
         )
-        return [[(0.0, True)] for _ in requests]
+        return [0.0 for _ in requests]
