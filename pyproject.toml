@@ -36,6 +36,8 @@ ibm-stt = ["ibm-watson~=11.2.0", "ibm-cloud-sdk-core~=3.25.0"]
 dev = [
     "mypy~=2.3.0",
     "pylint[spelling]~=4.0.7",
+    "pytest~=9.0",
+    "pytest-cov~=7.0",
     "pyright~=1.1.411",
     "types-pyyaml~=6.0.12.20260724",
     "types-tqdm~=4.70.0.20260805",
@@ -54,6 +56,16 @@ packages = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = [".", "src/"]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
 
 [tool.mypy]
 python_version = "3.12"

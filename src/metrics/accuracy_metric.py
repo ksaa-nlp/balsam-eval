@@ -2,6 +2,7 @@
 
 import logging
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
 from rapidfuzz import fuzz
@@ -12,15 +13,19 @@ from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 
 logger = logging.getLogger(__name__)
 
+MCQ_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+ARABIC_MCQ_LABELS = ("أ", "ب", "ج", "د", "هـ", "و")
 
-def extract_first_word_or_line(text: str) -> str:
-    """Extract the first word or short line from text.
+
+def extract_first_word_or_line(text: str, reference: Optional[str] = None) -> str:
+    """Extract an answer line without truncating multi-word answers.
 
     For MCQ answers, handles cases like "Answer: A" → "A"
-    or "The answer is Paris" → "Paris".
+    and can identify a reference answer at the start of a response line.
 
     Args:
         text: Input text
+        reference: Optional expected answer used to locate a verbose answer prefix
 
     Returns:
         Extracted word or line
@@ -33,14 +38,28 @@ def extract_first_word_or_line(text: str) -> str:
         logger.debug("extract_first_word_or_line: Empty text after strip")
         return ""
 
-    first_line = text.split("\n")[0].strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    first_line = lines[0] if lines else ""
     # Remove all non-alphanumeric characters from the end
     first_line = re.sub(r"[^\w\s]+$", "", first_line, flags=re.UNICODE)
 
     logger.debug("extract_first_word_or_line: first_line='%s'", first_line)
 
+    if reference:
+        reference_norm = normalize_text(reference)
+        for line in lines:
+            candidates = [line.lstrip("-*• \t")]
+            if ":" in line:
+                candidates.append(line.split(":", 1)[1].strip())
+            for candidate in candidates:
+                candidate_norm = normalize_text(candidate)
+                if candidate_norm == reference_norm or candidate_norm.startswith(
+                    f"{reference_norm} "
+                ):
+                    return reference
+
     # Handle common patterns like "Answer: A" or "The answer is: Paris"
-    colon_match = re.match(r"^([^:]+):\s*([^\s]+)", first_line, re.IGNORECASE)
+    colon_match = re.match(r"^([^:]+):\s*(.+)$", first_line, re.IGNORECASE)
     if colon_match:
         prefix = colon_match.group(1).strip().lower()
         if any(
@@ -63,20 +82,8 @@ def extract_first_word_or_line(text: str) -> str:
             extracted = re.sub(r"[^\w\s]", "", extracted, flags=re.UNICODE).strip()
             return extracted
 
-    # If line is short (≤3 words), return it as-is
-    if len(first_line.split()) <= 3:
-        logger.debug(
-            "extract_first_word_or_line: Returning short line (≤3 words): '%s'",
-            first_line,
-        )
-        return first_line
-
-    # Otherwise, extract just the first word
-    first_word = first_line.split()[0] if first_line.split() else first_line
-    first_word = re.sub(r"[^\w\s]", "", first_word, flags=re.UNICODE).strip()
-
-    logger.debug("extract_first_word_or_line: Extracted first word: '%s'", first_word)
-    return first_word
+    logger.debug("extract_first_word_or_line: Returning first line: '%s'", first_line)
+    return first_line
 
 
 def normalize_text(
@@ -112,12 +119,50 @@ def normalize_text(
         mapped_text: str = mcq_mapping[text.upper()]
         return mapped_text
 
+    # Ignore Arabic vocalization and tatweel, which do not change the answer.
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    text = text.replace("ـ", "")
+
     # Remove all punctuation and extra whitespace
     text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
     text = re.sub(r"\s+", " ", text).strip().lower()
 
     logger.debug("normalize_text: Normalized to '%s'", text)
     return text
+
+
+def resolve_mcq_answer(answer: str, options: Any) -> str:
+    """Resolve a choice label to its option text when MCQ options are present."""
+    if not isinstance(options, list) or not options:
+        return answer
+
+    normalized_answer = normalize_text(answer)
+    for option in options:
+        if normalized_answer == normalize_text(option):
+            return str(option)
+
+    label = answer.strip().rstrip(".)،:").strip()
+    label_upper = label.upper()
+    if len(label_upper) == 1 and label_upper in MCQ_LABELS:
+        index = MCQ_LABELS.index(label_upper)
+        if index < len(options):
+            return str(options[index])
+
+    if label.isdigit():
+        index = int(label) - 1
+        if 0 <= index < len(options):
+            return str(options[index])
+
+    for index, arabic_label in enumerate(ARABIC_MCQ_LABELS):
+        equivalent_labels = {arabic_label}
+        if arabic_label == "أ":
+            equivalent_labels.update({"ا", "إ", "آ"})
+        elif arabic_label == "هـ":
+            equivalent_labels.add("ه")
+        if label in equivalent_labels and index < len(options):
+            return str(options[index])
+
+    return answer
 
 
 def compute_accuracy(
@@ -233,7 +278,8 @@ def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     golds = doc["output"]
 
     # Extract first word/line for MCQ answers
-    pred_extracted = extract_first_word_or_line(preds)
+    pred_extracted = extract_first_word_or_line(preds, reference=golds)
+    pred_extracted = resolve_mcq_answer(pred_extracted, doc.get("mcq"))
     gold_extracted = extract_first_word_or_line(golds)
 
     return {"accuracy": [gold_extracted, pred_extracted]}
@@ -256,7 +302,8 @@ def process_results_fuzzy(doc: Dict[str, Any], results: Any) -> Dict[str, List[s
     golds = doc["output"]
 
     # Extract first word/line for MCQ answers
-    pred_extracted = extract_first_word_or_line(preds)
+    pred_extracted = extract_first_word_or_line(preds, reference=golds)
+    pred_extracted = resolve_mcq_answer(pred_extracted, doc.get("mcq"))
     gold_extracted = extract_first_word_or_line(golds)
 
     return {"fuzzy_accuracy": [gold_extracted, pred_extracted]}
@@ -276,9 +323,17 @@ class AccuracyMetric(BaseMetric):
             original_doc_to_text: Original doc_to_text template
 
         Returns:
-            Original template (accuracy doesn't modify the prompt)
+            Template with labeled choices when the document contains MCQ options
         """
-        return original_doc_to_text
+        return (
+            f"{original_doc_to_text}\n"
+            "{% if mcq %}\n"
+            "الخيارات:\n"
+            "{% for option in mcq %}"
+            '{{ "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[loop.index0] }}. {{ option }}\n'
+            "{% endfor %}"
+            "{% endif %}"
+        )
 
     def get_generation_kwargs(self) -> Dict[str, Any]:
         """Get generation kwargs for accuracy metric.
