@@ -21,8 +21,10 @@ def build_judge(cls=GenerativeLLMJudge, configs=None, **kwargs):
 
 
 def test_create_model_adapter_builds_provider_specific_parameters(monkeypatch):
-    factory = MagicMock(return_value="adapter")
-    monkeypatch.setitem(base.PROVIDER_REGISTRY, "openai", factory)
+    adapter = MagicMock()
+    factory = MagicMock(return_value=adapter)
+    get_model = MagicMock(return_value=factory)
+    monkeypatch.setattr(base, "get_model", get_model)
     config = base.ModelConfig(
         name="judge",
         provider="openai",
@@ -30,11 +32,12 @@ def test_create_model_adapter_builds_provider_specific_parameters(monkeypatch):
         endpoint_url="https://host/v1/chat/completions?api-version=1",
         other={"temperature": 0},
     )
-    assert base.create_model_adapter(config) == "adapter"
+    assert base.create_model_adapter(config) is adapter
+    assert adapter.api_key == "key"
+    get_model.assert_called_once_with("openai")
     factory.assert_called_once_with(
         model="judge",
-        api_key="key",
-        base_url="https://host/v1?api-version=1",
+        base_url="https://host/v1/chat/completions?api-version=1",
         temperature=0,
     )
 
@@ -59,6 +62,20 @@ def test_call_model_adapter_parses_common_response_shapes(response, expected):
     adapter = MagicMock()
     adapter.generate.return_value = response
     assert base.call_model_adapter_with_retry(adapter, "prompt", max_retries=1) == expected
+
+
+def test_call_model_adapter_uses_lm_eval_generate_until():
+    generate_until = MagicMock(
+        return_value=['{"score": 1, "explanation": "ok"}']
+    )
+    adapter = SimpleNamespace(generate_until=generate_until)
+
+    result = base.call_model_adapter_with_retry(adapter, "prompt", max_retries=1)
+
+    assert result == {"score": 1, "explanation": "ok"}
+    request = generate_until.call_args.args[0][0]
+    assert request.args == ("prompt", {"until": [], "do_sample": False})
+    generate_until.assert_called_once_with([request])
 
 
 @pytest.mark.parametrize("method", ["_call", "invoke", "__call__"])
