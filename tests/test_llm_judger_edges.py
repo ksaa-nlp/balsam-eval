@@ -21,7 +21,7 @@ def build_judge(cls=GenerativeLLMJudge, configs=None, **kwargs):
 
 def test_create_model_adapter_keeps_non_openai_endpoint(monkeypatch):
     factory = MagicMock(return_value="adapter")
-    monkeypatch.setitem(base.PROVIDER_REGISTRY, "gemini", factory)
+    monkeypatch.setattr(base, "get_model", MagicMock(return_value=factory))
     config = base.ModelConfig(
         name="judge",
         provider="gemini",
@@ -30,13 +30,13 @@ def test_create_model_adapter_keeps_non_openai_endpoint(monkeypatch):
 
     assert base.create_model_adapter(config) == "adapter"
     factory.assert_called_once_with(
-        model="judge", base_url="https://judge.invalid/chat/completions/"
+        model_name="judge", base_url="https://judge.invalid/chat/completions/"
     )
 
 
 def test_create_model_adapter_omits_unset_optional_parameters(monkeypatch):
     factory = MagicMock(return_value="adapter")
-    monkeypatch.setitem(base.PROVIDER_REGISTRY, "openai", factory)
+    monkeypatch.setattr(base, "get_model", MagicMock(return_value=factory))
 
     base.create_model_adapter(base.ModelConfig(name="judge"))
 
@@ -200,7 +200,7 @@ def test_aggregate_model_results_defaults_raw_score_when_absent():
     assert result["overall_raw_score"] == 0
 
 
-def test_evaluate_batch_accepts_llm_test_case_and_uses_progress(monkeypatch):
+def test_evaluate_batch_accepts_test_case_object_and_uses_progress(monkeypatch):
     class FakeLLMTestCase:
         def __init__(self):
             self.input = "question"
@@ -215,7 +215,6 @@ def test_evaluate_batch_accepts_llm_test_case_and_uses_progress(monkeypatch):
         return_value={"overall_score": 1.0, "overall_raw_score": 3.0}
     )
     progress = MagicMock(side_effect=lambda values, **_: values)
-    monkeypatch.setattr(base, "LLMTestCase", FakeLLMTestCase)
     monkeypatch.setattr(base, "tqdm", progress)
     monkeypatch.setattr(judge, "evaluate_answer", evaluate)
 

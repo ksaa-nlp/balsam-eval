@@ -14,44 +14,24 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from statistics import mean, median
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union, cast
 
-from deepeval.models import (
-    AmazonBedrockModel,
-    AnthropicModel,
-    AzureOpenAIModel,
-    DeepSeekModel,
-    GeminiModel,
-    OpenAIModel,
-    GrokModel,
-    KimiModel,
-    LiteLLMModel,
-    LocalModel,
-    OllamaModel,
-    OpenRouterModel,
-    PortkeyModel,
-)
-from deepeval.models import DeepEvalBaseLLM
-from deepeval.test_case import LLMTestCase
+import lm_eval.models  # noqa: F401  pylint: disable=unused-import
+from lm_eval.api.instance import Instance
+from lm_eval.api.registry import get_model
 from tqdm import tqdm
+
+import src.adapters  # noqa: F401  pylint: disable=unused-import
 
 # Setup logging
 logger = logging.getLogger(__name__)
 
-PROVIDER_REGISTRY: Dict[str, type[DeepEvalBaseLLM]] = {
-    "openai": OpenAIModel,
-    "anthropic": AnthropicModel,
-    "gemini": GeminiModel,
-    "ollama": OllamaModel,
-    "local": LocalModel,
-    "azure": AzureOpenAIModel,
-    "amazon_bedrock": AmazonBedrockModel,
-    "deepseek": DeepSeekModel,
-    "grok": GrokModel,
-    "kimi": KimiModel,
-    "litellm": LiteLLMModel,
-    "openrouter": OpenRouterModel,
-    "portkey": PortkeyModel,
+PROVIDER_REGISTRY: Dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "gemini": "gemini",
+    "groq": "groq",
+    "local": "local-adapter",
 }
 
 
@@ -69,9 +49,7 @@ class ModelConfig:
     """Configuration for a model to use with the LLMJudge."""
     name: str
     provider: Literal[
-        "openai", "anthropic", "gemini", "ollama", "local",
-        "azure", "amazon_bedrock", "deepseek", "grok", "kimi",
-        "litellm", "openrouter", "portkey",
+        "openai", "anthropic", "gemini", "groq", "local",
     ] = "openai"
     api_key: Optional[str] = None
     endpoint_url: Optional[str] = None
@@ -90,29 +68,27 @@ class TestCaseDict:
     metadata: Optional[Dict[str, Any]] = None
 
 
-def create_model_adapter(config: ModelConfig) -> DeepEvalBaseLLM:
-    """Create a model adapter based on the configuration."""
-    cls = PROVIDER_REGISTRY.get(config.provider)
-    if cls is None:
+def create_model_adapter(config: ModelConfig) -> Any:
+    """Create an lm-eval model adapter based on the configuration."""
+    model_key = PROVIDER_REGISTRY.get(config.provider)
+    if model_key is None:
         raise ValueError(f"Unsupported provider: {config.provider}")
 
-    params: Dict[str, Any] = {"model": config.name}
-    if config.api_key:
+    model_parameter = "model_name" if config.provider == "gemini" else "model"
+    params: Dict[str, Any] = {model_parameter: config.name}
+    if config.api_key and config.provider in {"gemini", "groq"}:
         params["api_key"] = config.api_key
     if config.endpoint_url:
-        base_url = config.endpoint_url
-        if config.provider == "openai":
-            base_url = base_url.rstrip("/")
-            path, separator, query = base_url.partition("?")
-            endpoint_suffix = "/chat/completions"
-            if path.endswith(endpoint_suffix):
-                path = path[:-len(endpoint_suffix)]
-            base_url = separator.join((path, query)) if separator else path
-        params["base_url"] = base_url
+        params["base_url"] = config.endpoint_url
     if config.other:
         params.update(config.other)
 
-    return cls(**params)
+    adapter = get_model(model_key)(**params)
+    if config.api_key and config.provider in {"openai", "anthropic", "local"}:
+        # lm-eval API adapters expose API keys as cached properties backed by env vars.
+        # Setting the instance value keeps each judge's credentials isolated.
+        setattr(adapter, "api_key", config.api_key)
+    return adapter
 
 
 def call_model_adapter_with_retry(
@@ -125,9 +101,17 @@ def call_model_adapter_with_retry(
             # Try different methods to call the model based on its type
             model_response: Any = None
 
-            # For DeepEval models, use the appropriate method
             if hasattr(adapter, 'generate'):
                 model_response = getattr(adapter, 'generate')(prompt)
+            elif hasattr(adapter, "generate_until"):
+                request = Instance(
+                    request_type="generate_until",
+                    doc={},
+                    arguments=(prompt, {"until": [], "do_sample": False}),
+                    idx=0,
+                )
+                responses = getattr(adapter, "generate_until")([request])
+                model_response = responses[0] if responses else None
             elif hasattr(adapter, '_call'):  # pylint: disable=protected-access
                 model_response = getattr(adapter, '_call')(prompt)
             elif hasattr(adapter, 'invoke'):
@@ -379,7 +363,7 @@ class BaseLLMJudge(ABC):
 
     def evaluate_batch(
         self,
-        test_cases: Union[List[LLMTestCase], List[Dict[str, Any]], List[TestCaseDict]],
+        test_cases: Union[List[Any], List[Dict[str, Any]], List[TestCaseDict]],
         show_progress: bool = True
     ) -> Dict[str, Any]:
         """Evaluate a batch of test cases."""
@@ -395,14 +379,18 @@ class BaseLLMJudge(ABC):
             test_id: str | None = None
             metadata: Dict[str, Any] | None = None
 
-            if isinstance(tc, LLMTestCase):
-                question = tc.input or ""
-                reference_answer = tc.expected_output or ""
-                given_answer = tc.actual_output or ""
-                context_list = tc.context
+            if all(
+                hasattr(tc, attr)
+                for attr in ("input", "expected_output", "actual_output")
+            ):
+                object_case = cast(Any, tc)
+                question = object_case.input or ""
+                reference_answer = object_case.expected_output or ""
+                given_answer = object_case.actual_output or ""
+                context_list = getattr(object_case, "context", None)
                 context = "\n".join(context_list) if context_list else None
-                test_id = getattr(tc, "id", None)
-                metadata = getattr(tc, "metadata", None)
+                test_id = getattr(object_case, "id", None)
+                metadata = getattr(object_case, "metadata", None)
             elif isinstance(tc, dict):
                 question = tc.get("question", "")
                 reference_answer = tc.get("reference_answer", "")
