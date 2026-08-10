@@ -302,6 +302,14 @@ def test_groq_constructor_validates_key_and_normalizes_url(monkeypatch):
     assert model.get_model_name() == "m"
 
 
+def test_groq_properties_report_configured_model_limits():
+    model = object.__new__(groq.GroqLM)
+    model._tokenizer_name = "tokenizer"
+    assert model.tokenizer_name == "tokenizer"
+    assert model.max_sequence_length == 32768
+    assert model.batch_size == 8
+
+
 @pytest.mark.parametrize(
     ("message", "expected"),
     [
@@ -313,6 +321,15 @@ def test_groq_constructor_validates_key_and_normalizes_url(monkeypatch):
 )
 def test_groq_clean_message(message, expected):
     assert groq.GroqLM._clean_message(message) == expected
+
+
+def test_groq_clean_message_handles_generic_text_blocks_and_dict_content():
+    assert groq.GroqLM._clean_message({
+        "content": [{"text": "generic"}, {"type": "image"}]
+    }) == {"role": "user", "content": "generic"}
+    assert groq.GroqLM._clean_message({
+        "role": "system", "content": {"rule": "brief"}
+    }) == {"role": "system", "content": "{'rule': 'brief'}"}
 
 
 def test_groq_generation_routes_audio_payload(monkeypatch):
@@ -391,6 +408,23 @@ def test_groq_request_wraps_final_sdk_error(monkeypatch):
     assert create.call_count == 2
 
 
+def test_groq_request_reports_exhausted_empty_responses(monkeypatch):
+    model = object.__new__(groq.GroqLM)
+    model.model_name = "model"
+    model.temperature = 0
+    model.max_tokens = 5
+    model.max_retries = 1
+    model.retry_timeout = 0
+    create = MagicMock(return_value=SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=None))]
+    ))
+    model.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(groq.time, "sleep", MagicMock())
+    with pytest.raises(RuntimeError, match="Groq API call failed after 1 retries") as exc:
+        model._make_request_with_retry([{"role": "user", "content": "hello"}])
+    assert "returned empty response" in str(exc.value.__cause__)
+
+
 def test_groq_generation_handles_empty_and_text_requests():
     model = object.__new__(groq.GroqLM)
     model.model_name = "model"
@@ -437,6 +471,31 @@ def test_gemini_constructor_and_generation_use_mocked_sdk(monkeypatch):
     assert call["config"].stop_sequences == ["END"]
 
 
+def test_gemini_constructor_uses_environment_defaults(monkeypatch):
+    client = MagicMock()
+    sdk = MagicMock(return_value=client)
+    monkeypatch.setattr(gemini.genai, "Client", sdk)
+    monkeypatch.setenv("MODEL", "gemini-env")
+    monkeypatch.setenv("GOOGLE_API_KEY", "env-key")
+    model = gemini.GeminiLM()
+    assert model.model_name == "models/gemini-env"
+    sdk.assert_called_once_with(api_key="env-key", http_options={"timeout": 120_000})
+
+
+def test_gemini_constructor_requires_api_key(monkeypatch):
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="No API key provided"):
+        gemini.GeminiLM(model_name="gemini-test")
+
+
+def test_gemini_properties_report_model_limits():
+    model = object.__new__(gemini.GeminiLM)
+    model._tokenizer_name = "tokenizer"
+    assert model.tokenizer_name == "tokenizer"
+    assert model.max_sequence_length == 32000
+    assert model.batch_size == 8
+
+
 def test_gemini_vertex_url_and_text_helpers(monkeypatch):
     client = MagicMock()
     monkeypatch.setattr(gemini.genai, "Client", MagicMock(return_value=client))
@@ -461,6 +520,12 @@ def test_gemini_vertex_url_and_text_helpers(monkeypatch):
 def test_gemini_extract_instance_data_fallback_formats(instance, expected):
     model = object.__new__(gemini.GeminiLM)
     assert model._extract_instance_data(instance) == expected
+
+
+def test_gemini_extract_instance_data_normalizes_string_until():
+    model = object.__new__(gemini.GeminiLM)
+    instance = SimpleNamespace(args=(SimpleNamespace(prompt="prompt"), {"until": "STOP"}, {}))
+    assert model._extract_instance_data(instance) == ("prompt", ["STOP"], None)
 
 
 def test_gemini_audio_conversion_creates_sdk_parts(monkeypatch):
@@ -530,6 +595,20 @@ def test_gemini_generation_wraps_exhausted_empty_responses(monkeypatch):
         model.generate_until(["prompt"])
 
 
+def test_gemini_generation_wraps_final_sdk_error(monkeypatch):
+    model = object.__new__(gemini.GeminiLM)
+    model.model_name = "models/test"
+    model.max_retries = 1
+    model.retry_timeout = 0
+    model._gen_config = MagicMock(return_value="config")
+    model.client = SimpleNamespace(models=SimpleNamespace(
+        generate_content=MagicMock(side_effect=OSError("offline"))
+    ))
+    with pytest.raises(RuntimeError, match="Generation failed for idx=0 after 1 retries") as exc:
+        model.generate_until(["prompt"])
+    assert isinstance(exc.value.__cause__, OSError)
+
+
 def test_gemini_likelihood_token_count_and_string_template_fallbacks():
     model = object.__new__(gemini.GeminiLM)
     model.model_name = "models/test"
@@ -544,6 +623,15 @@ def test_gemini_likelihood_token_count_and_string_template_fallbacks():
     assert model.apply_chat_template(
         [{"role": "user", "content": "hello"}], add_generation_prompt=False
     ) == "User: hello"
+
+
+def test_gemini_count_tokens_maps_missing_count_to_zero():
+    model = object.__new__(gemini.GeminiLM)
+    model.model_name = "models/test"
+    model.client = SimpleNamespace(models=SimpleNamespace(
+        count_tokens=MagicMock(return_value=SimpleNamespace(total_tokens=None))
+    ))
+    assert model.token_count(["text"]) == [0]
 
 
 def test_gemini_create_completion_sends_overrides(monkeypatch):
@@ -587,6 +675,23 @@ def test_gemini_create_completion_retries_empty_then_succeeds(monkeypatch):
 
     assert model.create_completion("prompt") == "answer"
     sleep.assert_called_once_with(0)
+
+
+def test_gemini_create_completion_reports_exhausted_empty_response():
+    model = object.__new__(gemini.GeminiLM)
+    model.model_name = "models/test"
+    model.temperature = 0
+    model.max_tokens = 100
+    model.top_p = 0.9
+    model.top_k = 20
+    model.max_retries = 1
+    model.retry_timeout = 0
+    model.client = SimpleNamespace(models=SimpleNamespace(
+        generate_content=MagicMock(return_value=SimpleNamespace(text=""))
+    ))
+    with pytest.raises(RuntimeError, match="Gemini completion failed after 1 retries") as exc:
+        model.create_completion("prompt")
+    assert "attempts returned empty response" in str(exc.value.__cause__)
 
 
 def test_gemini_create_completion_wraps_final_sdk_error(monkeypatch):

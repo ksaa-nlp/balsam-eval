@@ -142,6 +142,16 @@ def resolve_mcq_answer(answer: str, options: Any) -> str:
             return str(option)
 
     label = answer.strip().rstrip(".)،:").strip()
+    leading_label = re.match(
+        r"^([A-Za-zأاإآبجدهـو])(?:\s*[).:،-]\s*|\s+)", answer.strip()
+    )
+    embedded_label = re.search(
+        r"(?<!\w)([A-Za-zأاإآبجدهـو])\s*[).:،-](?:\s|$)", answer
+    )
+    label_match = leading_label or embedded_label
+    if label_match:
+        label = label_match.group(1)
+
     label_upper = label.upper()
     if len(label_upper) == 1 and label_upper in MCQ_LABELS:
         index = MCQ_LABELS.index(label_upper)

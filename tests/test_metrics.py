@@ -43,7 +43,15 @@ def test_normalize_text_handles_case_punctuation_and_arabic_marks():
 
 @pytest.mark.parametrize(
     ("answer", "expected"),
-    [("B)", "beta"), ("2", "beta"), ("ب", "beta"), ("ALPHA", "alpha")],
+    [
+        ("B)", "beta"),
+        ("2", "beta"),
+        ("ب", "beta"),
+        ("ALPHA", "alpha"),
+        ("A. alpha", "alpha"),
+        ("الإجابة الأقرب هي B. beta", "beta"),
+        ("الخيار: ب. beta", "beta"),
+    ],
 )
 def test_resolve_mcq_answer_supports_labels_and_option_text(answer, expected):
     assert resolve_mcq_answer(answer, ["alpha", "beta"]) == expected
