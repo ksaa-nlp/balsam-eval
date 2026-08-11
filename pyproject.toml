@@ -3,6 +3,7 @@ name = "balsam-lm-evaluation"
 version = "1.0.0"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "certifi~=2026.7.22",
     "evaluate~=0.4.6",
     "google-cloud-speech~=2.40.0",
     "google-cloud-storage~=3.13.1",

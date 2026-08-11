@@ -14,6 +14,7 @@ import lm_eval.evaluator
 import lm_eval.models  # noqa: F401  pylint: disable=unused-import  # registers models
 import lm_eval.tasks
 import requests
+from lm_eval.api.registry import get_model
 
 import src.adapters  # noqa: F401  pylint: disable=unused-import  # registers adapters
 import src.metrics  # noqa: F401  pylint: disable=unused-import  # registers custom metrics
@@ -22,6 +23,27 @@ from src.processors.result_processing import ResultProcessor
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+_NON_BATCHING_ADAPTERS = {
+    "anthropic-chat-completions",
+    "cohere",
+    "local-chat-completions",
+    "openai",
+    "openai-chat-completions",
+}
+
+
+def create_evaluation_model(
+    adapter: str, model_args: dict[str, Any], batch_size: int
+) -> Any:
+    """Initialize one lm-eval model for reuse across all pool files."""
+    args = dict(model_args)
+    args.setdefault("eos_string", "<|endoftext|>")
+    model_batch_size = 1 if adapter in _NON_BATCHING_ADAPTERS else batch_size
+    return get_model(adapter).create_from_arg_obj(
+        args,
+        {"batch_size": model_batch_size, "max_batch_size": None, "device": None},
+    )
 
 
 # --- Compatibility patches ---------------------------------------------------
@@ -83,6 +105,9 @@ class SingleFileEvaluationJob:
         source_pool_path: str,
         adapter: str,
         model_args: dict[str, Any],
+        model: Any = None,
+        batch_size: int = 8,
+        bootstrap_iters: int = 100000,
         result_filename: str,
         results_dir: str,
     ):
@@ -108,6 +133,9 @@ class SingleFileEvaluationJob:
         self.source_pool_path = source_pool_path
         self.adapter = adapter
         self.model_args = dict(model_args)
+        self.model = model
+        self.batch_size = batch_size
+        self.bootstrap_iters = bootstrap_iters
         self.result_filename = result_filename
         self.results_dir = results_dir
 
@@ -146,23 +174,38 @@ class SingleFileEvaluationJob:
     def _run_lm_eval(self) -> Dict[str, Any]:
         temp_dir = Path(".temp").resolve()
         use_chat_template = self.adapter not in _ASR_ADAPTERS
+        model_batch_size = getattr(self.model, "batch_size", None)
+        effective_batch_size = (
+            model_batch_size
+            if isinstance(model_batch_size, (int, str))
+            else self.batch_size
+        )
 
         with _lm_eval_compatibility_patches():
-            return cast(
+            results = cast(
                 dict[str, Any],
                 lm_eval.evaluator.simple_evaluate(
-                    model=self.adapter,
-                    model_args=self.model_args,
+                    model=self.model if self.model is not None else self.adapter,
+                    model_args=None if self.model is not None else self.model_args,
                     tasks=[self.task_name],
                     apply_chat_template=use_chat_template,
                     task_manager=lm_eval.tasks.TaskManager(
-                        include_path=str(temp_dir)),
-                    batch_size=1,
+                        include_path=str(temp_dir), include_defaults=False),
+                    batch_size=effective_batch_size,
+                    bootstrap_iters=self.bootstrap_iters,
                     log_samples=True,
                     gen_kwargs=get_max_tokens_config(
                         self.adapter, self.model_args["model"]),
                 ),
             )
+
+        # Reusing a model makes lm-eval report its class name and no arguments.
+        # Preserve result metadata produced before model reuse was introduced.
+        config = results.get("config")
+        if self.model is not None and isinstance(config, dict):
+            config["model"] = self.adapter
+            config["model_args"] = dict(self.model_args)
+        return results
 
     @staticmethod
     def _sanitize_results(results: Dict[str, Any]) -> None:

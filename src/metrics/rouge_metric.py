@@ -1,16 +1,21 @@
 """ROUGE metric implementation for text evaluation."""
 
+from functools import lru_cache
 import re
 import sys
 import unicodedata
 
-import evaluate
 from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 
-rouge = evaluate.load("rouge")
+@lru_cache(maxsize=1)
+def _load_rouge_metric():
+    """Load and cache Hugging Face ROUGE only when ROUGE is requested."""
+    import evaluate  # pylint: disable=import-outside-toplevel
+
+    return evaluate.load("rouge")
 
 # Punctuation handling
 PUNCT_TABLE = dict.fromkeys(
@@ -56,8 +61,13 @@ if "rouge" not in le_registry.AGGREGATION_REGISTRY:
         preds = [prepare_texts(p, True).strip() for _, p in items]
 
         total = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
+        if not refs:
+            return total
+        rouge_metric = _load_rouge_metric()
         for ref, pred in zip(refs, preds):
-            score = rouge.compute(references=[ref], predictions=[pred], tokenizer=tokenizer)
+            score = rouge_metric.compute(
+                references=[ref], predictions=[pred], tokenizer=tokenizer
+            )
             if score is None:
                 continue
             for k in total:

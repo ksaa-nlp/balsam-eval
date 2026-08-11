@@ -153,11 +153,10 @@ def test_metrics_utils_handles_missing_optional_pyarabic(monkeypatch):
         metrics_utils.araby = original_araby
 
 
-def test_rouge_metric_registration_and_identity_function(monkeypatch):
+def test_rouge_metric_registration_and_identity_function():
     registry = rouge_metric.le_registry.METRIC_REGISTRY
     snapshot = registry._objs.copy()
     registry._objs.pop("rouge", None)
-    monkeypatch.setattr(rouge_metric.evaluate, "load", Mock(return_value=Mock()))
     try:
         importlib.reload(rouge_metric)
         items = [("reference", "prediction")]

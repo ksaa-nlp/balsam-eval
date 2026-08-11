@@ -15,6 +15,8 @@ Usage:
     >>> from src.metrics.metrics_utils import prepare_text_with_punctuation, all_punctuations
 """
 
+import lm_eval.api.metrics  # noqa: F401  pylint: disable=unused-import
+
 # Metric implementations
 from .accuracy_metric import (
     AccuracyMetric,

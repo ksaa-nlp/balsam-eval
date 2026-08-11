@@ -242,6 +242,7 @@ name = "balsam-lm-evaluation"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "certifi" },
     { name = "evaluate" },
     { name = "google-cloud-speech" },
     { name = "google-cloud-storage" },
@@ -286,6 +287,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = "~=2026.7.22" },
     { name = "evaluate", specifier = "~=0.4.6" },
     { name = "google-cloud-speech", specifier = "~=2.40.0" },
     { name = "google-cloud-storage", specifier = "~=3.13.1" },

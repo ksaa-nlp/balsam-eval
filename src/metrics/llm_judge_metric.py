@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 # (question, gold, pred, mcq_options | None, custom_prompt | None)
 JudgeItem = Tuple[str, str, str, Optional[list], Optional[str]]
+JudgeCacheKey = Tuple[str, str, str, Tuple[str, ...], Optional[str]]
+_JUDGE_SCORE_CACHE: dict[JudgeCacheKey, Optional[float]] = {}
 
 
 def _parse_csv_env(name: str) -> list[str]:
@@ -177,42 +179,60 @@ def _normalize_mcq_answer(answer: str, mcq_options: list) -> str:
 # Unified LLM-as-judge
 # ---------------------------------------------------------------------------
 
+def _judge_cache_key(item: JudgeItem) -> JudgeCacheKey:
+    question, gold, pred, mcq_options, custom_prompt = item
+    options = tuple(str(option) for option in (mcq_options or []))
+    return str(question), str(gold), str(pred), options, custom_prompt
+
+
+def _score_judge_item(item: JudgeItem) -> Optional[float]:
+    question, gold, pred, mcq_options, custom_prompt = item
+    if not gold or not pred:
+        return None
+
+    ref = gold
+    answer = str(pred)
+
+    if mcq_options:
+        mcq_judge = _get_mcq_judge()
+        if mcq_judge is None:
+            return None
+        ref = _normalize_mcq_answer(ref, mcq_options)
+        answer = _normalize_mcq_answer(answer, mcq_options)
+        result = mcq_judge.evaluate_answer(
+            question=question,
+            reference_answer=ref,
+            given_answer=answer,
+            custom_prompt=custom_prompt,
+        )
+    else:
+        gen_judge = _get_generative_judge()
+        if gen_judge is None:
+            return None
+        result = gen_judge.evaluate_answer(
+            question=question,
+            reference_answer=ref,
+            given_answer=answer,
+            custom_prompt=custom_prompt,
+        )
+
+    return float(result["overall_score"])
+
+
 def compute_llm_judge_aggregation(items: List[JudgeItem]) -> float:
-    """Score items with the appropriate judge based on MCQ presence."""
+    """Score items once and reuse scores for per-question result export."""
+    keys = [_judge_cache_key(item) for item in items]
+    uncached = [item for item, key in zip(items, keys) if key not in _JUDGE_SCORE_CACHE]
+
+    for item in tqdm(uncached, desc="LLM-as-judge", unit="sample", disable=not uncached):
+        key = _judge_cache_key(item)
+        _JUDGE_SCORE_CACHE[key] = _score_judge_item(item)
+
     scores: list[float] = []
-    for question, gold, pred, mcq_options, custom_prompt in tqdm(
-        items, desc="LLM-as-judge", unit="sample"
-    ):
-        if not gold or not pred:
-            continue
-
-        ref = gold
-        answer = str(pred)
-
-        if mcq_options:
-            mcq_judge = _get_mcq_judge()
-            if mcq_judge is None:
-                continue
-            ref = _normalize_mcq_answer(ref, mcq_options)
-            answer = _normalize_mcq_answer(answer, mcq_options)
-            result = mcq_judge.evaluate_answer(
-                question=question,
-                reference_answer=ref,
-                given_answer=answer,
-                custom_prompt=custom_prompt,
-            )
-        else:
-            gen_judge = _get_generative_judge()
-            if gen_judge is None:
-                continue
-            result = gen_judge.evaluate_answer(
-                question=question,
-                reference_answer=ref,
-                given_answer=answer,
-                custom_prompt=custom_prompt,
-            )
-
-        scores.append(result["overall_score"])
+    for key in keys:
+        score = _JUDGE_SCORE_CACHE[key]
+        if score is not None:
+            scores.append(score)
 
     if not scores:
         logger.warning("LLM judge produced no scores.")

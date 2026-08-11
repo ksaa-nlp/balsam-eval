@@ -548,7 +548,7 @@ class LMHDataset:
 
         out_path = f"{self.directory}/{self.file_name}_{split}.json"
         with open(out_path, "w", encoding="utf8") as f:
-            json.dump(processed, f, ensure_ascii=False, indent=2)
+            json.dump(processed, f, ensure_ascii=False, separators=(",", ":"))
 
         logger.info("Exported %s items to %s", len(processed), out_path)
 

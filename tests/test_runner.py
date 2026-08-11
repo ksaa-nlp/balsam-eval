@@ -98,7 +98,7 @@ def test_evaluate_one_file_exports_media_and_runs_job(monkeypatch, tmp_path):
     monkeypatch.setattr(run, "copy_audio_to_temp", audio)
     job = Mock(return_value="/results/result.json")
     job_type = Mock(return_value=job)
-    monkeypatch.setattr(run, "SingleFileEvaluationJob", job_type)
+    monkeypatch.setattr(run, "_create_evaluation_job", job_type)
     config = EvalConfig(bucket="media-bucket", category_id="fallback")
 
     result = run._evaluate_one_file(
@@ -126,6 +126,9 @@ def test_evaluate_one_file_exports_media_and_runs_job(monkeypatch, tmp_path):
         source_pool_path="remote/pool.json",
         adapter="adapter",
         model_args={"model": "m"},
+        model=None,
+        batch_size=8,
+        bootstrap_iters=100000,
         result_filename="pool-stem.json",
         results_dir=str(tmp_path / "results"),
     )
@@ -180,6 +183,9 @@ def test_run_remote_evaluates_uploads_all_and_finalizes(monkeypatch):
     ):
         monkeypatch.setattr(run, name, Mock())
     monkeypatch.setattr(run, "process_adapter_and_url", Mock(return_value=("processed", "url")))
+    model = Mock()
+    create_model = Mock(return_value=model)
+    monkeypatch.setattr(run, "_create_evaluation_model", create_model)
     evaluate = Mock(side_effect=[("/tmp/one", "one-result.json"), ("/tmp/two", "two-result.json")])
     monkeypatch.setattr(run, "_evaluate_one_file", evaluate)
     upload = Mock()
@@ -188,6 +194,8 @@ def test_run_remote_evaluates_uploads_all_and_finalizes(monkeypatch):
     monkeypatch.setattr(run, "_try_finalize", finalize)
 
     assert run._run() == 0
+    create_model.assert_called_once_with("processed", config.get_model_args("url"), 8)
+    assert all(item.kwargs["model"] is model for item in evaluate.call_args_list)
     assert upload.call_args_list == [
         call(bucket="bucket", local_path="/tmp/one", object_path="results/path/one-result.json"),
         call(bucket="bucket", local_path="/tmp/two", object_path="results/path/two-result.json"),
@@ -209,6 +217,7 @@ def test_run_reports_no_files_and_evaluation_failure(monkeypatch):
     ):
         monkeypatch.setattr(run, name, Mock())
     monkeypatch.setattr(run, "process_adapter_and_url", lambda *_args: ("adapter", None))
+    monkeypatch.setattr(run, "_create_evaluation_model", Mock(return_value=Mock()))
     finalize = Mock(return_value=True)
     monkeypatch.setattr(run, "_try_finalize", finalize)
     monkeypatch.setattr(run, "resolve_pool_files", Mock(return_value=[]))

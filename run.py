@@ -25,8 +25,8 @@ from typing import Any, Optional, Tuple
 
 from dotenv import load_dotenv
 
-from src.adapters.utils import process_adapter_and_url
 from src.core.common import (
+    configure_ssl_certificates,
     copy_audio_to_temp,
     copy_images_to_temp,
     copy_metrics_combined_to_temp,
@@ -40,7 +40,6 @@ from src.core.helpers import (
     upload_result_file_to_gcs,
 )
 from src.db_operations import JobOutcome, finalize_job
-from src.evaluation import SingleFileEvaluationJob
 from src.task import LMHDataset
 
 TEMP_DIR = ".temp"
@@ -49,6 +48,37 @@ RESULTS_DIR = ".results"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def process_adapter_and_url(
+    adapter: str, base_url: Optional[str]
+) -> tuple[str, Optional[str]]:
+    """Load adapter registrations only once startup progress is visible."""
+    from src.adapters.utils import (  # pylint: disable=import-outside-toplevel
+        process_adapter_and_url as process,
+    )
+
+    return process(adapter, base_url)
+
+
+def _create_evaluation_job(**kwargs: Any) -> Any:
+    """Load lm-eval and metric registrations only when evaluation starts."""
+    from src.evaluation import (  # pylint: disable=import-outside-toplevel
+        SingleFileEvaluationJob,
+    )
+
+    return SingleFileEvaluationJob(**kwargs)
+
+
+def _create_evaluation_model(
+    adapter: str, model_args: dict[str, Any], batch_size: int
+) -> Any:
+    """Initialize shared evaluator model after startup progress is visible."""
+    from src.evaluation import (  # pylint: disable=import-outside-toplevel
+        create_evaluation_model,
+    )
+
+    return create_evaluation_model(adapter, model_args, batch_size)
 
 
 def _setup_logging() -> None:
@@ -153,7 +183,7 @@ def _materialise_pool_file(source: str, is_remote: bool, bucket: Optional[str]) 
         normalised = raw
 
     with open(dest_path, "w", encoding="utf-8") as fp:
-        json.dump(normalised, fp, ensure_ascii=False)
+        json.dump(normalised, fp, ensure_ascii=False, separators=(",", ":"))
 
     return Path(dest_path).stem
 
@@ -165,6 +195,7 @@ def _evaluate_one_file(
     config: EvalConfig,
     processed_adapter: str,
     model_args: dict[str, Any],
+    model: Any = None,
 ) -> Tuple[str, str]:
     """Evaluate a single pool file. Returns (local_result_path, result_filename)."""
     file_stem = _materialise_pool_file(source, is_remote, config.bucket)
@@ -186,13 +217,16 @@ def _evaluate_one_file(
     task_id = str(dataset.task_id or "")
     result_filename = f"{file_stem}.json"
 
-    job = SingleFileEvaluationJob(
+    job = _create_evaluation_job(
         task_name=dataset.name,
         category=category,
         task_id=task_id,
         source_pool_path=source,
         adapter=processed_adapter,
         model_args=model_args,
+        model=model,
+        batch_size=config.batch_size,
+        bootstrap_iters=config.bootstrap_iters,
         result_filename=result_filename,
         results_dir=RESULTS_DIR,
     )
@@ -245,11 +279,6 @@ def _run() -> int:
     else:
         config.validate_local()
 
-    processed_adapter, processed_base_url = process_adapter_and_url(
-        config.adapter, config.base_url
-    )
-    model_args = config.get_model_args(processed_base_url)
-
     pool_files = resolve_pool_files(config)
     _log_job_start(config, pool_files)
 
@@ -258,6 +287,15 @@ def _run() -> int:
         logger.error(message)
         _try_finalize(config, JobOutcome.FAILED, message)
         return 1
+
+    configure_ssl_certificates()
+    processed_adapter, processed_base_url = process_adapter_and_url(
+        config.adapter, config.base_url
+    )
+    model_args = config.get_model_args(processed_base_url)
+    model = _create_evaluation_model(
+        processed_adapter, model_args, config.batch_size
+    )
 
     for source in pool_files:
         logger.info("--- Evaluating: %s ---", source)
@@ -268,6 +306,7 @@ def _run() -> int:
                 config=config,
                 processed_adapter=processed_adapter,
                 model_args=model_args,
+                model=model,
             )
             if is_remote and config.bucket and config.results_path:
                 upload_result_file_to_gcs(

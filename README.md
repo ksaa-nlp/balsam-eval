@@ -70,6 +70,9 @@ The runner picks its mode from the env. There is no flag.
 | `JUDGE_API_KEY`         | both?   | Comma-separated keys, paired with `JUDGE_MODEL` / `JUDGE_PROVIDER`.     |
 | `IS_REASONING`          | both?   | `1` to use reasoning-model token budgets.                               |
 | `MAX_TOKENS`            | both?   | Token budget when `IS_REASONING=1`.                                     |
+| `EVAL_BATCH_SIZE`       | both?   | Requests grouped per model call; defaults to `8`.                       |
+| `EVAL_CONCURRENCY`      | both?   | Concurrent requests for compatible API adapters; defaults to `8`.      |
+| `EVAL_BOOTSTRAP_ITERS`  | both?   | Statistical bootstrap iterations; defaults to `100000`; use `0` for speed. |
 
 `?` = optional. See [`src/core/config.py`](src/core/config.py) for the full
 parsing rules.

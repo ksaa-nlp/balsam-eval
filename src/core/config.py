@@ -14,7 +14,7 @@ The runner is launched in two ways:
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -45,6 +45,11 @@ class EvalConfig:
     modalities: Optional[str] = None
     temperature: Optional[str] = None
 
+    # Performance controls
+    batch_size: int = 8
+    concurrency: int = 8
+    bootstrap_iters: int = 100000
+
     # LLM-as-judge configuration
     llm_judge: list[str] = field(default_factory=list)
     llm_judge_provider: list[str] = field(default_factory=list)
@@ -71,6 +76,11 @@ class EvalConfig:
             evaluation_types=os.getenv("EVALUATION_TYPES"),
             modalities=os.getenv("MODALITIES"),
             temperature=os.getenv("TEMPERATURE"),
+            batch_size=cls._parse_positive_int_env("EVAL_BATCH_SIZE", 8),
+            concurrency=cls._parse_positive_int_env("EVAL_CONCURRENCY", 8),
+            bootstrap_iters=cls._parse_non_negative_int_env(
+                "EVAL_BOOTSTRAP_ITERS", 100000
+            ),
             llm_judge=cls._parse_csv_env("JUDGE_MODEL"),
             llm_judge_provider=cls._parse_csv_env("JUDGE_PROVIDER"),
             llm_judge_api_key=cls._parse_csv_env("JUDGE_API_KEY"),
@@ -82,6 +92,26 @@ class EvalConfig:
         if not raw:
             return []
         return [v.strip() for v in raw.split(",") if v.strip()]
+
+    @staticmethod
+    def _parse_positive_int_env(name: str, default: int) -> int:
+        value = EvalConfig._parse_non_negative_int_env(name, default)
+        if value < 1:
+            raise ValueError(f"{name} must be greater than zero")
+        return value
+
+    @staticmethod
+    def _parse_non_negative_int_env(name: str, default: int) -> int:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            return default
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer") from exc
+        if value < 0:
+            raise ValueError(f"{name} must not be negative")
+        return value
 
     def is_remote_job(self) -> bool:
         """True when any remote-job configuration has been supplied."""
@@ -124,14 +154,16 @@ class EvalConfig:
         if not self.pool_files:
             raise ValueError("POOL_FILES is required for remote run")
 
-    def get_model_args(self, base_url: Optional[str] = None) -> dict[str, str]:
+    def get_model_args(self, base_url: Optional[str] = None) -> dict[str, Any]:
         """Return the kwargs to pass to the adapter constructor."""
-        args: dict[str, str] = {"model": self.model_name}
+        args: dict[str, Any] = {"model": self.model_name}
         resolved_base_url = base_url or self.base_url
         if resolved_base_url:
             args["base_url"] = resolved_base_url
         if self.api_key:
             args["api_key"] = self.api_key
+        if self.concurrency > 1:
+            args["num_concurrent"] = self.concurrency
         return args
 
     def get_evaluation_types_list(self) -> list[str]:

@@ -63,7 +63,13 @@ class ResultProcessor:
         os.makedirs(self.results_dir, exist_ok=True)
         path = os.path.join(self.results_dir, filename)
         with open(path, "w", encoding="utf-8") as fp:
-            json.dump(enriched, fp, ensure_ascii=False, cls=_NumpyEncoder)
+            json.dump(
+                enriched,
+                fp,
+                ensure_ascii=False,
+                cls=_NumpyEncoder,
+                separators=(",", ":"),
+            )
         logger.info("Wrote result file: %s", path)
         return path
 

@@ -95,10 +95,26 @@ def test_copy_images_materialises_local_files_and_rewrites_json(tmp_path):
     assert data[1]["images"] == "invalid"
 
 
+def test_configure_ssl_certificates_uses_certifi_when_system_bundle_missing(
+    monkeypatch, tmp_path
+):
+    cert_file = tmp_path / "cacert.pem"
+    cert_file.write_text("certificate", encoding="utf-8")
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.setattr(common.ssl, "get_default_verify_paths", Mock(return_value=Mock(cafile=None)))
+    monkeypatch.setattr("certifi.where", Mock(return_value=str(cert_file)))
+
+    common.configure_ssl_certificates()
+
+    assert common.os.environ["SSL_CERT_FILE"] == str(cert_file)
+
+
 def test_copy_audio_downloads_gcs_refs_with_lazy_single_client(monkeypatch, tmp_path):
     data_file = tmp_path / "data.json"
     data_file.write_text(
-        json.dumps([{"audio": ["relative/a.wav", "gs://other/b.wav"]}]),
+        json.dumps(
+            [{"audio": ["relative/a.wav", "relative/a.wav", "gs://other/b.wav"]}]
+        ),
         encoding="utf-8",
     )
     downloads = []
@@ -128,6 +144,7 @@ def test_copy_audio_downloads_gcs_refs_with_lazy_single_client(monkeypatch, tmp_
 
     refs = json.loads(data_file.read_text(encoding="utf-8"))[0]["audio"]
     assert all(Path(ref).read_bytes() == b"audio" for ref in refs)
+    assert refs[0] == refs[1]
     assert [(bucket, obj) for bucket, obj, _path in downloads] == [
         ("default", "relative/a.wav"),
         ("other", "b.wav"),

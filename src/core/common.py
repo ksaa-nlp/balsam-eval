@@ -4,11 +4,28 @@ import hashlib
 import json
 import os
 import shutil
+import ssl
 
 from dotenv import load_dotenv
 from google.cloud import storage  # type: ignore[attr-defined]
 
 load_dotenv()
+
+
+def configure_ssl_certificates() -> None:
+    """Use certifi when framework Python has no usable system CA bundle."""
+    if os.getenv("SSL_CERT_FILE"):
+        return
+
+    default_cafile = ssl.get_default_verify_paths().cafile
+    if default_cafile and os.path.isfile(default_cafile):
+        return
+
+    import certifi  # pylint: disable=import-outside-toplevel
+
+    certifi_cafile = certifi.where()
+    if os.path.isfile(certifi_cafile):
+        os.environ["SSL_CERT_FILE"] = certifi_cafile
 
 
 def setup_directories(*dirs: str) -> None:
@@ -194,6 +211,11 @@ def _materialise_media(
                 changed = True
                 continue
 
+            if os.path.exists(dst_path):
+                new_refs.append(dst_path)
+                changed = True
+                continue
+
             if bucket:
                 try:
                     media_bucket, object_ref = _normalise_remote_media_ref(ref_str, bucket)
@@ -229,7 +251,7 @@ def _materialise_media(
 
     if changed:
         with open(json_file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
 
 
 def copy_images_to_temp(json_file_path: str, temp_dir: str, bucket: str | None = None) -> None:

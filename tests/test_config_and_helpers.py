@@ -62,12 +62,28 @@ def test_model_args_include_only_configured_values():
         "model": "model",
         "base_url": "https://default",
         "api_key": "secret",
+        "num_concurrent": 8,
     }
     assert config.get_model_args("https://override") == {
         "model": "model",
         "base_url": "https://override",
         "api_key": "secret",
+        "num_concurrent": 8,
     }
+
+
+def test_performance_settings_parse_and_validate(monkeypatch):
+    monkeypatch.setenv("EVAL_BATCH_SIZE", "4")
+    monkeypatch.setenv("EVAL_CONCURRENCY", "6")
+    monkeypatch.setenv("EVAL_BOOTSTRAP_ITERS", "12")
+
+    config = EvalConfig.from_env()
+
+    assert (config.batch_size, config.concurrency, config.bootstrap_iters) == (4, 6, 12)
+
+    monkeypatch.setenv("EVAL_BATCH_SIZE", "0")
+    with pytest.raises(ValueError, match="greater than zero"):
+        EvalConfig.from_env()
 
 
 def test_evaluation_types_are_trimmed_and_empty_values_removed():

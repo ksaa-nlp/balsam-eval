@@ -153,7 +153,7 @@ def test_bleu_score_prepares_inputs_and_averages_all_pairs(monkeypatch):
         ZeroDivisionError,
     ]
     load = Mock(return_value=loaded_metric)
-    monkeypatch.setattr(bleu_metric.evaluate, "load", load)
+    monkeypatch.setattr(bleu_metric, "_load_bleu_metric", load)
 
     score = bleu_metric.compute_bleu_score(
         ["ref one", "ref two", "ref three"],
@@ -162,7 +162,7 @@ def test_bleu_score_prepares_inputs_and_averages_all_pairs(monkeypatch):
     )
 
     assert score == pytest.approx(0.8 / 3)
-    load.assert_called_once_with("bleu")
+    load.assert_called_once_with()
     first_call = loaded_metric.compute.call_args_list[0].kwargs
     assert first_call["references"] == ["ref one"]
     assert first_call["predictions"] == ["pred , one"]
@@ -172,7 +172,7 @@ def test_bleu_score_prepares_inputs_and_averages_all_pairs(monkeypatch):
 def test_bleu_score_skips_empty_pairs_but_keeps_denominator(monkeypatch):
     loaded_metric = Mock()
     loaded_metric.compute.return_value = {"bleu": 1.0}
-    monkeypatch.setattr(bleu_metric.evaluate, "load", Mock(return_value=loaded_metric))
+    monkeypatch.setattr(bleu_metric, "_load_bleu_metric", Mock(return_value=loaded_metric))
 
     assert bleu_metric.compute_bleu_score(["", "ref"], ["pred", ""]) == 0.0
     assert bleu_metric.compute_bleu_score([], []) == 0.0
@@ -223,7 +223,7 @@ def test_rouge_aggregation_averages_scores_and_supplies_tokenizer(monkeypatch):
         {"rouge1": 1.0, "rouge2": 0.8, "rougeL": 0.6, "rougeLsum": 0.4},
         None,
     ]
-    monkeypatch.setattr(rouge_metric, "rouge", rouge)
+    monkeypatch.setattr(rouge_metric, "_load_rouge_metric", Mock(return_value=rouge))
 
     result = rouge_metric.rouge_aggregation([("ref", "pred"), ("other", "answer")])
 
@@ -233,7 +233,7 @@ def test_rouge_aggregation_averages_scores_and_supplies_tokenizer(monkeypatch):
 
 def test_rouge_empty_aggregation_process_results_and_metric_export(monkeypatch):
     rouge = Mock()
-    monkeypatch.setattr(rouge_metric, "rouge", rouge)
+    monkeypatch.setattr(rouge_metric, "_load_rouge_metric", Mock(return_value=rouge))
 
     assert rouge_metric.rouge_aggregation([]) == {
         "rouge1": 0.0,
@@ -306,6 +306,7 @@ def isolate_judge_state(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(llm_judge_metric, "_GENERATIVE_JUDGE", None)
     monkeypatch.setattr(llm_judge_metric, "_MCQ_JUDGE", None)
+    monkeypatch.setattr(llm_judge_metric, "_JUDGE_SCORE_CACHE", {})
 
 
 def test_parse_csv_env_trims_and_discards_empty_values(monkeypatch):
@@ -480,6 +481,11 @@ def test_llm_judge_aggregation_routes_mcq_and_generative_items(monkeypatch):
         given_answer="pred",
         custom_prompt="gen prompt",
     )
+
+    assert llm_judge_metric.compute_llm_judge_aggregation(
+        [("open question", "gold", "pred", None, "gen prompt")]
+    ) == pytest.approx(0.3333)
+    generative.evaluate_answer.assert_called_once()
 
 
 def test_llm_judge_aggregation_returns_zero_when_no_scores(monkeypatch, caplog):

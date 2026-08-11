@@ -1,14 +1,21 @@
 """BLEU metric implementation for text evaluation."""
 
+from functools import lru_cache
 from typing import Any, Dict, List, Tuple
-
-import evaluate
 
 from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
 from src.metrics.metrics_utils import prepare_text_with_punctuation
+
+@lru_cache(maxsize=1)
+def _load_bleu_metric():
+    """Load and cache Hugging Face BLEU only when BLEU is requested."""
+    import evaluate  # pylint: disable=import-outside-toplevel
+
+    return evaluate.load("bleu")
+
 
 def compute_bleu_score(
     references: List[str],
@@ -32,8 +39,6 @@ def compute_bleu_score(
     if len(references) != len(predictions):
         raise ValueError("references and predictions must have the same length")
 
-    bleu = evaluate.load("bleu")
-
     def tokenizer(x):
         return x.split()
 
@@ -46,12 +51,15 @@ def compute_bleu_score(
         for p in predictions
     ]
 
+    if not refs:
+        return 0.0
+    bleu_metric = _load_bleu_metric()
     total = 0.0
     for ref, pred in zip(refs, preds):
         if not pred or not ref:
             continue
         try:
-            score = bleu.compute(
+            score = bleu_metric.compute(
                 references=[ref], predictions=[pred], tokenizer=tokenizer
             )
             if score is not None:

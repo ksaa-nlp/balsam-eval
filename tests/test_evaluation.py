@@ -94,17 +94,44 @@ def test_run_lm_eval_builds_expected_request(monkeypatch, adapter, chat_template
     job = make_job(adapter=adapter, model_args={"model": "model"})
 
     assert job._run_lm_eval() == {"results": {}}
-    task_manager.assert_called_once_with(include_path=str(Path(".temp").resolve()))
+    task_manager.assert_called_once_with(
+        include_path=str(Path(".temp").resolve()), include_defaults=False
+    )
     simple_evaluate.assert_called_once_with(
         model=adapter,
         model_args={"model": "model", "eos_string": "<|endoftext|>"},
         tasks=["generated-task"],
         apply_chat_template=chat_template,
         task_manager="manager",
-        batch_size=1,
+        batch_size=8,
+        bootstrap_iters=100000,
         log_samples=True,
         gen_kwargs={"max_gen_toks": 99},
     )
+
+
+def test_run_lm_eval_reuses_preinitialized_model(monkeypatch):
+    model = Mock(batch_size=4)
+    simple_evaluate = Mock(return_value={"results": {}, "config": {}})
+    monkeypatch.setattr(evaluation.lm_eval.evaluator, "simple_evaluate", simple_evaluate)
+    monkeypatch.setattr(evaluation, "get_max_tokens_config", Mock(return_value={}))
+    job = make_job(model=model, batch_size=4, bootstrap_iters=2)
+
+    job._run_lm_eval()
+
+    assert simple_evaluate.call_args.kwargs["model"] is model
+    assert simple_evaluate.call_args.kwargs["model_args"] is None
+    assert simple_evaluate.call_args.kwargs["batch_size"] == 4
+    assert simple_evaluate.call_args.kwargs["bootstrap_iters"] == 2
+    config = simple_evaluate.return_value["config"]
+    assert config == {
+        "model": "openai-chat-completions",
+        "model_args": {
+            "model": "model",
+            "api_key": "secret",
+            "eos_string": "<|endoftext|>",
+        },
+    }
 
 
 def test_call_sanitizes_stamps_and_exports(monkeypatch):
