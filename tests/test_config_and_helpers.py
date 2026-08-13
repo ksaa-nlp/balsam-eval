@@ -1,4 +1,6 @@
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from src.core.config import EvalConfig
 from src.core.helpers import normalize_string, sanitize_config_name
@@ -103,5 +105,22 @@ def test_normalize_string_normalizes_and_makes_path_safe():
     assert len(normalize_string("x" * 300)) == 255
 
 
+@given(st.text())
+def test_normalize_string_always_produces_stable_path_component(value):
+    normalized = normalize_string(value)
+
+    assert len(normalized) <= 255
+    assert not {"\x00", " ", ".", "/"} & set(normalized)
+    assert normalize_string(normalized) == normalized
+
+
 def test_sanitize_config_name_replaces_forbidden_characters():
     assert sanitize_config_name(r"a<b>c:d/e\f|g?h*i") == "a_b_c_d_e_f_g_h_i"
+
+
+@given(st.text())
+def test_sanitize_config_name_removes_forbidden_characters(value):
+    sanitized = sanitize_config_name(value)
+
+    assert not set("<>:/\\|?*") & set(sanitized)
+    assert sanitize_config_name(sanitized) == sanitized

@@ -42,6 +42,7 @@ dev = [
     "types-pyyaml~=6.0.12.20260724",
     "types-tqdm~=4.70.0.20260805",
     "types-requests~=2.33.0.20260712",
+    "hypothesis~=6.165",
 ]
 
 [build-system]

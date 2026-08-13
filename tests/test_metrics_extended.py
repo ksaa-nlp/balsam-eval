@@ -7,6 +7,8 @@ from unittest.mock import Mock, patch
 
 import evaluate
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from src import metrics_registry as registry_module
 from src.metrics_registry import BaseMetric, MetricConfig, MetricsRegistry
@@ -95,6 +97,15 @@ def test_registry_normalizes_names_overwrites_and_lists_in_order():
     assert registry.get("MY-METRIC") is replacement
     assert registry.get("missing") is None
     assert registry.list_metrics() == ["my_metric", "second"]
+
+
+@given(st.text())
+def test_registry_name_normalization_is_stable(name):
+    normalized = MetricsRegistry._normalize_name(name)
+
+    assert "-" not in normalized
+    assert normalized == normalized.lower()
+    assert MetricsRegistry._normalize_name(normalized) == normalized
 
 
 def test_registry_detects_exact_and_longest_token_match():

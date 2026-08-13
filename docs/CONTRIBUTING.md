@@ -10,31 +10,35 @@ and use the service to evaluate models.
 
 After cloning the repository, follow these steps to get your environment ready.
 
-1. **Initialize a virtual environment**. In order to keep all dependncies local for the project and avoid missing your global ones, at the root of the project, run:
+1. **Install dependencies**. This project uses [uv](https://docs.astral.sh/uv/)
+   and requires Python 3.12 or 3.13. At the project root, run:
    ```bash
-   python3.12 -m venv venv
+   uv sync
    ```
-   This will initialize a new folder named `venv` that contains a Python 3.12 binary. To tell the IDE terminal to use this version, run:
-   ```bash
-   source venv/bin/activate
-   ```
-   Feel free to use other Python environment managers like conda.
-2. **Install dependencies**. At the root of this project, run:
-   ```bash
-   pip install .
-   ```
-   This will take care of installing the main dependencies. Contributors are required to install the development dependencies as well:
-   ```bash
-   pip install ."[dev]"
-   ```
-3. **Set environment variables**. The evaluation requires a number of variables to be set, those can be found in `.env.example`, you will need to copy it then **modify with you own variables** (refer to (Environment variables explained)[#environment-variables-explained] section):
+   This creates `.venv` and installs runtime and development dependencies from
+   `uv.lock`.
+2. **Set environment variables**. The evaluation requires a number of variables to be set, those can be found in `.env.example`, you will need to copy it then **modify with you own variables** (refer to (Environment variables explained)[#environment-variables-explained] section):
    ```bash
    cp .env.example .env
    ```
-4. **Run the evaluation**. To run the evaluation _locally_:
+3. **Run the evaluation**. To run the evaluation _locally_:
    ```bash
-   python3 run_local.py
+   uv run python run.py
    ```
+
+## Tests
+
+Run the complete test suite with:
+
+```bash
+uv run pytest
+```
+
+Tests use [Hypothesis](https://hypothesis.readthedocs.io/) for properties that
+must hold across broad input ranges. Prefer property tests for pure functions
+with clear invariants, such as normalization being idempotent or sanitized
+output excluding forbidden characters. Keep example-based tests for exact
+business cases, integrations, and regressions.
 
 ## Environment variables explained
 
