@@ -104,10 +104,16 @@ def call_model_adapter_with_retry(
             if hasattr(adapter, 'generate'):
                 model_response = getattr(adapter, 'generate')(prompt)
             elif hasattr(adapter, "generate_until"):
+                request_prompt: Any = prompt
+                if hasattr(adapter, "apply_chat_template"):
+                    request_prompt = getattr(adapter, "apply_chat_template")(
+                        [{"role": "user", "content": prompt}],
+                        add_generation_prompt=True,
+                    )
                 request = Instance(
                     request_type="generate_until",
                     doc={},
-                    arguments=(prompt, {"until": [], "do_sample": False}),
+                    arguments=(request_prompt, {"until": [], "do_sample": False}),
                     idx=0,
                 )
                 responses = getattr(adapter, "generate_until")([request])

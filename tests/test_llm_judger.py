@@ -68,14 +68,34 @@ def test_call_model_adapter_uses_lm_eval_generate_until():
     generate_until = MagicMock(
         return_value=['{"score": 1, "explanation": "ok"}']
     )
-    adapter = SimpleNamespace(generate_until=generate_until)
+    apply_chat_template = MagicMock(return_value="formatted prompt")
+    adapter = SimpleNamespace(
+        generate_until=generate_until,
+        apply_chat_template=apply_chat_template,
+    )
 
     result = base.call_model_adapter_with_retry(adapter, "prompt", max_retries=1)
 
     assert result == {"score": 1, "explanation": "ok"}
+    apply_chat_template.assert_called_once_with(
+        [{"role": "user", "content": "prompt"}],
+        add_generation_prompt=True,
+    )
+    request = generate_until.call_args.args[0][0]
+    assert request.args == ("formatted prompt", {"until": [], "do_sample": False})
+    generate_until.assert_called_once_with([request])
+
+
+def test_call_model_adapter_generate_until_without_chat_template():
+    generate_until = MagicMock(
+        return_value=['{"score": 1, "explanation": "ok"}']
+    )
+    adapter = SimpleNamespace(generate_until=generate_until)
+
+    base.call_model_adapter_with_retry(adapter, "prompt", max_retries=1)
+
     request = generate_until.call_args.args[0][0]
     assert request.args == ("prompt", {"until": [], "do_sample": False})
-    generate_until.assert_called_once_with([request])
 
 
 @pytest.mark.parametrize("method", ["_call", "invoke", "__call__"])
