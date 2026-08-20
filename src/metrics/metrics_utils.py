@@ -5,6 +5,7 @@ Metric-specific functions should remain in their respective metric files.
 """
 
 import logging
+import math
 import re
 import unicodedata
 
@@ -22,6 +23,14 @@ all_punctuations = "".join(
 OTHERS = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ"""
 all_punctuations += "".join(char for char in OTHERS if char not in all_punctuations)
 _PUNCTUATION_PATTERN = re.compile(f"([{re.escape(all_punctuations)}])")
+
+
+def clamp_score(score: float) -> float:
+    """Return a finite metric score constrained to the inclusive [0, 1] range."""
+    value = float(score)
+    if math.isnan(value):
+        return 0.0
+    return max(0.0, min(1.0, value))
 
 
 def prepare_text_with_punctuation(

@@ -154,7 +154,7 @@ def test_single_model_prompt_fallback_precedence(
     prompt = call.call_args.args[1]
     assert prompt.startswith(expected_start)
     assert "[CONTEXT]" not in prompt
-    call.assert_called_once_with(judge.model_adapters[0], prompt, max_score=3.0)
+    call.assert_called_once_with(judge.model_adapters[0], prompt, max_score=1.0)
 
 
 def test_single_model_handles_none_raw_score_from_adapter(monkeypatch):
@@ -235,7 +235,7 @@ def test_evaluate_batch_accepts_test_case_object_and_uses_progress(monkeypatch):
 @pytest.mark.parametrize(
     ("judge_class", "maximum", "prompt_fragment"),
     [
-        (GenerativeLLMJudge, 3.0, "Score 3"),
+        (GenerativeLLMJudge, 1.0, "Decimal scores are allowed"),
         (MCQLLMJudge, 1.0, "multiple-choice question"),
     ],
 )

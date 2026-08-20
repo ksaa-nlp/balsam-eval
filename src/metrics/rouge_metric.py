@@ -9,6 +9,7 @@ from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
+from src.metrics.metrics_utils import clamp_score
 
 @lru_cache(maxsize=1)
 def _load_rouge_metric():
@@ -73,7 +74,7 @@ if "rouge" not in le_registry.AGGREGATION_REGISTRY:
             for k in total:
                 total[k] += score[k]
         count = len(refs) if refs else 1
-        return {k: v / count for k, v in total.items()}
+        return {k: clamp_score(v / count) for k, v in total.items()}
 
 
 # Register metric

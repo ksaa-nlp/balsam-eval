@@ -7,7 +7,7 @@ from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
-from src.metrics.metrics_utils import prepare_text_with_punctuation
+from src.metrics.metrics_utils import clamp_score, prepare_text_with_punctuation
 
 @lru_cache(maxsize=1)
 def _load_bleu_metric():
@@ -66,7 +66,7 @@ def compute_bleu_score(
                 total += score["bleu"]
         except ZeroDivisionError:
             continue
-    return total / len(refs) if refs else 0.0
+    return clamp_score(total / len(refs)) if refs else 0.0
 
 
 def compute_bleu_aggregation(items: List[Tuple[Any, Any]]) -> float:

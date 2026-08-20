@@ -156,6 +156,14 @@ def test_prepare_text_warns_when_diacritic_dependency_missing(monkeypatch, caplo
     assert "pyarabic not installed" in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("score", "expected"),
+    [(-1.0, 0.0), (0.4, 0.4), (2.0, 1.0), (float("nan"), 0.0)],
+)
+def test_clamp_score_constrains_metric_values(score, expected):
+    assert metrics_utils.clamp_score(score) == expected
+
+
 def test_bleu_score_prepares_inputs_and_averages_all_pairs(monkeypatch):
     loaded_metric = Mock()
     loaded_metric.compute.side_effect = [
@@ -287,6 +295,18 @@ def test_asr_scores_validate_lengths_and_aggregation_shape(module, score_name):
         compute(["reference"], [])
     with pytest.raises(ValueError, match=f"{score_name.upper()} aggregation items"):
         aggregate(["not-a-pair"])
+
+
+@pytest.mark.parametrize(
+    ("module", "score_name"),
+    [(wer_metric, "wer"), (cer_metric, "cer")],
+)
+def test_asr_scores_preserve_values_above_one(monkeypatch, module, score_name):
+    monkeypatch.setattr(module.jiwer, score_name, Mock(return_value=2.5))
+
+    compute = getattr(module, f"compute_{score_name}_score")
+
+    assert compute(["reference"], ["many inserted words"]) == 2.5
 
 
 @pytest.mark.parametrize(
@@ -509,6 +529,19 @@ def test_llm_judge_aggregation_returns_zero_when_no_scores(monkeypatch, caplog):
 
     assert result == 0.0
     assert "produced no scores" in caplog.text
+
+
+@pytest.mark.parametrize(("judge_score", "expected"), [(-0.5, 0.0), (1.5, 1.0)])
+def test_llm_judge_aggregation_clamps_scores(monkeypatch, judge_score, expected):
+    judge = Mock()
+    judge.evaluate_answer.return_value = {"overall_score": judge_score}
+    monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=judge))
+
+    result = llm_judge_metric.compute_llm_judge_aggregation(
+        [("question", "gold", "pred", None, None)]
+    )
+
+    assert result == expected
 
 
 def test_llm_judge_aggregation_skips_unavailable_mcq_judge(monkeypatch):

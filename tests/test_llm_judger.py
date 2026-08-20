@@ -134,9 +134,10 @@ def test_call_model_adapter_rejects_invalid_judgments(response, monkeypatch):
         (MCQLLMJudge, 0.5, 0.0),
         (MCQLLMJudge, "bad", 0.0),
         (GenerativeLLMJudge, 0, 0.0),
-        (GenerativeLLMJudge, 2, 0.66667),
-        (GenerativeLLMJudge, 3, 1.0),
-        (GenerativeLLMJudge, 4, 0.0),
+        (GenerativeLLMJudge, 0.25, 0.25),
+        (GenerativeLLMJudge, 0.666666, 0.66667),
+        (GenerativeLLMJudge, 1, 1.0),
+        (GenerativeLLMJudge, 2, 0.0),
     ],
 )
 def test_score_normalization(cls, raw, expected):
@@ -168,7 +169,7 @@ def test_judge_constructor_creates_one_adapter_per_config(monkeypatch):
 def test_single_model_prompt_precedence_and_normalized_result(monkeypatch):
     config = base.ModelConfig("judge", custom_prompt="config prompt")
     judge = build_judge(configs=[config], custom_prompt="instance prompt", threshold=0.6)
-    call = MagicMock(return_value={"score": 2, "explanation": "close"})
+    call = MagicMock(return_value={"score": 0.8, "explanation": "close"})
     monkeypatch.setattr(base, "call_model_adapter_with_retry", call)
 
     result = judge._evaluate_single_model(
@@ -182,8 +183,8 @@ def test_single_model_prompt_precedence_and_normalized_result(monkeypatch):
     assert "[CONTEXT]\ncontext" in prompt
     assert "[GROUND TRUTH]\nreference" in prompt
     assert result == {
-        "model": "judge", "provider": "openai", "score": 0.66667,
-        "raw_score": 2, "passed": True, "explanation": "close",
+        "model": "judge", "provider": "openai", "score": 0.8,
+        "raw_score": 0.8, "passed": True, "explanation": "close",
     }
 
 

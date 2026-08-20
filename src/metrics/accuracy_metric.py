@@ -10,6 +10,7 @@ from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
+from src.metrics.metrics_utils import clamp_score
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +229,7 @@ def compute_accuracy(
                 if ref_norm == pred_norm:
                     correct += 1
 
-    return correct / total if total > 0 else 0.0
+    return clamp_score(correct / total) if total > 0 else 0.0
 
 
 def compute_fuzzy_accuracy(items: List[Tuple[Any, Any]]) -> float:

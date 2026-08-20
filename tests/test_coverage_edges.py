@@ -178,7 +178,7 @@ def test_asr_unparseable_double_quoted_prediction_strips_outer_quotes():
 @pytest.mark.parametrize(
     ("judge_class", "maximum", "prompt_fragment"),
     [
-        (GenerativeLLMJudge, 3.0, "Score 3"),
+        (GenerativeLLMJudge, 1.0, "Decimal scores are allowed"),
         (MCQLLMJudge, 1.0, "Arabic–English equivalence"),
     ],
 )

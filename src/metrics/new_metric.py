@@ -12,6 +12,7 @@ from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
+from src.metrics.metrics_utils import clamp_score
 
 
 def compute_new_metric_aggregation(items: List[Any]) -> float:
@@ -25,7 +26,7 @@ def compute_new_metric_aggregation(items: List[Any]) -> float:
         _items: List of metric items (typically reference, prediction pairs)
 
     Returns:
-        Aggregated score (typically a float between 0 and 1, or 0 to 100)
+        Aggregated score between 0 and 1
 
     Example:
         >>> def compute_new_metric_aggregation(items):
@@ -48,9 +49,10 @@ def compute_new_metric_aggregation(items: List[Any]) -> float:
     ]
     if not valid_items:
         return 0.0
-    return float(
-        sum(reference == prediction for reference, prediction in valid_items)
-    ) / len(valid_items)
+    return clamp_score(
+        float(sum(reference == prediction for reference, prediction in valid_items))
+        / len(valid_items)
+    )
 
 
 # Register aggregation function

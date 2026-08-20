@@ -32,6 +32,7 @@ def test_calculate_average_scores_collects_supported_metric_shapes(tmp_path):
             "first": {
                 "accuracy,none": 0.12344,
                 "rouge,none": {"rougeLsum": 0.8},
+                "wer,none": 2.5,
                 "ignored,stderr": 10,
             },
             "second": {"accuracy,none": 0.12346, "invalid,none": "value"},
@@ -42,6 +43,7 @@ def test_calculate_average_scores_collects_supported_metric_shapes(tmp_path):
     assert processor._calculate_average_scores(results) == {
         "accuracy": 0.1235,
         "rouge": 0.8,
+        "wer": 2.5,
     }
 
 

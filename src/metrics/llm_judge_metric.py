@@ -24,6 +24,7 @@ from src.llm_judger.base_llm_judge import ModelConfig
 from src.llm_judger.generative_llm_judge import GenerativeLLMJudge
 from src.llm_judger.mcq_llm_judge import MCQLLMJudge
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
+from src.metrics.metrics_utils import clamp_score
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +217,7 @@ def _score_judge_item(item: JudgeItem) -> Optional[float]:
             custom_prompt=custom_prompt,
         )
 
-    return float(result["overall_score"])
+    return clamp_score(result["overall_score"])
 
 
 def compute_llm_judge_aggregation(items: List[JudgeItem]) -> float:
@@ -238,7 +239,7 @@ def compute_llm_judge_aggregation(items: List[JudgeItem]) -> float:
         logger.warning("LLM judge produced no scores.")
         return 0.0
 
-    avg = round(mean(scores), 4)
+    avg = round(clamp_score(mean(scores)), 4)
     logger.info("LLM-as-judge average: %.4f (%d samples)", avg, len(scores))
     return avg
 

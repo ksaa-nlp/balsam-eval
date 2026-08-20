@@ -4,7 +4,7 @@ Refactored LLM Judge system with base class and specialized MCQ/Generative class
 The main improvement is separating concerns:
 - Base class handles common logic (model calling, aggregation, batch processing)
 - MCQ judge uses binary 0-1 scoring with simpler prompt
-- Generative judge uses 0-3 scoring with normalization to 0-1
+- Generative judge uses continuous 0-1 scoring for partial credit
 """
 
 import json
