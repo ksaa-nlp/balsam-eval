@@ -60,6 +60,11 @@ def test_compatibility_patches_restore_after_exception(monkeypatch):
         ("anthropic", "ANTHROPIC_API_KEY"),
         ("gemini", "GOOGLE_API_KEY"),
         ("cohere", "CO_API_KEY"),
+        ("cohere-asr", "COHERE_API_KEY"),
+        ("deepgram-stt", "DEEPGRAM_API_KEY"),
+        ("hf-asr", "HF_TOKEN"),
+        ("qwen-asr", "DASHSCOPE_API_KEY"),
+        ("azure-openai", "AZURE_OPENAI_API_KEY"),
         ("azure-stt", "AZURE_SPEECH_KEY"),
     ],
 )
@@ -82,7 +87,12 @@ def test_job_constructor_copies_args_adds_eos_and_reads_api_key(monkeypatch):
 
 @pytest.mark.parametrize(
     ("adapter", "chat_template"),
-    [("openai-chat-completions", True), ("openai-asr", False)],
+    [
+        ("openai-chat-completions", True),
+        ("openai-asr", False),
+        ("cohere-asr", False),
+        ("aws-transcribe", False),
+    ],
 )
 def test_run_lm_eval_builds_expected_request(monkeypatch, adapter, chat_template):
     task_manager = Mock(return_value="manager")

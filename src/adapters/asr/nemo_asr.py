@@ -71,8 +71,8 @@ class NeMoASRLM(LM):
 
         resolved_key = (
             api_key
-            or os.environ.get("API_KEY")
             or os.environ.get("NVIDIA_API_KEY")
+            or os.environ.get("API_KEY")
         )
         if not resolved_key:
             raise ValueError(

@@ -1,8 +1,8 @@
-"""OpenAI API adapter for LM Evaluation Harness with audio support.
+"""OpenAI API adapter for LM Evaluation Harness with multimodal support.
 
-Extends lm-eval's built-in OpenAIChatCompletion to add multimodal audio support.
+Extends lm-eval's built-in OpenAIChatCompletion to add image and audio support.
 For text-only requests, delegates entirely to the parent implementation (retry,
-batching, collation, caching). For audio requests, processes one at a time using
+batching, collation, caching). Multimodal requests process one at a time using
 the inherited model_call() and parse_generations() machinery.
 
 Also works as an OpenAI-compatible adapter — pass a custom base_url to target
@@ -73,11 +73,28 @@ def _build_openai_audio_parts(audio_dicts: List[dict]) -> List[dict]:
     ]
 
 
-def _inject_audio_into_messages(
-    messages: List[dict], audio_parts: List[dict]
+def _build_openai_image_parts(images: List[Any]) -> List[dict]:
+    """Encode PIL-compatible images as OpenAI image_url content parts."""
+    parts = []
+    for image in images:
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        data = base64.b64encode(buf.getvalue()).decode("ascii")
+        parts.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{data}"},
+        })
+    return parts
+
+
+def _inject_media_into_messages(
+    messages: List[dict], media_parts: List[dict]
 ) -> List[dict]:
-    """Inject audio content parts into the last user message."""
+    """Inject media content parts into the last user message."""
     messages = copy.deepcopy(messages)
+    if not messages:
+        messages.append({"role": "user", "content": []})
+
     last_user = None
     for msg in reversed(messages):
         if msg.get("role") == "user":
@@ -92,9 +109,16 @@ def _inject_audio_into_messages(
     elif not isinstance(content, list):
         content = [{"type": "text", "text": str(content)}]
 
-    last_user["content"] = audio_parts + content
+    last_user["content"] = media_parts + content
     last_user.pop("type", None)
     return messages
+
+
+def _inject_audio_into_messages(
+    messages: List[dict], audio_parts: List[dict]
+) -> List[dict]:
+    """Compatibility wrapper for audio-only callers."""
+    return _inject_media_into_messages(messages, audio_parts)
 
 
 def _parse_chat_prompt(prompt_obj: Any) -> List[Dict[str, Any]]:
@@ -122,6 +146,17 @@ def _has_audio(requests: list) -> bool:
         len(req.args) > 2
         and isinstance(req.args[2], dict)
         and "audio" in req.args[2]
+        for req in requests
+        if hasattr(req, "args")
+    )
+
+
+def _has_multimodal(requests: list) -> bool:
+    """Check if any request contains image or audio auxiliary data."""
+    return any(
+        len(req.args) > 2
+        and isinstance(req.args[2], dict)
+        and bool(req.args[2].get("visual") or req.args[2].get("audio"))
         for req in requests
         if hasattr(req, "args")
     )
@@ -177,7 +212,7 @@ class OpenAIAudioLM(OpenAIChatCompletion):
         if not requests:
             return []
 
-        if not _has_audio(requests):
+        if not _has_multimodal(requests):
             result: List[str] = super().generate_until(
                 requests,
                 disable_tqdm=disable_tqdm,  # pyright: ignore[reportCallIssue]
@@ -194,13 +229,18 @@ class OpenAIAudioLM(OpenAIChatCompletion):
             prompt_obj = req.args[0]
             gen_kwargs = req.args[1] if len(req.args) > 1 else {}
             aux = req.args[2] if len(req.args) > 2 else {}
+            images = aux.get("visual") if isinstance(aux, dict) else None
             audio_dicts = aux.get("audio") if isinstance(aux, dict) else None
 
             messages = _parse_chat_prompt(prompt_obj)
 
+            media_parts = []
+            if images:
+                media_parts.extend(_build_openai_image_parts(images))
             if audio_dicts:
-                audio_parts = _build_openai_audio_parts(audio_dicts)
-                messages = _inject_audio_into_messages(messages, audio_parts)
+                media_parts.extend(_build_openai_audio_parts(audio_dicts))
+            if media_parts:
+                messages = _inject_media_into_messages(messages, media_parts)
 
             chat_str = JsonChatStr(json.dumps(messages))
             response = runtime.model_call(

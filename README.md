@@ -77,6 +77,49 @@ The runner picks its mode from the env. There is no flag.
 `?` = optional. See [`src/core/config.py`](src/core/config.py) for the full
 parsing rules.
 
+## Supported adapters
+
+Chat adapters:
+
+| Adapter | Provider/runtime | Additional configuration |
+|---|---|---|
+| `openai` | OpenAI chat with model-dependent image/audio input | `OPENAI_API_KEY` |
+| `local-adapter` | OpenAI-compatible text/image/audio endpoint | `BASE_URL`; media support depends on server/model |
+| `anthropic` | Anthropic text/image Messages | `ANTHROPIC_API_KEY`; audio is unsupported |
+| `cohere` | Cohere Chat with image input | `CO_API_KEY` |
+| `gemini` | Gemini/Vertex text, image, and audio | `GOOGLE_API_KEY` or application credentials |
+| `groq` | Groq text/image chat | `GROQ_API_KEY`; audio uses `openai-asr` |
+| `azure-openai` | Azure OpenAI text/image/audio chat | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`; media support depends on deployment |
+| `aixplain` | aiXplain text/image models | `AIXPLAIN_API_KEY`; audio has no model-independent schema |
+| `huggingface-chat` | Hugging Face text/image inference | `HF_TOKEN`; install `.[hf-chat]`; audio unsupported |
+| `aws-bedrock` (`bedrock`) | Amazon Bedrock text/image Converse | AWS credentials and region; install `.[aws]`; audio unsupported |
+| `sagemaker-chat` (`sagemaker`) | Amazon SageMaker text/image/audio endpoint | AWS credentials, region, and `SAGEMAKER_ENDPOINT_NAME`; media support depends on endpoint |
+
+ASR adapters:
+
+| Adapter | Provider/runtime | Additional configuration |
+|---|---|---|
+| `openai-asr` | OpenAI-compatible transcription API | `OPENAI_API_KEY` |
+| `google-stt` | Google Cloud Speech-to-Text | Application credentials |
+| `azure-stt` | Azure AI Speech | `AZURE_SPEECH_KEY` |
+| `hf-asr` | Hugging Face inference | `HF_TOKEN`; install `.[hf-asr]` |
+| `nemo-asr` | NVIDIA NIM | `NVIDIA_API_KEY` |
+| `ibm-stt` | IBM Watson Speech to Text | `IBM_API_KEY`, `IBM_STT_URL`; install `.[ibm-stt]` |
+| `qwen-asr` | DashScope or self-hosted Qwen ASR | `BASE_URL` |
+| `cohere-asr` | Cohere Transcribe | `COHERE_API_KEY` |
+| `deepgram-stt` | Deepgram | `DEEPGRAM_API_KEY` |
+| `speechmatics-stt` | Speechmatics | `SPEECHMATICS_API_KEY` |
+| `assemblyai-stt` | AssemblyAI | `ASSEMBLYAI_API_KEY` |
+| `elevenlabs-stt` | ElevenLabs Scribe | `ELEVENLABS_API_KEY` |
+| `gladia-stt` | Gladia | `GLADIA_API_KEY` |
+| `revai-stt` | Rev AI | `REVAI_API_KEY` |
+| `aws-transcribe` | Amazon Transcribe | AWS credentials, region, and `AWS_TRANSCRIBE_S3_BUCKET`; install `.[aws]` |
+
+`API_KEY` is accepted as the generic credential input and copied to the
+provider-specific variable where applicable. Provider-specific variables are
+useful when invoking adapters directly. Most ASR adapters accept
+`ASR_LANGUAGE`; provider URL overrides are documented in their modules.
+
 ## Output format
 
 Each result JSON has the keys `lm_eval` produces plus the runner's stamped

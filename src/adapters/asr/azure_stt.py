@@ -139,8 +139,6 @@ class AzureSTTLM(LM):
 
     def _transcribe_audio(self, wav_bytes: bytes, sample_rate: int) -> str:
         """Transcribe audio via Azure STT REST API with retry."""
-        url = f"{self.endpoint_url}?language={self.language}&format=detailed"
-
         headers = {
             "Ocp-Apim-Subscription-Key": self.api_key or "",
             "Content-Type": f"audio/wav; codecs=audio/pcm; samplerate={sample_rate}",
@@ -150,8 +148,9 @@ class AzureSTTLM(LM):
         for attempt in range(self.max_retries):
             try:
                 resp = http_requests.post(
-                    url,
+                    self.endpoint_url,
                     headers=headers,
+                    params={"language": self.language, "format": "detailed"},
                     data=wav_bytes,
                     timeout=120,
                 )

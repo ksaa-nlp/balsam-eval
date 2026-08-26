@@ -67,8 +67,8 @@ class OpenAIWhisperLM(LM):
 
         api_key = (
             api_key
-            or os.environ.get("API_KEY")
             or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("API_KEY")
         )
         if not api_key:
             raise ValueError(

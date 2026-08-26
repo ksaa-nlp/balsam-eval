@@ -1,11 +1,10 @@
-"""Anthropic API adapter for LM Evaluation Harness with audio support.
+"""Anthropic API adapter for LM Evaluation Harness with image support.
 
-Extends lm-eval's built-in AnthropicChat to add multimodal audio support.
+Extends lm-eval's built-in AnthropicChat to add native image support.
 For text-only requests, delegates entirely to the parent implementation.
-For audio requests, injects Anthropic-format audio content blocks and uses
-the inherited model_call() / parse_generations() HTTP machinery.
+Anthropic's hosted Messages API does not support audio input.
 
-Dependencies: lm-eval[api], numpy, soundfile
+Dependencies: lm-eval[api], pillow
 """
 
 import base64
@@ -16,9 +15,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Protocol, Tuple, cast
 
-import numpy as np
 import requests as http_requests
-import soundfile as sf  # type: ignore[import-untyped]
 from tqdm import tqdm
 
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
@@ -39,36 +36,25 @@ class _AnthropicRuntime(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Audio helpers (self-contained, no external src.* imports)
+# Multimodal helpers (self-contained, no external src.* imports)
 # ---------------------------------------------------------------------------
 
 
-def _audio_dicts_to_base64_wav(audio_dicts: List[dict]) -> List[str]:
-    """Convert lm-eval audio dicts to base64-encoded WAV strings."""
-    results = []
-    for audio in audio_dicts:
-        array = np.array(audio["array"])
-        if array.dtype != np.float32:
-            array = array.astype(np.float32)
+def _build_anthropic_image_parts(images: List[Any]) -> List[dict]:
+    """Encode PIL-compatible images as Anthropic image content blocks."""
+    parts = []
+    for image in images:
         buf = io.BytesIO()
-        sf.write(buf, array, audio["sampling_rate"], format="WAV", subtype="PCM_16")
-        results.append(base64.b64encode(buf.getvalue()).decode("ascii"))
-    return results
-
-
-def _build_anthropic_audio_parts(audio_dicts: List[dict]) -> List[dict]:
-    """Build Anthropic-format audio content blocks."""
-    return [
-        {
-            "type": "audio",
+        image.save(buf, format="PNG")
+        parts.append({
+            "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": "audio/wav",
-                "data": b64,
+                "media_type": "image/png",
+                "data": base64.b64encode(buf.getvalue()).decode("ascii"),
             },
-        }
-        for b64 in _audio_dicts_to_base64_wav(audio_dicts)
-    ]
+        })
+    return parts
 
 
 def _parse_chat_prompt(prompt_obj: Any) -> List[Dict[str, Any]]:
@@ -95,21 +81,31 @@ def _has_audio(requests: list) -> bool:
     return any(
         len(req.args) > 2
         and isinstance(req.args[2], dict)
-        and "audio" in req.args[2]
+        and bool(req.args[2].get("audio"))
         for req in requests
         if hasattr(req, "args")
     )
 
 
-def _inject_audio_into_anthropic_messages(
-    messages: List[dict], audio_parts: List[dict]
-) -> List[dict]:
-    """Inject audio content blocks into the last user message (Anthropic format).
+def _has_visual(requests: list) -> bool:
+    """Check if any request contains image data in auxiliary_args."""
+    return any(
+        len(req.args) > 2
+        and isinstance(req.args[2], dict)
+        and bool(req.args[2].get("visual"))
+        for req in requests
+        if hasattr(req, "args")
+    )
 
-    Anthropic's Messages API expects content as a list of typed blocks:
-      [{"type": "audio", "source": {...}}, {"type": "text", "text": "..."}]
-    """
+
+def _inject_images_into_anthropic_messages(
+    messages: List[dict], image_parts: List[dict]
+) -> List[dict]:
+    """Inject native image blocks into the last user message."""
     messages = copy.deepcopy(messages)
+    if not messages:
+        messages.append({"role": "user", "content": []})
+
     last_user = None
     for msg in reversed(messages):
         if msg.get("role") == "user":
@@ -124,7 +120,7 @@ def _inject_audio_into_anthropic_messages(
     elif not isinstance(content, list):
         content = [{"type": "text", "text": str(content)}]
 
-    last_user["content"] = audio_parts + content
+    last_user["content"] = image_parts + content
     last_user.pop("type", None)
     return messages
 
@@ -181,7 +177,7 @@ def _messages_to_anthropic_payload(
 @register_model("anthropic")
 # @register_model("anthropic-chat-completions")
 class AnthropicAudioLM(AnthropicChat):
-    """Anthropic Messages API adapter with audio support.
+    """Anthropic Messages API adapter with native image support.
 
     Inherits all text-only functionality from lm-eval's AnthropicChat
     (payload creation, header/auth, response parsing, tenacity retry).
@@ -221,7 +217,12 @@ class AnthropicAudioLM(AnthropicChat):
         if not requests:
             return []
 
-        if not _has_audio(requests):
+        if _has_audio(requests):
+            raise NotImplementedError(
+                "Anthropic Messages API does not support audio input"
+            )
+
+        if not _has_visual(requests):
             result: List[str] = super().generate_until(
                 requests,
                 disable_tqdm=disable_tqdm,  # pyright: ignore[reportCallIssue]
@@ -238,14 +239,14 @@ class AnthropicAudioLM(AnthropicChat):
             prompt_obj = req.args[0]
             gen_kwargs = req.args[1] if len(req.args) > 1 else {}
             aux = req.args[2] if len(req.args) > 2 else {}
-            audio_dicts = aux.get("audio") if isinstance(aux, dict) else None
+            images = aux.get("visual") if isinstance(aux, dict) else None
 
             messages = _parse_chat_prompt(prompt_obj)
 
-            if audio_dicts:
-                audio_parts = _build_anthropic_audio_parts(audio_dicts)
-                messages = _inject_audio_into_anthropic_messages(
-                    messages, audio_parts
+            if images:
+                image_parts = _build_anthropic_image_parts(images)
+                messages = _inject_images_into_anthropic_messages(
+                    messages, image_parts
                 )
 
             gen_kwargs = copy.deepcopy(gen_kwargs)

@@ -181,7 +181,7 @@ def test_nemo_transcription_includes_language():
     assert create.call_args.kwargs["language"] == "ar"
 
 
-def test_qwen_transcription_sends_audio_data_uri_and_language_prompt():
+def test_qwen_transcription_sends_raw_audio_base64_and_language_prompt():
     model = object.__new__(qwen_asr.QwenASRLM)
     model.model_name = "qwen"
     model.language = "Arabic"
@@ -193,7 +193,7 @@ def test_qwen_transcription_sends_audio_data_uri_and_language_prompt():
     model.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
     assert model._transcribe_audio(audio()) == "words"
     content = create.call_args.kwargs["messages"][0]["content"]
-    assert content[0]["input_audio"]["data"].startswith("data:audio/wav;base64,")
+    assert not content[0]["input_audio"]["data"].startswith("data:")
     assert content[1] == {"type": "text", "text": "Transcribe this audio in Arabic."}
 
 
@@ -206,7 +206,7 @@ def test_azure_constructor_and_transcription_payload(monkeypatch):
     monkeypatch.setattr(azure_stt.http_requests, "post", post)
     assert model._transcribe_audio(b"wav", 8000) == "hello"
     call = post.call_args
-    assert "language=ar-SA" in call.args[0]
+    assert call.kwargs["params"] == {"language": "ar-SA", "format": "detailed"}
     assert call.kwargs["headers"]["Ocp-Apim-Subscription-Key"] == "key"
     assert "samplerate=8000" in call.kwargs["headers"]["Content-Type"]
 
@@ -254,7 +254,7 @@ def test_huggingface_constructor_and_result_shapes(monkeypatch):
     )
     client.automatic_speech_recognition.return_value = {"text": "  text  "}
     assert model._transcribe_audio(b"wav") == "text"
-    factory.assert_called_once_with(model="hf/model", token="token", api_url="https://endpoint")
+    factory.assert_called_once_with(model="https://endpoint", token="token")
     client.automatic_speech_recognition.assert_called_once_with(
         b"wav", extra_body={"language": "ar"}
     )

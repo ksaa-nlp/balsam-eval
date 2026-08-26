@@ -43,9 +43,7 @@ business cases, integrations, and regressions.
 ## Environment variables explained
 
 - `BASE_URL`: the base URL refernces your API, without any path components. For example, if you want to evaluate ChatGPT, the base URL would be `https://api.openai.com`. Not required for `aixplain` adapter.
-- `ADAPTER`: There're 4 types of adapters supported via this service (LM Harness supports more):
-  - `openai-chat-completions`: any OpenAI compatible API
-  - `local-chat-completions`: local inference server with OpenAI compatible API
-  - `gguf`: for locally hosted models via [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) (supports `logprobs` for `multiple_choice` tasks)
-  - `aixplain`: this is a new adapter added in this service, compatible with [aiXplain API](https://aixplain.com/) (supports `logprobs` for `multiple_choice` tasks)
+- `ADAPTER`: select an lm-eval adapter. Project adapters are listed in the
+  [README](../README.md#supported-adapters); lm-eval provides additional
+  built-in adapters.
 - `MODEL`: The model name provided with `model_args` alongside the `BASE_URL` of the model, in the case of OpenAI, this may be `gpt-4o`

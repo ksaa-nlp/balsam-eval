@@ -9,6 +9,8 @@ import ssl
 from dotenv import load_dotenv
 from google.cloud import storage  # type: ignore[attr-defined]
 
+from src.adapter_config import API_KEY_ENV_BY_ADAPTER
+
 load_dotenv()
 
 
@@ -274,16 +276,6 @@ def set_api_key_for_adapter(adapter: str, api_key: str | None) -> None:
     if not api_key:
         return
 
-    env_var_map = {
-        "openai-chat-completions": "OPENAI_API_KEY",
-        "local-chat-completions": "OPENAI_API_KEY",
-        "anthropic-chat-completions": "ANTHROPIC_API_KEY",
-        "gemini": "GOOGLE_API_KEY",
-        "groq": "GROQ_API_KEY",
-        "openai-asr": "OPENAI_API_KEY",
-        "azure-stt": "AZURE_SPEECH_KEY",
-    }
-
-    env_var = env_var_map.get(adapter)
+    env_var = API_KEY_ENV_BY_ADAPTER.get(adapter)
     if env_var:
         os.environ[env_var] = api_key

@@ -76,8 +76,8 @@ class HuggingFaceASRLM(LM):
 
         token = (
             api_key
-            or os.environ.get("API_KEY")
             or os.environ.get("HF_TOKEN")
+            or os.environ.get("API_KEY")
         )
         if not token:
             raise ValueError(
@@ -85,14 +85,11 @@ class HuggingFaceASRLM(LM):
                 "environment variable or pass api_key parameter."
             )
 
+        endpoint = base_url or os.environ.get("BASE_URL")
         client_kwargs: dict[str, Any] = {
-            "model": self.model_name,
+            "model": endpoint.rstrip("/") if endpoint else self.model_name,
             "token": token,
         }
-        if base_url or os.environ.get("BASE_URL"):
-            client_kwargs["api_url"] = (
-                base_url or os.environ.get("BASE_URL", "")
-            ).rstrip("/")
 
         self.client = InferenceClient(**client_kwargs)
 

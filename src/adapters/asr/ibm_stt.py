@@ -77,8 +77,8 @@ class IBMSTTLM(LM):
 
         resolved_api_key = (
             api_key
-            or os.environ.get("API_KEY")
             or os.environ.get("IBM_API_KEY")
+            or os.environ.get("API_KEY")
         )
         if not resolved_api_key:
             raise ValueError(

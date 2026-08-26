@@ -4,21 +4,21 @@ This adapter uses the official Groq SDK to interact with Groq Cloud API by:
 1. Using the native Groq Python client
 2. Cleaning messages to ensure API compatibility
 3. Handling Groq-specific limitations (no loglikelihood support)
-4. Supporting audio via base64-encoded content parts for audio-capable models
+4. Supporting images through OpenAI-compatible image_url content parts
 """
 
 import base64
 import io
+import json
 import logging
 import os
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
 
-import numpy as np
-import soundfile as sf  # type: ignore[import-untyped]
 from groq import Groq
 from lm_eval.api.model import LM  # type: ignore[import-untyped]
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
+from PIL import Image
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -30,8 +30,7 @@ class GroqLM(LM):
     Groq-specific adapter using the official Groq SDK.
 
     This adapter uses the native Groq client and ensures message compatibility
-    with Groq Cloud API. Audio is supported by sending base64-encoded audio
-    as content parts to audio-capable models.
+    with Groq Cloud API. Vision models accept PIL images as image_url parts.
     """
 
     MULTIMODAL = True
@@ -59,7 +58,7 @@ class GroqLM(LM):
         self._tokenizer_name = self.model_name
 
         # Get API key from parameters or environment
-        api_key = api_key or os.environ.get("API_KEY") or os.environ.get("GROQ_API_KEY")
+        api_key = api_key or os.environ.get("GROQ_API_KEY") or os.environ.get("API_KEY")
         if not api_key:
             raise ValueError(
                 "No API key provided. Set GROQ_API_KEY or API_KEY environment variable "
@@ -252,25 +251,56 @@ class GroqLM(LM):
         return str(instance), [], None
 
     # ---------------------------------------------------------------------
-    # Audio utilities
+    # Multimodal utilities
     # ---------------------------------------------------------------------
 
     @staticmethod
-    def _audio_dicts_to_content_parts(audio_dicts: List[dict]) -> list:
-        """Convert lm_eval audio dicts to OpenAI-compatible input_audio content parts."""
-        parts = []
-        for audio in audio_dicts:
-            array = np.array(audio["array"])
-            if array.dtype != np.float32:
-                array = array.astype(np.float32)
-            buf = io.BytesIO()
-            sf.write(buf, array, audio["sampling_rate"], format="WAV", subtype="PCM_16")
-            encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-            parts.append({
-                "type": "input_audio",
-                "input_audio": {"data": encoded, "format": "wav"},
-            })
-        return parts
+    def _parse_chat_prompt(prompt: Any) -> List[Dict[str, Any]]:
+        value = prompt.prompt if hasattr(prompt, "prompt") else prompt
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            if isinstance(parsed, dict) and isinstance(parsed.get("messages"), list):
+                parsed = parsed["messages"]
+            if isinstance(parsed, list):
+                return [item for item in parsed if isinstance(item, dict)]
+            return [{"role": "user", "content": value}]
+        return [{"role": "user", "content": str(value)}]
+
+    @staticmethod
+    def _image_to_content_part(image: Image.Image) -> Dict[str, Any]:
+        """Encode a PIL image as an OpenAI-compatible data URL block."""
+        if not isinstance(image, Image.Image):
+            raise TypeError("Groq visual inputs must be PIL.Image.Image instances")
+        if image.mode not in {"1", "L", "LA", "P", "RGB", "RGBA"}:
+            image = image.convert("RGB")
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+        return {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{encoded}"},
+        }
+
+    def _inject_visuals(
+        self, messages: List[Dict[str, Any]], visuals: Sequence[Image.Image]
+    ) -> List[Dict[str, Any]]:
+        cleaned: List[Dict[str, Any]] = [self._clean_message(message) for message in messages]
+        target: Optional[Dict[str, Any]] = next(
+            (message for message in reversed(cleaned) if message["role"] == "user"),
+            None,
+        )
+        if target is None:
+            target = {"role": "user", "content": ""}
+            cleaned.append(target)
+        text = target.get("content", "")
+        target["content"] = [
+            {"type": "text", "text": str(text)},
+            *(self._image_to_content_part(image) for image in visuals),
+        ]
+        return cleaned
 
     # ---------------------------------------------------------------------
     # API request with retry logic
@@ -278,9 +308,10 @@ class GroqLM(LM):
 
     def _make_request_with_retry(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         stop: Optional[List[str]] = None,
         max_tokens: Optional[int] = None,
+        generation_settings: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Make a request to Groq API with retry logic.
@@ -300,12 +331,18 @@ class GroqLM(LM):
             try:
                 logger.debug("API call attempt %d/%d", attempt + 1, self.max_retries)
 
+                settings = generation_settings or {}
                 response = self.client.chat.completions.create(
                     model=self.model_name,
                     messages=messages,  # type: ignore[arg-type]
-                    temperature=self.temperature,
-                    max_tokens=max_tokens or self.max_tokens,
+                    temperature=settings.get("temperature", self.temperature),
+                    max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                     stop=stop if stop else None,
+                    **{
+                        key: settings[key]
+                        for key in ("top_p", "frequency_penalty", "presence_penalty", "seed")
+                        if key in settings
+                    },
                 )
 
                 response_text = response.choices[0].message.content or ""
@@ -364,24 +401,46 @@ class GroqLM(LM):
 
         for instance in tqdm(requests, desc=f"Generating {self.model_name}", unit="req"):
             prompt, stop_seqs, audio_dicts = self._extract_instance_data(instance)
+            args: Sequence[Any] = instance.args if hasattr(instance, "args") else ()
+            gen_kwargs = args[1] if len(args) > 1 and isinstance(args[1], dict) else {}
+            auxiliary = args[2] if len(args) > 2 and isinstance(args[2], dict) else {}
+            visuals = auxiliary.get("visual")
+            if visuals is not None and not isinstance(visuals, (list, tuple)):
+                visuals = [visuals]
 
-            if not prompt and not audio_dicts:
+            if audio_dicts is not None:
+                raise NotImplementedError(
+                    "Groq Chat API does not support audio input; use the openai-asr "
+                    "adapter configured with Groq's transcription endpoint"
+                )
+
+            if not prompt and not visuals:
                 logger.warning("Empty prompt encountered")
                 results.append("")
                 continue
 
-            if audio_dicts:
-                content = self._audio_dicts_to_content_parts(audio_dicts)
-                if prompt:
-                    content.append({"type": "text", "text": prompt})
-                messages: List[Dict[str, Any]] = [{"role": "user", "content": content}]
+            parsed_messages = self._parse_chat_prompt(prompt)
+            if visuals:
+                messages = self._inject_visuals(parsed_messages, visuals)
             else:
-                messages = [self._clean_message({"role": "user", "content": prompt})]
+                messages = [self._clean_message(message) for message in parsed_messages]
 
-            response = self._make_request_with_retry(
-                messages=messages,
-                stop=stop_seqs if stop_seqs else None
-            )
+            max_tokens = gen_kwargs.get("max_tokens", gen_kwargs.get("max_gen_toks"))
+            settings = {
+                key: gen_kwargs[key]
+                for key in ("temperature", "top_p", "frequency_penalty", "presence_penalty", "seed")
+                if key in gen_kwargs
+            }
+
+            request_kwargs: Dict[str, Any] = {
+                "messages": messages,
+                "stop": stop_seqs if stop_seqs else None,
+            }
+            if max_tokens is not None:
+                request_kwargs["max_tokens"] = max_tokens
+            if settings:
+                request_kwargs["generation_settings"] = settings
+            response = self._make_request_with_retry(**request_kwargs)
 
             results.append(response)
 

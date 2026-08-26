@@ -18,6 +18,7 @@ from lm_eval.api.registry import get_model
 
 import src.adapters  # noqa: F401  pylint: disable=unused-import  # registers adapters
 import src.metrics  # noqa: F401  pylint: disable=unused-import  # registers custom metrics
+from src.adapter_config import API_KEY_ENV_BY_ADAPTER, ASR_ADAPTERS
 from src.adapters.utils import get_max_tokens_config
 from src.processors.result_processing import ResultProcessor
 
@@ -75,22 +76,12 @@ def _lm_eval_compatibility_patches():
         requests.post = original_post  # type: ignore[assignment]
 
 
-_ASR_ADAPTERS = {"openai-asr", "google-stt", "azure-stt"}
-
-
 def _set_api_key_env(adapter: str, api_key: Optional[str]) -> None:
     if not api_key:
         return
-    if adapter in {"openai-chat-completions", "local-chat-completions", "openai", "openai-asr"}:
-        os.environ["OPENAI_API_KEY"] = api_key
-    elif adapter in {"anthropic-chat-completions", "anthropic"}:
-        os.environ["ANTHROPIC_API_KEY"] = api_key
-    elif adapter == "gemini":
-        os.environ["GOOGLE_API_KEY"] = api_key
-    elif adapter == "cohere":
-        os.environ["CO_API_KEY"] = api_key
-    elif adapter == "azure-stt":
-        os.environ["AZURE_SPEECH_KEY"] = api_key
+    env_var = API_KEY_ENV_BY_ADAPTER.get(adapter)
+    if env_var:
+        os.environ[env_var] = api_key
 
 
 class SingleFileEvaluationJob:
@@ -173,7 +164,7 @@ class SingleFileEvaluationJob:
 
     def _run_lm_eval(self) -> Dict[str, Any]:
         temp_dir = Path(".temp").resolve()
-        use_chat_template = self.adapter not in _ASR_ADAPTERS
+        use_chat_template = self.adapter not in ASR_ADAPTERS
         model_batch_size = getattr(self.model, "batch_size", None)
         effective_batch_size = (
             model_batch_size

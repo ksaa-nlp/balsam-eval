@@ -1,12 +1,7 @@
-"""Cohere API adapter for LM Evaluation Harness with audio support.
+"""Cohere v2 Chat API adapter with image support for LM Evaluation Harness.
 
 Extends lm-eval's built-in LocalChatCompletion (OpenAI-compatible chat format)
-to work with Cohere's v2 Chat API. Adds multimodal audio support by injecting
-base64-encoded audio content parts into messages.
-
-For text-only requests, delegates entirely to the parent implementation.
-For audio requests, processes one at a time using inherited model_call()
-and parse_generations() machinery.
+to work with Cohere's v2 Chat API.
 
 Dependencies: lm-eval[api], numpy, soundfile
 """
@@ -22,10 +17,7 @@ from typing import Any, Dict, List, Optional, Protocol, Tuple, cast
 
 import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
-from tqdm import tqdm
-
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
-from lm_eval.models.api_models import JsonChatStr  # type: ignore[import-untyped]
 from lm_eval.models.openai_completions import (  # type: ignore[import-untyped]
     LocalChatCompletion,
 )
@@ -135,12 +127,12 @@ def _inject_audio_into_messages(
 
 @register_model("cohere")
 class CohereAudioLM(LocalChatCompletion):
-    """Cohere v2 chat adapter with audio support.
+    """Cohere v2 chat adapter with native image input support.
 
     Inherits all text-only functionality from lm-eval's LocalChatCompletion
-    (OpenAI-compatible payload creation, response parsing, tenacity retry,
-    async batching). Overrides auth (Bearer token with CO_API_KEY) and
-    generate_until() when audio is present.
+    (tenacity retry and async batching), while translating payload and response
+    fields to Cohere's native wire format. Audio transcription uses the
+    separate ``cohere-asr`` adapter.
     """
 
     MULTIMODAL = True
@@ -185,6 +177,54 @@ class CohereAudioLM(LocalChatCompletion):
     def header(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}"}
 
+    def _create_payload(
+        self,
+        messages: List[Dict[str, Any]],
+        generate: bool = False,
+        gen_kwargs: Optional[dict] = None,
+        seed: int = 1234,
+        eos: Optional[str] = None,
+        **_kwargs: Any,
+    ) -> dict:
+        """Translate lm-eval generation options to Cohere v2 fields."""
+        if not generate:
+            raise NotImplementedError("Cohere Chat API does not provide loglikelihood")
+        options = copy.deepcopy(gen_kwargs) if gen_kwargs else {}
+        options.pop("do_sample", None)
+        default_max_tokens = getattr(self, "_max_gen_toks", 4096)
+        max_tokens = options.pop(
+            "max_tokens", options.pop("max_gen_toks", default_max_tokens)
+        )
+        stop = options.pop("until", options.pop("stop", None))
+        if isinstance(stop, str):
+            stop = [stop]
+        if eos:
+            stop = [*(stop or []), eos]
+        if "top_p" in options:
+            options["p"] = options.pop("top_p")
+        return {
+            "model": cast(_LocalChatRuntime, self).model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": options.pop("temperature", 0),
+            **({"stop_sequences": [item for item in stop if item]} if stop else {}),
+            **options,
+        }
+
+    @staticmethod
+    def parse_generations(outputs: Any, **_kwargs: Any) -> List[str]:
+        """Extract text blocks from Cohere v2 chat responses."""
+        responses = outputs if isinstance(outputs, list) else [outputs]
+        results = []
+        for response in responses:
+            content = response.get("message", {}).get("content", [])
+            results.append("".join(
+                str(block.get("text", ""))
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            ))
+        return results
+
     # ------------------------------------------------------------------ #
     # Generation
     # ------------------------------------------------------------------ #
@@ -201,42 +241,9 @@ class CohereAudioLM(LocalChatCompletion):
                 disable_tqdm=disable_tqdm,  # pyright: ignore[reportCallIssue]
             )
             return result
-
-        runtime = cast(_LocalChatRuntime, self)
-        results: List[str] = []
-        for req in tqdm(
-            requests,
-            desc=f"Generating {runtime.model}",
-            disable=disable_tqdm,
-        ):
-            prompt_obj = req.args[0]
-            gen_kwargs = req.args[1] if len(req.args) > 1 else {}
-            aux = req.args[2] if len(req.args) > 2 else {}
-            audio_dicts = aux.get("audio") if isinstance(aux, dict) else None
-
-            messages = _parse_chat_prompt(prompt_obj)
-
-            if audio_dicts:
-                audio_parts = _build_openai_audio_parts(audio_dicts)
-                messages = _inject_audio_into_messages(messages, audio_parts)
-
-            chat_str = JsonChatStr(json.dumps(messages))
-            try:
-                response = runtime.model_call(
-                    messages=[chat_str],
-                    generate=True,
-                    gen_kwargs=copy.deepcopy(gen_kwargs),
-                )
-                parsed = runtime.parse_generations(response)
-                results.append(parsed[0] if parsed else "")
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.error("Cohere generation error: %s", e)
-                results.append("")
-
-        assert len(results) == len(requests), (
-            f"Result count mismatch: {len(results)} vs {len(requests)}"
+        raise NotImplementedError(
+            "Cohere Chat does not accept audio; use the cohere-asr adapter"
         )
-        return results
 
     # ------------------------------------------------------------------ #
     # Loglikelihood stubs

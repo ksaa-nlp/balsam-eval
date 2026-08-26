@@ -37,19 +37,6 @@ def test_openai_style_audio_helpers_emit_wav_and_payload(module):
     ]
 
 
-def test_anthropic_audio_helpers_emit_wav_source_block():
-    encoded = anthropic._audio_dicts_to_base64_wav([audio()])[0]
-    assert base64.b64decode(encoded).startswith(b"RIFF")
-    assert anthropic._build_anthropic_audio_parts([audio()]) == [{
-        "type": "audio",
-        "source": {
-            "type": "base64",
-            "media_type": "audio/wav",
-            "data": encoded,
-        },
-    }]
-
-
 @pytest.mark.parametrize("module", OPENAI_STYLE_MODULES + [anthropic])
 @pytest.mark.parametrize(
     ("prompt", "expected"),
@@ -87,7 +74,7 @@ def test_audio_injection_targets_last_user_without_mutating_input(module):
     }
 
 
-@pytest.mark.parametrize("module", OPENAI_STYLE_MODULES + [anthropic])
+@pytest.mark.parametrize("module", OPENAI_STYLE_MODULES)
 def test_audio_injection_falls_back_to_last_message_and_stringifies_content(module):
     messages = [{"role": "assistant", "content": {"answer": 1}, "type": "message"}]
     audio_part = {"type": "audio-test"}
@@ -106,7 +93,7 @@ def test_audio_injection_falls_back_to_last_message_and_stringifies_content(modu
 
 @pytest.mark.parametrize("module", OPENAI_STYLE_MODULES + [anthropic])
 def test_has_audio_requires_auxiliary_audio_key(module):
-    assert module._has_audio([request(audio_items=[])])
+    assert module._has_audio([request(audio_items=[audio()])])
     assert not module._has_audio([SimpleNamespace(args=("x", {})), object()])
 
 
@@ -137,7 +124,7 @@ def test_anthropic_payload_extracts_system_and_filters_stops():
 
 @pytest.mark.parametrize(
     ("module", "cls"),
-    [(openai, openai.OpenAIAudioLM), (local, local.LocalAudioLM), (cohere, cohere.CohereAudioLM)],
+    [(openai, openai.OpenAIAudioLM), (local, local.LocalAudioLM)],
 )
 def test_openai_style_audio_generation_builds_chat_request(module, cls, monkeypatch):
     model = object.__new__(cls)
@@ -158,55 +145,71 @@ def test_openai_style_audio_generation_builds_chat_request(module, cls, monkeypa
     assert call["gen_kwargs"] == {"temperature": 0.3}
 
 
-def test_local_and_cohere_generation_convert_client_errors_to_empty(monkeypatch):
-    for module, cls in ((local, local.LocalAudioLM), (cohere, cohere.CohereAudioLM)):
-        model = object.__new__(cls)
-        model.model = "model"
-        model.model_call = MagicMock(side_effect=RuntimeError("offline"))
-        monkeypatch.setattr(module, "_build_openai_audio_parts", lambda _: [])
-        assert model.generate_until([request(audio_items=[audio()])], disable_tqdm=True) == [""]
+def test_local_generation_converts_client_errors_to_empty(monkeypatch):
+    model = object.__new__(local.LocalAudioLM)
+    model.model = "model"
+    model.model_call = MagicMock(side_effect=RuntimeError("offline"))
+    monkeypatch.setattr(local, "_build_openai_audio_parts", lambda _: [])
+    assert model.generate_until([request(audio_items=[audio()])], disable_tqdm=True) == [""]
 
 
-def test_anthropic_audio_generation_posts_expected_payload(monkeypatch):
-    model = object.__new__(anthropic.AnthropicAudioLM)
-    model.model = "claude"
-    model.base_url = "https://example.invalid/messages"
-    model.header = {"x-api-key": "secret"}
-    model.verify_certificate = False
-    model.timeout = 4
-    model._max_gen_toks = 99
-    response = MagicMock()
-    response.json.return_value = {"content": [{"type": "text", "text": "answer"}]}
-    post = MagicMock(return_value=response)
-    monkeypatch.setattr(anthropic.http_requests, "post", post)
-    monkeypatch.setattr(anthropic, "_build_anthropic_audio_parts", lambda _: [{"type": "audio"}])
+def test_cohere_rejects_audio_and_uses_native_wire_format():
+    model = object.__new__(cohere.CohereAudioLM)
+    model.model = "command"
 
-    result = model.generate_until(
-        [request("hello", {"max_gen_toks": 8, "until": "STOP", "do_sample": False}, [audio()])],
-        disable_tqdm=True,
+    with pytest.raises(NotImplementedError, match="cohere-asr"):
+        model.generate_until([request(audio_items=[audio()])], disable_tqdm=True)
+
+    payload = model._create_payload(
+        [{"role": "user", "content": "hello"}],
+        generate=True,
+        gen_kwargs={"max_gen_toks": 8, "until": "END", "top_p": 0.7},
     )
+    assert payload == {
+        "model": "command",
+        "messages": [{"role": "user", "content": "hello"}],
+        "max_tokens": 8,
+        "temperature": 0,
+        "stop_sequences": ["END"],
+        "p": 0.7,
+    }
+    assert model.parse_generations({
+        "message": {"content": [
+            {"type": "text", "text": "first"},
+            {"type": "text", "text": " second"},
+        ]}
+    }) == ["first second"]
 
-    assert result == ["answer"]
-    payload = post.call_args.kwargs["json"]
-    assert payload["max_tokens"] == 8
-    assert payload["stop_sequences"] == ["STOP"]
-    assert payload["messages"][0]["content"][0] == {"type": "audio"}
-    response.raise_for_status.assert_called_once()
+
+def test_cohere_delegates_image_requests_to_multimodal_parent(monkeypatch):
+    parent_generate = MagicMock(return_value=["vision result"])
+    monkeypatch.setattr(cohere.LocalChatCompletion, "generate_until", parent_generate)
+    model = object.__new__(cohere.CohereAudioLM)
+    image_request = SimpleNamespace(args=("describe", {}, {"visual": [object()]}))
+
+    assert model.generate_until([image_request], disable_tqdm=True) == ["vision result"]
+    parent_generate.assert_called_once_with([image_request], disable_tqdm=True)
 
 
-def test_anthropic_audio_generation_converts_http_failure_to_empty(monkeypatch):
-    model = object.__new__(anthropic.AnthropicAudioLM)
-    model.model = "claude"
-    model.base_url = "https://example.invalid/messages"
-    model.header = {"x-api-key": "secret"}
-    model.verify_certificate = True
-    model.timeout = 4
-    model._max_gen_toks = 16
-    monkeypatch.setattr(anthropic.http_requests, "post", MagicMock(side_effect=OSError("offline")))
-    monkeypatch.setattr(anthropic, "_build_anthropic_audio_parts", lambda _: [])
-    assert model.generate_until(
-        [request("hello", audio_items=[audio()])], disable_tqdm=True
-    ) == [""]
+def test_cohere_payload_preserves_native_image_blocks():
+    model = object.__new__(cohere.CohereAudioLM)
+    model.model = "command-a-vision-07-2025"
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "describe"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        ],
+    }]
+
+    assert model._create_payload(messages, generate=True)["messages"] == messages
+
+
+def test_anthropic_audio_generation_is_rejected():
+    with pytest.raises(NotImplementedError, match="does not support audio"):
+        object.__new__(anthropic.AnthropicAudioLM).generate_until(
+            [request("hello", audio_items=[audio()])], disable_tqdm=True
+        )
 
 
 @pytest.mark.parametrize("module", OPENAI_STYLE_MODULES)
@@ -332,19 +335,13 @@ def test_groq_clean_message_handles_generic_text_blocks_and_dict_content():
     }) == {"role": "system", "content": "{'rule': 'brief'}"}
 
 
-def test_groq_generation_routes_audio_payload(monkeypatch):
+def test_groq_generation_rejects_unsupported_audio():
     model = object.__new__(groq.GroqLM)
     model.model_name = "audio-model"
-    model._audio_dicts_to_content_parts = MagicMock(return_value=[{"type": "input_audio"}])
     model._make_request_with_retry = MagicMock(return_value="transcript")
-    result = model.generate_until([request("transcribe", {"until": "END"}, [audio()])])
-    assert result == ["transcript"]
-    assert model._make_request_with_retry.call_args.kwargs == {
-        "messages": [{"role": "user", "content": [
-            {"type": "input_audio"}, {"type": "text", "text": "transcribe"}
-        ]}],
-        "stop": ["END"],
-    }
+    with pytest.raises(NotImplementedError, match="openai-asr"):
+        model.generate_until([request("transcribe", {"until": "END"}, [audio()])])
+    model._make_request_with_retry.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -358,13 +355,6 @@ def test_groq_generation_routes_audio_payload(monkeypatch):
 def test_groq_extract_instance_data_fallback_formats(instance, expected):
     model = object.__new__(groq.GroqLM)
     assert model._extract_instance_data(instance) == expected
-
-
-def test_groq_audio_conversion_emits_wav_data():
-    part = groq.GroqLM._audio_dicts_to_content_parts([audio()])[0]
-    assert part["type"] == "input_audio"
-    assert part["input_audio"]["format"] == "wav"
-    assert base64.b64decode(part["input_audio"]["data"]).startswith(b"RIFF")
 
 
 def test_groq_request_retries_empty_response_then_succeeds(monkeypatch):

@@ -7,6 +7,7 @@ with LM Evaluation Harness, using the new google.genai SDK.
 """
 
 import io
+import json
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
 from google import genai
 from google.genai import types
+from PIL import Image
 
 from lm_eval.api.model import LM  # type: ignore[import-untyped]
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
@@ -142,15 +144,99 @@ class GeminiLM(LM):
     # Helpers
     # ---------------------------------------------------------------------
 
-    def _gen_config(self, stop_seqs: Optional[List[str]] = None):
+    def _gen_config(
+        self,
+        stop_seqs: Optional[List[str]] = None,
+        gen_kwargs: Optional[Dict[str, Any]] = None,
+        system_instruction: Optional[str] = None,
+    ):
+        options = gen_kwargs or {}
         filtered = [s for s in stop_seqs if s] if stop_seqs else None
         return types.GenerateContentConfig(
-            temperature=self.temperature,
-            max_output_tokens=self.max_tokens,
-            top_p=self.top_p,
-            top_k=self.top_k,
+            temperature=options.get("temperature", self.temperature),
+            max_output_tokens=options.get(
+                "max_tokens", options.get("max_gen_toks", self.max_tokens)
+            ),
+            top_p=options.get("top_p", self.top_p),
+            top_k=options.get("top_k", self.top_k),
             stop_sequences=filtered or None,
+            system_instruction=system_instruction,
         )
+
+    @staticmethod
+    def _parse_chat_prompt(prompt: Any) -> Optional[List[Dict[str, Any]]]:
+        """Return messages when prompt is serialized chat, otherwise None."""
+        value = prompt.prompt if hasattr(prompt, "prompt") else prompt
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if isinstance(parsed, dict) and isinstance(parsed.get("messages"), list):
+            parsed = parsed["messages"]
+        if not isinstance(parsed, list):
+            return None
+        return [message for message in parsed if isinstance(message, dict)]
+
+    @staticmethod
+    def _image_to_part(image: Image.Image) -> types.Part:
+        """Encode a PIL image as a Gemini inline PNG part."""
+        if not isinstance(image, Image.Image):
+            raise TypeError("Gemini visual inputs must be PIL.Image.Image instances")
+        if image.mode not in {"1", "L", "LA", "P", "RGB", "RGBA"}:
+            image = image.convert("RGB")
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/png")
+
+    def _visuals_to_parts(self, visuals: Sequence[Image.Image]) -> List[types.Part]:
+        return [self._image_to_part(image) for image in visuals]
+
+    @staticmethod
+    def _message_text(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                str(item.get("text", "")) if isinstance(item, dict) else str(item)
+                for item in content
+            )
+        return str(content)
+
+    def _chat_contents(
+        self,
+        messages: List[Dict[str, Any]],
+        media_parts: List[types.Part],
+    ) -> Tuple[List[types.Content], Optional[str]]:
+        """Convert OpenAI-style chat roles to Gemini content roles."""
+        system_parts = []
+        contents: List[types.Content] = []
+        media_target: Optional[types.Content] = None
+        for message in messages:
+            role = str(message.get("role", "user")).lower()
+            text = self._message_text(message.get("content", ""))
+            if role == "system":
+                if text:
+                    system_parts.append(text)
+                continue
+            content = types.Content(
+                role="model" if role in {"assistant", "model"} else "user",
+                parts=[types.Part.from_text(text=text)],
+            )
+            contents.append(content)
+            if content.role == "user":
+                media_target = content
+
+        if not contents:
+            contents.append(types.Content(role="user", parts=[]))
+            media_target = contents[-1]
+        if media_parts:
+            if media_target is None:
+                media_target = types.Content(role="user", parts=[])
+                contents.append(media_target)
+            media_target.parts = media_parts + (media_target.parts or [])
+        return contents, "\n\n".join(system_parts) or None
 
     def _extract_instance_data(
         self, instance: Any
@@ -225,16 +311,32 @@ class GeminiLM(LM):
 
         for idx, instance in enumerate(requests):
             prompt, stop_seqs, audio_dicts = self._extract_instance_data(instance)
+            args: Sequence[Any] = instance.args if hasattr(instance, "args") else ()
+            gen_kwargs = args[1] if len(args) > 1 and isinstance(args[1], dict) else {}
+            auxiliary = args[2] if len(args) > 2 and isinstance(args[2], dict) else {}
+            visuals = auxiliary.get("visual")
+            if visuals is not None and not isinstance(visuals, (list, tuple)):
+                visuals = [visuals]
 
-            if not prompt and not audio_dicts:
+            if not prompt and not audio_dicts and not visuals:
                 logger.warning("Empty prompt at index %d", idx)
                 results.append("")
                 continue
 
-            # Build contents: audio parts first, then the text prompt
-            contents: Union[str, list] = prompt
+            media_parts = []
+            if visuals:
+                media_parts.extend(self._visuals_to_parts(visuals))
             if audio_dicts:
-                contents = self._audio_dicts_to_parts(audio_dicts) + [prompt]
+                media_parts.extend(self._audio_dicts_to_parts(audio_dicts))
+
+            # Preserve plain text/audio wire shape while retaining roles for JSON chat.
+            contents: Union[str, list] = prompt
+            system_instruction = None
+            messages = self._parse_chat_prompt(prompt)
+            if messages is not None:
+                contents, system_instruction = self._chat_contents(messages, media_parts)
+            elif media_parts:
+                contents = media_parts + ([prompt] if prompt else [])
 
             final_response = ""
             last_error: Optional[Exception] = None
@@ -243,7 +345,11 @@ class GeminiLM(LM):
                     response = self.client.models.generate_content(
                         model=self.model_name,
                         contents=contents,
-                        config=self._gen_config(stop_seqs),
+                        config=self._gen_config(
+                            stop_seqs,
+                            gen_kwargs=gen_kwargs,
+                            system_instruction=system_instruction,
+                        ),
                     )
                     response_text = response.text or ""
                     if response_text.strip():

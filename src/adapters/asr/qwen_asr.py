@@ -67,12 +67,13 @@ class QwenASRLM(LM):
 
         resolved_key = (
             api_key
-            or os.environ.get("API_KEY")
+            or os.environ.get("DASHSCOPE_API_KEY")
             or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("API_KEY")
         )
         if not resolved_key:
             raise ValueError(
-                "No API key provided. Set API_KEY or OPENAI_API_KEY "
+                "No API key provided. Set DASHSCOPE_API_KEY, OPENAI_API_KEY, or API_KEY "
                 "environment variable or pass api_key parameter."
             )
 
@@ -150,8 +151,6 @@ class QwenASRLM(LM):
         """Transcribe by sending audio to the Qwen ASR API endpoint."""
         last_error: Exception | None = None
         audio_b64 = self._audio_dict_to_base64_wav(audio_dict)
-        data_uri = f"data:audio/wav;base64,{audio_b64}"
-
         prompt = "Transcribe this audio."
         if self.language:
             prompt = f"Transcribe this audio in {self.language}."
@@ -162,7 +161,7 @@ class QwenASRLM(LM):
                 "content": [
                     {
                         "type": "input_audio",
-                        "input_audio": {"data": data_uri, "format": "wav"},
+                        "input_audio": {"data": audio_b64, "format": "wav"},
                     },
                     {"type": "text", "text": prompt},
                 ],

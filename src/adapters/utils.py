@@ -3,6 +3,8 @@
 import logging
 import os
 
+from src.adapter_config import ASR_ADAPTERS
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +38,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         if max_tokens <= 0:
             raise ValueError("MAX_TOKENS must be greater than zero")
         # For OpenAI reasoning models, use max_completion_tokens
-        if adapter in ("openai-chat-completions", "openai"):
+        if adapter in ("openai-chat-completions", "openai", "azure-openai"):
             return {"max_completion_tokens": max_tokens}
         return {"max_tokens": max_tokens}
 
@@ -53,6 +55,13 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
             "gpt5",
         ],
         "openai": [
+            "o1-",
+            "o3-",
+            "o4-",
+            "gpt-5",
+            "gpt5",
+        ],
+        "azure-openai": [
             "o1-",
             "o3-",
             "o4-",
@@ -85,8 +94,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
             return result
 
     # ASR adapters don't use max_tokens, return minimal config
-    asr_adapters = {"openai-asr", "google-stt", "azure-stt"}
-    if adapter in asr_adapters:
+    if adapter in ASR_ADAPTERS:
         return {"max_tokens": 4096}
 
     # Adapter-specific defaults for non-thinking models
@@ -115,7 +123,7 @@ def _get_thinking_model_config(adapter: str, model_lower: str) -> dict | None:
     Returns:
         Dict with appropriate token config, or None if not a thinking model
     """
-    if adapter in ("openai-chat-completions", "openai"):
+    if adapter in ("openai-chat-completions", "openai", "azure-openai"):
         # GPT-5.2 supports up to 128,000 output tokens
         if "gpt-5.2" in model_lower or "gpt5.2" in model_lower:
             return {"max_completion_tokens": 128000}
