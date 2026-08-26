@@ -189,16 +189,12 @@ name = "balsam-lm-evaluation"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "boto3" },
     { name = "certifi" },
     { name = "evaluate" },
     { name = "google-cloud-speech" },
     { name = "google-cloud-storage" },
     { name = "google-genai" },
     { name = "groq" },
-    { name = "huggingface-hub" },
-    { name = "ibm-cloud-sdk-core" },
-    { name = "ibm-watson" },
     { name = "jiwer" },
     { name = "librosa" },
     { name = "lm-eval", extra = ["api"] },
@@ -213,6 +209,24 @@ dependencies = [
     { name = "rouge-score" },
     { name = "soundfile" },
     { name = "tqdm" },
+]
+
+[package.optional-dependencies]
+all-adapters = [
+    { name = "boto3" },
+    { name = "huggingface-hub" },
+    { name = "ibm-cloud-sdk-core" },
+    { name = "ibm-watson" },
+]
+aws = [
+    { name = "boto3" },
+]
+huggingface = [
+    { name = "huggingface-hub" },
+]
+ibm = [
+    { name = "ibm-cloud-sdk-core" },
+    { name = "ibm-watson" },
 ]
 
 [package.dev-dependencies]
@@ -230,16 +244,20 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", specifier = "~=1.43.80" },
+    { name = "boto3", marker = "extra == 'all-adapters'", specifier = "~=1.43.80" },
+    { name = "boto3", marker = "extra == 'aws'", specifier = "~=1.43.80" },
     { name = "certifi", specifier = "~=2026.7.22" },
     { name = "evaluate", specifier = "~=0.4.6" },
     { name = "google-cloud-speech", specifier = "~=2.40.0" },
     { name = "google-cloud-storage", specifier = "~=3.13.1" },
     { name = "google-genai", specifier = "~=2.20.0" },
     { name = "groq", specifier = "~=1.7.0" },
-    { name = "huggingface-hub", specifier = "~=1.28.0" },
-    { name = "ibm-cloud-sdk-core", specifier = "~=3.26.0" },
-    { name = "ibm-watson", specifier = "~=11.2.0" },
+    { name = "huggingface-hub", marker = "extra == 'all-adapters'", specifier = "~=1.28.0" },
+    { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = "~=1.28.0" },
+    { name = "ibm-cloud-sdk-core", marker = "extra == 'all-adapters'", specifier = "~=3.26.0" },
+    { name = "ibm-cloud-sdk-core", marker = "extra == 'ibm'", specifier = "~=3.26.0" },
+    { name = "ibm-watson", marker = "extra == 'all-adapters'", specifier = "~=11.2.0" },
+    { name = "ibm-watson", marker = "extra == 'ibm'", specifier = "~=11.2.0" },
     { name = "jiwer", specifier = "~=4.0.0" },
     { name = "librosa", specifier = "~=1.0.0" },
     { name = "lm-eval", extras = ["api"], specifier = "~=0.4.12" },
@@ -255,6 +273,7 @@ requires-dist = [
     { name = "soundfile", specifier = "~=0.14.0" },
     { name = "tqdm", specifier = "~=4.70.0" },
 ]
+provides-extras = ["aws", "huggingface", "ibm", "all-adapters"]
 
 [package.metadata.requires-dev]
 dev = [

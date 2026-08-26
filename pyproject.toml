@@ -3,16 +3,12 @@ name = "balsam-lm-evaluation"
 version = "1.0.0"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "boto3~=1.43.80",
     "certifi~=2026.7.22",
     "evaluate~=0.4.6",
     "google-cloud-speech~=2.40.0",
     "google-cloud-storage~=3.13.1",
     "google-genai~=2.20.0",
     "groq~=1.7.0",
-    "huggingface-hub~=1.28.0",
-    "ibm-cloud-sdk-core~=3.26.0",
-    "ibm-watson~=11.2.0",
     "jiwer~=4.0.0",
     "librosa~=1.0.0",
     "lm-eval[api]~=0.4.12",
@@ -27,6 +23,20 @@ dependencies = [
     "rouge-score~=0.1.2",
     "soundfile~=0.14.0",
     "tqdm~=4.70.0",
+]
+
+[project.optional-dependencies]
+aws = ["boto3~=1.43.80"]
+huggingface = ["huggingface-hub~=1.28.0"]
+ibm = [
+    "ibm-cloud-sdk-core~=3.26.0",
+    "ibm-watson~=11.2.0",
+]
+all-adapters = [
+    "boto3~=1.43.80",
+    "huggingface-hub~=1.28.0",
+    "ibm-cloud-sdk-core~=3.26.0",
+    "ibm-watson~=11.2.0",
 ]
 
 [project.scripts]

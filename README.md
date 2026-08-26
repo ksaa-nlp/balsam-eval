@@ -120,6 +120,13 @@ provider-specific variable where applicable. Provider-specific variables are
 useful when invoking adapters directly. Most ASR adapters accept
 `ASR_LANGUAGE`; provider URL overrides are documented in their modules.
 
+AWS, Hugging Face, and IBM adapters require optional dependencies. Install an
+individual provider with `pip install 'balsam-lm-evaluation[aws]'`,
+`pip install 'balsam-lm-evaluation[huggingface]'`, or
+`pip install 'balsam-lm-evaluation[ibm]'`. Install every adapter dependency with
+`pip install 'balsam-lm-evaluation[all-adapters]'`. With uv, use the equivalent
+`uv sync --extra <name>` command.
+
 ## Output format
 
 Each result JSON has the keys `lm_eval` produces plus the runner's stamped
