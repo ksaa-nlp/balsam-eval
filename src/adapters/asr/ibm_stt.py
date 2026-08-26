@@ -15,7 +15,7 @@ import io
 import logging
 import os
 import time
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
@@ -157,11 +157,14 @@ class IBMSTTLM(LM):
         """Transcribe audio via IBM Watson STT with retry."""
         for attempt in range(self.max_retries):
             try:
-                response = self.client.recognize(
-                    audio=io.BytesIO(wav_bytes),
-                    content_type="audio/wav",
-                    model=self.model_name,
-                ).get_result()
+                response = cast(
+                    Dict[str, Any],
+                    self.client.recognize(
+                        audio=io.BytesIO(wav_bytes),
+                        content_type="audio/wav",
+                        model=self.model_name,
+                    ).get_result(),
+                )
 
                 transcripts = []
                 for result in response.get("results", []):
