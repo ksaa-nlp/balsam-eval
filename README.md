@@ -100,7 +100,7 @@ ASR adapters:
 | Adapter | Provider/runtime | Additional configuration |
 |---|---|---|
 | `openai-asr` | OpenAI-compatible transcription API | `OPENAI_API_KEY` |
-| `google-stt` | Google Cloud Speech-to-Text | Application credentials |
+| `google-stt` | Google Cloud Speech-to-Text | `GOOGLE_API_KEY`, optional `GOOGLE_STT_URL`; application credentials also supported |
 | `azure-stt` | Azure AI Speech | `AZURE_SPEECH_KEY` |
 | `hf-asr` | Hugging Face inference | `HF_TOKEN` |
 | `nemo-asr` | NVIDIA NIM | `NVIDIA_API_KEY` |

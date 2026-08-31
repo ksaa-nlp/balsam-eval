@@ -228,6 +228,35 @@ def test_google_constructor_and_transcription_are_fully_mocked(monkeypatch):
     assert config["model"] == "latest"
 
 
+def test_google_constructor_supports_api_key_and_custom_url(monkeypatch):
+    speech = MagicMock()
+    monkeypatch.setattr(google_stt, "speech", speech)
+
+    google_stt.GoogleSTTLM(
+        api_key="key",
+        base_url="https://speech.example.com/",
+    )
+
+    speech.SpeechClient.assert_called_once_with(client_options={
+        "api_key": "key",
+        "api_endpoint": "speech.example.com",
+    })
+
+
+def test_google_constructor_reads_api_key_and_url_from_env(monkeypatch):
+    speech = MagicMock()
+    monkeypatch.setattr(google_stt, "speech", speech)
+    monkeypatch.setenv("GOOGLE_API_KEY", "env-key")
+    monkeypatch.setenv("GOOGLE_STT_URL", "speech.example.com:443")
+
+    google_stt.GoogleSTTLM()
+
+    speech.SpeechClient.assert_called_once_with(client_options={
+        "api_key": "env-key",
+        "api_endpoint": "speech.example.com:443",
+    })
+
+
 def test_google_transcription_sleeps_after_retryable_sdk_error(monkeypatch):
     speech = MagicMock()
     speech.RecognitionConfig.AudioEncoding.LINEAR16 = "linear16"

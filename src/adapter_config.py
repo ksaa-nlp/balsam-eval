@@ -31,6 +31,7 @@ API_KEY_ENV_BY_ADAPTER = {
     "elevenlabs-stt": "ELEVENLABS_API_KEY",
     "gemini": "GOOGLE_API_KEY",
     "gladia-stt": "GLADIA_API_KEY",
+    "google-stt": "GOOGLE_API_KEY",
     "groq": "GROQ_API_KEY",
     "hf-asr": "HF_TOKEN",
     "huggingface-chat": "HF_TOKEN",

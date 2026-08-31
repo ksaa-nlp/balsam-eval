@@ -32,4 +32,4 @@ def test_adapter_is_registered(adapter):
 def test_api_key_map_covers_key_based_custom_adapters():
     keyless_adapters = {"aws-bedrock", "bedrock", "sagemaker", "sagemaker-chat"}
     assert CHAT_ADAPTERS - keyless_adapters <= API_KEY_ENV_BY_ADAPTER.keys()
-    assert ASR_ADAPTERS - {"aws-transcribe", "google-stt"} <= API_KEY_ENV_BY_ADAPTER.keys()
+    assert ASR_ADAPTERS - {"aws-transcribe"} <= API_KEY_ENV_BY_ADAPTER.keys()

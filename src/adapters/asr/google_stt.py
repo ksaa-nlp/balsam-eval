@@ -1,8 +1,8 @@
 """Google Cloud Speech-to-Text adapter for LM Evaluation Harness.
 
 Uses the Google Cloud Speech-to-Text API (v1) for ASR evaluation.
-Authenticates via GOOGLE_APPLICATION_CREDENTIALS (service account key)
-or Application Default Credentials (gcloud auth).
+Authenticates via an API key, GOOGLE_APPLICATION_CREDENTIALS (service account
+key), or Application Default Credentials (gcloud auth).
 
 Dependencies: google-cloud-speech, numpy, soundfile
 """
@@ -12,6 +12,7 @@ import logging
 import os
 import time
 from typing import Any, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
@@ -33,6 +34,7 @@ class GoogleSTTLM(LM):
     """Google Cloud Speech-to-Text adapter.
 
     Authenticates via:
+    - api_key argument or GOOGLE_API_KEY env var
     - GOOGLE_APPLICATION_CREDENTIALS env var (service account JSON path)
     - Application Default Credentials (gcloud auth application-default login)
     """
@@ -46,8 +48,8 @@ class GoogleSTTLM(LM):
         model: Optional[str] = None,
         model_name: Optional[str] = None,
         language: Optional[str] = None,
-        api_key: Optional[str] = None,  # pylint: disable=unused-argument
-        base_url: Optional[str] = None,  # pylint: disable=unused-argument
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         retry_timeout: float = 30.0,
         max_retries: int = 3,
         **_kwargs,
@@ -76,7 +78,23 @@ class GoogleSTTLM(LM):
         self.max_retries = max_retries
         self._tokenizer_name = self.model_name
 
-        self.client = speech.SpeechClient()
+        api_key = api_key or os.environ.get("GOOGLE_API_KEY")
+        base_url = base_url or os.environ.get("GOOGLE_STT_URL")
+        client_options = {}
+        if api_key:
+            client_options["api_key"] = api_key
+        if base_url:
+            parsed_url = urlparse(base_url)
+            client_options["api_endpoint"] = (
+                parsed_url.netloc if "://" in base_url else base_url.rstrip("/")
+            )
+
+        client_factory: Any = speech.SpeechClient
+        self.client = (
+            client_factory(client_options=client_options)
+            if client_options
+            else client_factory()
+        )
 
         logger.info(
             "Initialized GoogleSTTLM with model '%s' (language=%s)",
