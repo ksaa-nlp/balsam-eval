@@ -21,7 +21,7 @@ class RevAISTTLM(HTTPASRLM):
             raise ValueError("No API key provided. Set REVAI_API_KEY or API_KEY.")
         super().__init__(
             model_name=model or model_name or os.environ.get("MODEL", "machine"),
-            api_key=key, language=language or os.environ.get("ASR_LANGUAGE", "en"),
+            api_key=key, language=language or os.environ.get("ASR_LANGUAGE", "ar"),
             base_url=base_url or os.environ.get(
                 "REVAI_STT_URL", "https://api.rev.ai/speechtotext/v1"
             ),

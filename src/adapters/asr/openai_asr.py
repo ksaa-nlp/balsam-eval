@@ -55,7 +55,7 @@ class OpenAIWhisperLM(LM):
             model or model_name
             or os.environ.get("MODEL", "whisper-1")
         )
-        self.language = language or os.environ.get("ASR_LANGUAGE")
+        self.language = language or os.environ.get("ASR_LANGUAGE", "ar")
         self.temperature = temperature
         if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
             raise ValueError("max_retries must be a positive integer")

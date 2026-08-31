@@ -21,7 +21,7 @@ class ElevenLabsSTTLM(HTTPASRLM):
         super().__init__(
             model_name=model or model_name or os.environ.get("MODEL", "scribe_v2"),
             api_key=key,
-            language=language or os.environ.get("ASR_LANGUAGE"),
+            language=language or os.environ.get("ASR_LANGUAGE", "ar"),
             base_url=base_url or os.environ.get(
                 "ELEVENLABS_STT_URL",
                 "https://api.elevenlabs.io/v1/speech-to-text",

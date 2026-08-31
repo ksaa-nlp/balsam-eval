@@ -102,49 +102,49 @@ def test_provider_api_key_required(cls, env_name, monkeypatch):
             cohere_asr.CohereASRLM,
             "COHERE_ASR_URL",
             "cohere-transcribe-03-2026",
-            "en",
+            "ar",
             "https://api.cohere.com/v2/audio/transcriptions",
         ),
         (
             deepgram_stt.DeepgramSTTLM,
             "DEEPGRAM_STT_URL",
             "nova-3",
-            "en",
+            "ar",
             "https://api.deepgram.com/v1/listen",
         ),
         (
             speechmatics_stt.SpeechmaticsSTTLM,
             "SPEECHMATICS_STT_URL",
             "standard",
-            "en",
+            "ar",
             "https://asr.api.speechmatics.com/v2",
         ),
         (
             assemblyai_stt.AssemblyAISTTLM,
             "ASSEMBLYAI_STT_URL",
             "universal-3-5-pro",
-            None,
+            "ar",
             "https://api.assemblyai.com/v2",
         ),
         (
             elevenlabs_stt.ElevenLabsSTTLM,
             "ELEVENLABS_STT_URL",
             "scribe_v2",
-            None,
+            "ar",
             "https://api.elevenlabs.io/v1/speech-to-text",
         ),
         (
             gladia_stt.GladiaSTTLM,
             "GLADIA_STT_URL",
             "solaria-1",
-            None,
+            "ar",
             "https://api.gladia.io/v2",
         ),
         (
             revai_stt.RevAISTTLM,
             "REVAI_STT_URL",
             "machine",
-            "en",
+            "ar",
             "https://api.rev.ai/speechtotext/v1",
         ),
     ],
@@ -175,7 +175,7 @@ def test_cohere_payload_and_empty_retry(monkeypatch):
     assert first.kwargs["headers"]["Authorization"] == "Bearer key"
     assert first.kwargs["data"] == {
         "model": "cohere-transcribe-03-2026",
-        "language": "en",
+        "language": "ar",
     }
     assert first.kwargs["files"]["file"] == ("audio.wav", b"wav", "audio/wav")
     sleep.assert_called_once_with(3)
@@ -203,7 +203,7 @@ def test_deepgram_payload_and_result():
     assert call.kwargs["data"] == b"wav"
 
 
-def test_elevenlabs_payload_result_and_language_autodetection():
+def test_elevenlabs_payload_result_and_default_language():
     model = elevenlabs_stt.ElevenLabsSTTLM(
         api_key="key", model="scribe_v2", max_retries=1
     )
@@ -212,7 +212,7 @@ def test_elevenlabs_payload_result_and_language_autodetection():
     assert model._transcribe_audio(b"wav") == "words"
     call = model.session.request.call_args
     assert call.kwargs["headers"] == {"xi-api-key": "key"}
-    assert call.kwargs["data"] == {"model_id": "scribe_v2"}
+    assert call.kwargs["data"] == {"model_id": "scribe_v2", "language_code": "ar"}
 
 
 def test_assemblyai_upload_submit_poll_and_result(monkeypatch):

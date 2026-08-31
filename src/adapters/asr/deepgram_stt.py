@@ -21,7 +21,7 @@ class DeepgramSTTLM(HTTPASRLM):
         super().__init__(
             model_name=model or model_name or os.environ.get("MODEL", "nova-3"),
             api_key=key,
-            language=language or os.environ.get("ASR_LANGUAGE", "en"),
+            language=language or os.environ.get("ASR_LANGUAGE", "ar"),
             base_url=base_url or os.environ.get(
                 "DEEPGRAM_STT_URL", "https://api.deepgram.com/v1/listen"
             ),

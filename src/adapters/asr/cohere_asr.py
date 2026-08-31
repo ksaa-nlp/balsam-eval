@@ -21,7 +21,7 @@ class CohereASRLM(HTTPASRLM):
         super().__init__(
             model_name=model or model_name or os.environ.get("MODEL", "cohere-transcribe-03-2026"),
             api_key=key,
-            language=language or os.environ.get("ASR_LANGUAGE", "en"),
+            language=language or os.environ.get("ASR_LANGUAGE", "ar"),
             base_url=base_url or os.environ.get(
                 "COHERE_ASR_URL", "https://api.cohere.com/v2/audio/transcriptions"
             ),

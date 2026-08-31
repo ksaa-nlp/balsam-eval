@@ -65,7 +65,7 @@ class HuggingFaceASRLM(LM):
             model or model_name
             or os.environ.get("MODEL", "openai/whisper-large-v3")
         )
-        self.language = language or os.environ.get("ASR_LANGUAGE")
+        self.language = language or os.environ.get("ASR_LANGUAGE", "ar")
         if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
             raise ValueError("max_retries must be a positive integer")
         if not np.isfinite(retry_timeout) or retry_timeout < 0:
