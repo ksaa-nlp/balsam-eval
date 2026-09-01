@@ -59,7 +59,15 @@ def request(items=None):
 
 @pytest.mark.parametrize("cls", CLASSES)
 def test_common_contract_wav_generation_and_validation(cls):
-    model = cls(api_key="key", max_retries=1)
+    model = cls(
+        api_key="key",
+        max_retries=1,
+        num_concurrent=8,
+        eos_string="<|endoftext|>",
+        batch_size=8,
+        max_batch_size=None,
+        device=None,
+    )
     assert model._audio_dict_to_wav_bytes(audio()).startswith(b"RIFF")
     assert model.tokenizer_name == model.model_name
     assert model.max_sequence_length == 0

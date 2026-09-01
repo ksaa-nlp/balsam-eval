@@ -33,6 +33,7 @@ class HTTPASRLM(LM):
         request_timeout: float = 120.0,
         poll_interval: float = 2.0,
         poll_timeout: float = 600.0,
+        **_kwargs: Any,
     ) -> None:
         super().__init__()
         if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
