@@ -320,7 +320,7 @@ def add_results_to_db(
     payload = {
         "id": job_id,
         "taskId": task_id,
-        "results": json.dumps(result, ensure_ascii=False),
+        "results": json.dumps([result], ensure_ascii=False),
         "status": JobStatus.COMPLETED.value,
         "scores": json.dumps(final_scores, ensure_ascii=False),
         "categoryName": category_name,
