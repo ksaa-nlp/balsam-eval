@@ -372,8 +372,9 @@ def update_status(
     payload = {
         "id": job_id,
         "status": status.value,
-        "error": error_message or "",
     }
+    if error_message:
+        payload["error"] = error_message
 
     webhook_url = f"{api_host}/api/webhook/job"
     try:
