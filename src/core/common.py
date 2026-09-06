@@ -118,7 +118,11 @@ def load_audio_file(file_path):
     return multimodal_utils_dst
 
 
-def _normalise_remote_media_ref(ref_str: str, default_bucket: str) -> tuple[str, str]:
+def _normalise_remote_media_ref(
+    ref_str: str,
+    default_bucket: str,
+    object_prefix: str = "",
+) -> tuple[str, str]:
     """Return the bucket and object name for a backend media reference."""
     if ref_str.startswith("gs://"):
         parts = ref_str.removeprefix("gs://").split("/", 1)
@@ -127,7 +131,11 @@ def _normalise_remote_media_ref(ref_str: str, default_bucket: str) -> tuple[str,
         return parts[0], parts[1]
     if "file:" in ref_str:
         ref_str = ref_str.split("file:", 1)[1]
-    return default_bucket, ref_str.lstrip("/")
+    object_ref = ref_str.lstrip("/")
+    prefix = object_prefix.strip("/")
+    if prefix and not object_ref.startswith(f"{prefix}/"):
+        object_ref = f"{prefix}/{object_ref}"
+    return default_bucket, object_ref
 
 
 def copy_metrics_combined_to_temp(temp_dir: str = ".temp") -> str | None:
@@ -171,6 +179,7 @@ def _materialise_media(
     item_key: str,
     sub_dir: str,
     bucket: str | None,
+    object_prefix: str = "",
 ) -> None:
     """Best-effort: pull every media reference into ``temp_dir/<sub_dir>``.
 
@@ -220,7 +229,9 @@ def _materialise_media(
 
             if bucket:
                 try:
-                    media_bucket, object_ref = _normalise_remote_media_ref(ref_str, bucket)
+                    media_bucket, object_ref = _normalise_remote_media_ref(
+                        ref_str, bucket, object_prefix
+                    )
                 except ValueError as exc:
                     print(f"[WARN] Could not resolve media reference {ref_str!r}: {exc}")
                     new_refs.append(ref_str)
@@ -256,14 +267,24 @@ def _materialise_media(
             json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
 
 
-def copy_images_to_temp(json_file_path: str, temp_dir: str, bucket: str | None = None) -> None:
+def copy_images_to_temp(
+    json_file_path: str,
+    temp_dir: str,
+    bucket: str | None = None,
+    object_prefix: str = "",
+) -> None:
     """Resolve image references for ``json_file_path`` into ``temp_dir/images``."""
-    _materialise_media(json_file_path, temp_dir, "images", "images", bucket)
+    _materialise_media(json_file_path, temp_dir, "images", "images", bucket, object_prefix)
 
 
-def copy_audio_to_temp(json_file_path: str, temp_dir: str, bucket: str | None = None) -> None:
+def copy_audio_to_temp(
+    json_file_path: str,
+    temp_dir: str,
+    bucket: str | None = None,
+    object_prefix: str = "",
+) -> None:
     """Resolve audio references for ``json_file_path`` into ``temp_dir/audio``."""
-    _materialise_media(json_file_path, temp_dir, "audio", "audio", bucket)
+    _materialise_media(json_file_path, temp_dir, "audio", "audio", bucket, object_prefix)
 
 
 def set_api_key_for_adapter(adapter: str, api_key: str | None) -> None:

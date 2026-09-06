@@ -148,6 +148,19 @@ def _slugify_source(source: str) -> str:
     return f"{stem}-{digest}"
 
 
+def _storage_prefix_from_pool_source(source: str) -> str:
+    """Extract backend storage namespace preceding evaluation-datasets/."""
+    object_path = source
+    if source.startswith("gs://"):
+        object_path = source.removeprefix("gs://").split("/", 1)[-1]
+    object_path = object_path.lstrip("/")
+    marker = "evaluation-datasets/"
+    marker_index = object_path.find(marker)
+    if marker_index <= 0:
+        return ""
+    return object_path[:marker_index].rstrip("/")
+
+
 def _materialise_pool_file(source: str, is_remote: bool, bucket: Optional[str]) -> str:
     """Place a pool file into TEMP_DIR in the flat format LMHDataset expects.
 
@@ -207,11 +220,22 @@ def _evaluate_one_file(
     # Remote mode passes the GCS bucket so references stored as object paths
     # (e.g. ``cat-1/dataset-7/img.png``) can be pulled down on demand.
     media_bucket = config.bucket if is_remote else None
+    media_object_prefix = _storage_prefix_from_pool_source(source) if is_remote else ""
     for split in ("test", "dev"):
         split_file = os.path.join(TEMP_DIR, f"{dataset.file_name}_{split}.json")
         if os.path.exists(split_file):
-            copy_images_to_temp(split_file, TEMP_DIR, bucket=media_bucket)
-            copy_audio_to_temp(split_file, TEMP_DIR, bucket=media_bucket)
+            copy_images_to_temp(
+                split_file,
+                TEMP_DIR,
+                bucket=media_bucket,
+                object_prefix=media_object_prefix,
+            )
+            copy_audio_to_temp(
+                split_file,
+                TEMP_DIR,
+                bucket=media_bucket,
+                object_prefix=media_object_prefix,
+            )
 
     category = str(dataset.category_id or config.category_id or "")
     task_id = str(dataset.task_id or "")

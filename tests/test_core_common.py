@@ -70,6 +70,26 @@ def test_normalise_remote_media_ref(reference, expected):
     assert common._normalise_remote_media_ref(reference, "default") == expected
 
 
+@pytest.mark.parametrize(
+    ("reference", "expected_object"),
+    [
+        (
+            "file://datasets/6/v1/media/image.png",
+            "development/datasets/6/v1/media/image.png",
+        ),
+        (
+            "development/datasets/6/v1/media/image.png",
+            "development/datasets/6/v1/media/image.png",
+        ),
+    ],
+)
+def test_normalise_remote_media_ref_applies_storage_prefix(reference, expected_object):
+    assert common._normalise_remote_media_ref(reference, "default", "development") == (
+        "default",
+        expected_object,
+    )
+
+
 @pytest.mark.parametrize("reference", ["gs://", "gs://bucket", "gs:///object"])
 def test_normalise_remote_media_ref_rejects_incomplete_uri(reference):
     with pytest.raises(ValueError, match="must include a bucket and object"):
