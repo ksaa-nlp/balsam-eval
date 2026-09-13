@@ -34,6 +34,8 @@ PROVIDER_REGISTRY: Dict[str, str] = {
     "local": "local-adapter",
 }
 
+JUDGE_MAX_GEN_TOKENS = 8192
+
 
 @dataclass
 class EvaluationResult:
@@ -113,7 +115,14 @@ def call_model_adapter_with_retry(
                 request = Instance(
                     request_type="generate_until",
                     doc={},
-                    arguments=(request_prompt, {"until": [], "do_sample": False}),
+                    arguments=(
+                        request_prompt,
+                        {
+                            "until": [],
+                            "do_sample": False,
+                            "max_gen_toks": JUDGE_MAX_GEN_TOKENS,
+                        },
+                    ),
                     idx=0,
                 )
                 responses = getattr(adapter, "generate_until")([request])

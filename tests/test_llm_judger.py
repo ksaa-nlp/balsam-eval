@@ -82,7 +82,14 @@ def test_call_model_adapter_uses_lm_eval_generate_until():
         add_generation_prompt=True,
     )
     request = generate_until.call_args.args[0][0]
-    assert request.args == ("formatted prompt", {"until": [], "do_sample": False})
+    assert request.args == (
+        "formatted prompt",
+        {
+            "until": [],
+            "do_sample": False,
+            "max_gen_toks": base.JUDGE_MAX_GEN_TOKENS,
+        },
+    )
     generate_until.assert_called_once_with([request])
 
 
@@ -95,7 +102,14 @@ def test_call_model_adapter_generate_until_without_chat_template():
     base.call_model_adapter_with_retry(adapter, "prompt", max_retries=1)
 
     request = generate_until.call_args.args[0][0]
-    assert request.args == ("prompt", {"until": [], "do_sample": False})
+    assert request.args == (
+        "prompt",
+        {
+            "until": [],
+            "do_sample": False,
+            "max_gen_toks": base.JUDGE_MAX_GEN_TOKENS,
+        },
+    )
 
 
 @pytest.mark.parametrize("method", ["_call", "invoke", "__call__"])
