@@ -1,0 +1,550 @@
+"""
+Gemini API backing for LM Evaluation Harness (google.genai version).
+
+This module provides a complete implementation of the Gemini model for use
+with LM Evaluation Harness, using the new google.genai SDK.
+
+"""
+
+import io
+import json
+import logging
+import os
+import re
+import time
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
+
+import numpy as np
+import soundfile as sf  # type: ignore[import-untyped]
+from google import genai
+from google.genai import types
+from PIL import Image
+
+from lm_eval.api.model import LM  # type: ignore[import-untyped]
+from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
+
+from src.adapters.chat._retry import is_retryable_error
+
+logger = logging.getLogger(__name__)
+
+
+@register_model("gemini")
+class GeminiLM(LM):
+    """
+    Gemini model API integration for the LM Evaluation Harness
+    """
+
+    MULTIMODAL = True
+
+    @staticmethod
+    def _parse_vertex_url(url: str) -> Dict[str, str]:
+        """Extract project, location, and model from a Vertex AI endpoint URL."""
+        m = re.match(
+            r"https?://(?P<location>[\w-]+)-aiplatform\.googleapis\.com"
+            r"/(?:v[\w]+)/projects/(?P<project>[^/]+)"
+            r"/locations/[^/]+"
+            r"/publishers/[^/]+/models/(?P<model>[^/:]+)",
+            url,
+        )
+        if not m:
+            raise ValueError(
+                f"Could not parse Vertex AI URL: {url}\n"
+                "Expected format: https://<location>-aiplatform.googleapis.com"
+                "/v1/projects/<project>/locations/<location>"
+                "/publishers/google/models/<model>"
+            )
+        return m.groupdict()
+
+    def __init__(
+        self,
+        model_name: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+        top_p: float = 0.95,
+        top_k: int = 40,
+        retry_timeout: float = 30.0,
+        max_retries: int = 3,
+        **_kwargs,
+    ):
+        super().__init__()
+
+        self.use_vertexai = False
+        project = None
+        location = None
+
+        if base_url and "aiplatform.googleapis.com" in base_url:
+            parsed = self._parse_vertex_url(base_url)
+            self.use_vertexai = True
+            project = parsed["project"]
+            location = parsed["location"]
+            model_name = parsed["model"]
+
+        if model_name is None:
+            model_name = os.environ.get("MODEL", "gemini-1.5-pro")
+
+        if not self.use_vertexai and not model_name.startswith("models/"):
+            model_name = f"models/{model_name}"
+
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.top_p = top_p
+        self.top_k = top_k
+        self.retry_timeout = retry_timeout
+        self.max_retries = max_retries
+        self._tokenizer_name = model_name
+
+        if self.use_vertexai:
+            self.client = genai.Client(
+                vertexai=True,
+                project=project,
+                location=location,
+                http_options={"timeout": 120_000},
+            )
+            logger.info(
+                "Initialized GeminiLM (Vertex AI) with model %s, "
+                "project=%s, location=%s",
+                self.model_name,
+                project,
+                location,
+            )
+        else:
+            if api_key is None:
+                api_key = os.environ.get("GOOGLE_API_KEY")
+            if api_key is None:
+                raise ValueError(
+                    "No API key provided and GOOGLE_API_KEY environment variable "
+                    "not set. For Vertex AI, pass a base_url instead."
+                )
+            self.client = genai.Client(
+                api_key=api_key,
+                http_options={"timeout": 120_000},
+            )
+            logger.info("Initialized GeminiLM with model %s", self.model_name)
+
+    # ---------------------------------------------------------------------
+    # Required LM Eval properties
+    # ---------------------------------------------------------------------
+
+    @property
+    def tokenizer_name(self) -> str:
+        return self._tokenizer_name
+
+    @property
+    def max_sequence_length(self) -> int:
+        """Max context length for Gemini models."""
+        return 32000
+
+    @property
+    def batch_size(self) -> int:
+        """Default batch size for Gemini requests."""
+        return 8
+
+    # ---------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------
+
+    def _gen_config(
+        self,
+        stop_seqs: Optional[List[str]] = None,
+        gen_kwargs: Optional[Dict[str, Any]] = None,
+        system_instruction: Optional[str] = None,
+    ):
+        options = gen_kwargs or {}
+        filtered = [s for s in stop_seqs if s] if stop_seqs else None
+        return types.GenerateContentConfig(
+            temperature=options.get("temperature", self.temperature),
+            max_output_tokens=options.get(
+                "max_tokens", options.get("max_gen_toks", self.max_tokens)
+            ),
+            top_p=options.get("top_p", self.top_p),
+            top_k=options.get("top_k", self.top_k),
+            stop_sequences=filtered or None,
+            system_instruction=system_instruction,
+        )
+
+    @staticmethod
+    def _parse_chat_prompt(prompt: Any) -> Optional[List[Dict[str, Any]]]:
+        """Return messages when prompt is serialized chat, otherwise None."""
+        value = prompt.prompt if hasattr(prompt, "prompt") else prompt
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if isinstance(parsed, dict) and isinstance(parsed.get("messages"), list):
+            parsed = parsed["messages"]
+        if not isinstance(parsed, list):
+            return None
+        return [message for message in parsed if isinstance(message, dict)]
+
+    @staticmethod
+    def _image_to_part(image: Image.Image) -> types.Part:
+        """Encode a PIL image as a Gemini inline PNG part."""
+        if not isinstance(image, Image.Image):
+            raise TypeError("Gemini visual inputs must be PIL.Image.Image instances")
+        if image.mode not in {"1", "L", "LA", "P", "RGB", "RGBA"}:
+            image = image.convert("RGB")
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/png")
+
+    def _visuals_to_parts(self, visuals: Sequence[Image.Image]) -> List[types.Part]:
+        return [self._image_to_part(image) for image in visuals]
+
+    @staticmethod
+    def _message_text(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                str(item.get("text", "")) if isinstance(item, dict) else str(item)
+                for item in content
+            )
+        return str(content)
+
+    def _chat_contents(
+        self,
+        messages: List[Dict[str, Any]],
+        media_parts: List[types.Part],
+    ) -> Tuple[List[types.Content], Optional[str]]:
+        """Convert OpenAI-style chat roles to Gemini content roles."""
+        system_parts = []
+        contents: List[types.Content] = []
+        media_target: Optional[types.Content] = None
+        for message in messages:
+            role = str(message.get("role", "user")).lower()
+            text = self._message_text(message.get("content", ""))
+            if role == "system":
+                if text:
+                    system_parts.append(text)
+                continue
+            content = types.Content(
+                role="model" if role in {"assistant", "model"} else "user",
+                parts=[types.Part.from_text(text=text)],
+            )
+            contents.append(content)
+            if content.role == "user":
+                media_target = content
+
+        if not contents:
+            contents.append(types.Content(role="user", parts=[]))
+            media_target = contents[-1]
+        if media_parts:
+            if media_target is None:
+                media_target = types.Content(role="user", parts=[])
+                contents.append(media_target)
+            media_target.parts = media_parts + (media_target.parts or [])
+        return contents, "\n\n".join(system_parts) or None
+
+    def _extract_instance_data(
+        self, instance: Any
+    ) -> Tuple[str, List[str], Optional[List[dict]]]:
+        """
+        Returns (prompt, stop_seqs, audio_dicts_or_None).
+        audio_dicts items are {"array": np.ndarray, "sampling_rate": int}.
+        """
+        audio = None
+
+        if hasattr(instance, "args"):
+            args = instance.args
+            # Multimodal: args is (prompt_obj, gen_kwargs, auxiliary_args)
+            if len(args) >= 3:
+                aux = args[2]
+                audio = aux.get("audio") if isinstance(aux, dict) else None
+
+            prompt_obj = args[0] if args else instance
+            gen_kwargs = args[1] if len(args) > 1 else {}
+            until = gen_kwargs.get("until", []) if isinstance(gen_kwargs, dict) else []
+            if isinstance(until, str):
+                until = [until]
+
+            prompt_str = (
+                prompt_obj.prompt if hasattr(prompt_obj, "prompt") else str(prompt_obj)
+            )
+            return prompt_str, until, audio
+
+        # Fallback for plain tuple / dict
+        if isinstance(instance, tuple):
+            tuple_instance = cast(Sequence[Any], instance)
+            stop = tuple_instance[1] if len(tuple_instance) >= 2 else []
+            if not isinstance(stop, list):
+                stop = [stop] if stop else []
+            return tuple_instance[0], stop, None
+
+        if isinstance(instance, dict):
+            stop = instance.get("until", [])
+            if not isinstance(stop, list):
+                stop = [stop] if stop else []
+            return instance.get("prompt", ""), stop, None
+
+        return str(instance), [], None
+
+    def _audio_dicts_to_parts(self, audio_dicts: List[dict]) -> list:
+        """Convert lm_eval audio dicts → google.genai Part objects."""
+        parts = []
+        for audio in audio_dicts:
+            array = np.array(audio["array"])
+            if array.dtype != np.float32:
+                array = array.astype(np.float32)
+            buf = io.BytesIO()
+            sf.write(buf, array, audio["sampling_rate"], format="WAV", subtype="PCM_16")
+            parts.append(
+                types.Part.from_bytes(
+                    data=buf.getvalue(),
+                    mime_type="audio/wav",
+                )
+            )
+        return parts
+
+    # ---------------------------------------------------------------------
+    # Generation with GUARANTEED 1:1 Mapping
+    # ---------------------------------------------------------------------
+
+    def generate_until(self, requests: List[Any]) -> List[str]:
+        logger.info("=" * 80)
+        logger.info("GENERATE_UNTIL called with %d requests", len(requests))
+        logger.info("=" * 80)
+
+        results = []
+
+        for idx, instance in enumerate(requests):
+            prompt, stop_seqs, audio_dicts = self._extract_instance_data(instance)
+            args: Sequence[Any] = instance.args if hasattr(instance, "args") else ()
+            gen_kwargs = args[1] if len(args) > 1 and isinstance(args[1], dict) else {}
+            auxiliary = args[2] if len(args) > 2 and isinstance(args[2], dict) else {}
+            visuals = auxiliary.get("visual")
+            if visuals is not None and not isinstance(visuals, (list, tuple)):
+                visuals = [visuals]
+
+            if not prompt and not audio_dicts and not visuals:
+                logger.warning("Empty prompt at index %d", idx)
+                results.append("")
+                continue
+
+            media_parts = []
+            if visuals:
+                media_parts.extend(self._visuals_to_parts(visuals))
+            if audio_dicts:
+                media_parts.extend(self._audio_dicts_to_parts(audio_dicts))
+
+            # Preserve plain text/audio wire shape while retaining roles for JSON chat.
+            contents: Union[str, list] = prompt
+            system_instruction = None
+            messages = self._parse_chat_prompt(prompt)
+            if messages is not None:
+                contents, system_instruction = self._chat_contents(messages, media_parts)
+            elif media_parts:
+                contents = media_parts + ([prompt] if prompt else [])
+
+            final_response = ""
+            last_error: Optional[Exception] = None
+            for attempt in range(self.max_retries):
+                try:
+                    response = self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=contents,
+                        config=self._gen_config(
+                            stop_seqs,
+                            gen_kwargs=gen_kwargs,
+                            system_instruction=system_instruction,
+                        ),
+                    )
+                    response_text = response.text or ""
+                    if response_text.strip():
+                        final_response = response_text
+                        last_error = None
+                        break
+                    if attempt < self.max_retries - 1:
+                        time.sleep(self.retry_timeout * (attempt + 1))
+                    else:
+                        last_error = RuntimeError(
+                            f"All {self.max_retries} attempts returned empty response for idx={idx}"
+                        )
+                except Exception as e:  # pylint: disable=broad-exception-caught
+                    logger.error("Generation error idx=%d attempt=%d: %s", idx, attempt + 1, e)
+                    last_error = e
+                    if not is_retryable_error(e, provider="gemini"):
+                        raise
+                    if attempt < self.max_retries - 1:
+                        time.sleep(self.retry_timeout * (attempt + 1))
+
+            if last_error is not None:
+                raise RuntimeError(
+                    f"Generation failed for idx={idx} after"
+                    f" {self.max_retries} retries: {last_error}"
+                ) from last_error
+
+            results.append(final_response)
+
+        assert len(results) == len(requests)
+        return results
+    # ---------------------------------------------------------------------
+    # Loglikelihood (unsupported by Gemini)
+    # ---------------------------------------------------------------------
+
+    def loglikelihood(self, requests: List[Any]) -> List[Tuple[float, bool]]:
+        """
+        Gemini API does not support loglikelihood computation.
+        Returns dummy values.
+        """
+        logger.info(
+            "LOGLIKELIHOOD called with %d requests (returning dummy values)",
+            len(requests),
+        )
+        return [(0.0, True) for _ in requests]
+
+    def loglikelihood_rolling(
+        self, requests: List[Any]
+    ) -> List[float]:
+        """
+        Gemini API does not support rolling loglikelihood computation.
+        Returns dummy values.
+        """
+        logger.info(
+            "LOGLIKELIHOOD_ROLLING called with %d requests (returning dummy values)",
+            len(requests),
+        )
+        return [0.0 for _ in requests]
+
+    # ---------------------------------------------------------------------
+    # Tokenization
+    # ---------------------------------------------------------------------
+
+    def _tokenize(self, text: str) -> List[str]:
+        """Simple tokenization fallback using regex split."""
+        return [t for t in re.split(r"\s+|[,.!?;:\"()\[\]{}]", text) if t]
+
+    def _count_tokens(self, text: str) -> int:
+        """Count tokens using Gemini's API or fallback to simple tokenization."""
+        try:
+            resp = self.client.models.count_tokens(
+                model=self.model_name,
+                contents=text,
+            )
+            return resp.total_tokens or 0
+        except Exception:  # pylint: disable=broad-exception-caught
+            return len(self._tokenize(text))
+
+    def token_count(self, instances: List[str]) -> List[int]:
+        """Return token counts for a list of text instances."""
+        return [self._count_tokens(str(x)) for x in instances]
+
+    def tokenize(self, text: str) -> List[str]:
+        """Tokenize text into a list of tokens."""
+        return self._tokenize(text)
+
+    def detokenize(self, tokens: List[str]) -> str:
+        """Convert tokens back to text."""
+        return " ".join(tokens)
+
+    # ---------------------------------------------------------------------
+    # Chat template
+    # ---------------------------------------------------------------------
+
+    @staticmethod
+    def _format_chat_prompt(messages: List[Dict[str, str]]) -> str:
+        """Format chat messages into a single prompt string."""
+        out = []
+        for msg in messages:
+            role = msg.get("role", "user").capitalize()
+            content = msg.get("content", "")
+            out.append(f"{role}: {content}")
+        return "\n\n".join(out)
+
+    def apply_chat_template(
+        self,
+        chat_history: Union[List[Dict[str, Any]], List[Dict[str, str]], str],
+        add_generation_prompt: bool = True,
+        **_kwargs,
+    ) -> str:
+        """Apply chat template to messages."""
+        if isinstance(chat_history, str):
+            return chat_history
+
+        prompt = self._format_chat_prompt(chat_history)
+        if add_generation_prompt:
+            prompt += "\n\nAssistant:"
+        return prompt
+
+    # ---------------------------------------------------------------------
+    # Convenience completion API
+    # ---------------------------------------------------------------------
+
+    def create_completion(
+        self,
+        prompt: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+    ) -> str:
+        """
+        Create a completion for the given prompt.
+        Convenience method for direct API usage.
+
+        Includes retry logic for empty responses.
+        """
+        stop_seqs = None
+        if stop:
+            stop_seqs = [stop] if isinstance(stop, str) else stop
+
+        final_response = ""
+
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=(
+                            temperature if temperature is not None else self.temperature
+                        ),
+                        max_output_tokens=(
+                            max_tokens if max_tokens is not None else self.max_tokens
+                        ),
+                        top_p=self.top_p,
+                        top_k=self.top_k,
+                        stop_sequences=stop_seqs or None,
+                    ),
+                )
+
+                response_text = response.text or ""
+
+                # Retry on empty response
+                if response_text.strip() == "":
+                    if attempt < self.max_retries - 1:
+                        logger.warning(
+                            "Empty completion response, attempt %d/%d. Retrying...",
+                            attempt + 1,
+                            self.max_retries,
+                        )
+                        time.sleep(self.retry_timeout * (attempt + 1))
+                        continue
+
+                    raise RuntimeError(
+                        f"All {self.max_retries} attempts returned empty response"
+                    )
+
+                final_response = response_text
+                break
+
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.warning(
+                    "Completion error, attempt %d/%d: %s",
+                    attempt + 1,
+                    self.max_retries,
+                    e,
+                )
+                if not is_retryable_error(e, provider="gemini"):
+                    raise
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_timeout * (attempt + 1))
+                else:
+                    raise RuntimeError(
+                        f"Gemini completion failed after {self.max_retries} retries: {e}"
+                    ) from e
+
+        return final_response

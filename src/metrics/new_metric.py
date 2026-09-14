@@ -12,9 +12,10 @@ from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
+from src.metrics.metrics_utils import clamp_score
 
 
-def compute_new_metric_aggregation(items: List[Any]) -> float:  # pylint: disable=unused-argument
+def compute_new_metric_aggregation(items: List[Any]) -> float:
     """Aggregate metric results into a final score.
 
     TODO: Implement your aggregation logic here.
@@ -25,7 +26,7 @@ def compute_new_metric_aggregation(items: List[Any]) -> float:  # pylint: disabl
         _items: List of metric items (typically reference, prediction pairs)
 
     Returns:
-        Aggregated score (typically a float between 0 and 1, or 0 to 100)
+        Aggregated score between 0 and 1
 
     Example:
         >>> def compute_new_metric_aggregation(items):
@@ -39,8 +40,19 @@ def compute_new_metric_aggregation(items: List[Any]) -> float:  # pylint: disabl
         ...             count += 1
         ...     return total / count if count > 0 else 0.0
     """
-    # TODO: Implement aggregation logic  # pylint: disable=fixme
-    return 0.0
+    if not all(isinstance(item, (list, tuple)) and len(item) == 2 for item in items):
+        raise ValueError("new_metric aggregation items must be [reference, prediction] pairs")
+    valid_items = [
+        (reference, prediction)
+        for reference, prediction in items
+        if reference is not None
+    ]
+    if not valid_items:
+        return 0.0
+    return clamp_score(
+        float(sum(reference == prediction for reference, prediction in valid_items))
+        / len(valid_items)
+    )
 
 
 # Register aggregation function
@@ -78,8 +90,10 @@ def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[Any]]:
         ...     return {"new_metric": [golds, preds]}
     """
     # TODO: Implement extraction logic  # pylint: disable=fixme
-    preds = results[0] if isinstance(results, list) else results
-    golds = doc.get("output", "")
+    preds = results[0] if isinstance(results, list) and results else ""
+    if "output" not in doc:
+        raise ValueError("Document is missing required 'output' reference")
+    golds = doc["output"]
     return {"new_metric": [golds, preds]}
 
 
@@ -117,7 +131,7 @@ class NewMetric(BaseMetric):
         """Get generation kwargs for this metric.
 
         TODO: Adjust generation parameters if needed.
-        Most metrics use default parameters with sampling disabled.
+        Most metrics use default parameters (no sampling, stop on empty).
 
         Returns:
             Generation parameters
@@ -132,7 +146,7 @@ class NewMetric(BaseMetric):
             ...     }
         """
         # TODO: Adjust generation parameters  # pylint: disable=fixme
-        return {"do_sample": False}
+        return {"do_sample": False, "until": []}
 
 
 # Register in custom registry

@@ -1,187 +1,236 @@
-"""Result processing and export functionality."""
+"""Per-file result processing for the evaluation runner.
+
+The runner produces exactly one result JSON per pool file; backend reads them
+from GCS after the job finalises, so this module no longer pushes results to
+the API directly.
+"""
 
 import json
 import logging
+import math
 import os
 from statistics import mean
 from typing import Any, Dict
 
-from src.db_operations import add_results_to_db
-from src.core.helpers import normalize_string
+import numpy as np
+from lm_eval.api.registry import get_aggregation, get_metric_aggregation
+
+from src.metrics_registry import get_metrics_registry
 
 logger = logging.getLogger(__name__)
 
 
+class _NumpyEncoder(json.JSONEncoder):
+    """JSON encoder that emits plain ints / floats / lists for numpy types."""
+
+    def default(self, o):
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        if isinstance(o, np.integer):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        return super().default(o)
+
+
 class ResultProcessor:
-    """Handles result processing and export operations."""
+    """Writes a per-file result JSON to ``results_dir`` and returns the path."""
 
     def __init__(
         self,
-        category_name: str,
-        api_host: str | None = None,
-        job_id: str | None = None,
-        server_token: str | None = None,
-        benchmark_id: str | None = None,
-        task_id: str | None = None,
+        *,
+        category: str,
+        task_id: str,
+        source_pool_path: str,
+        results_dir: str,
     ):
-        """Initialize result processor.
-
-        Args:
-            category_name: Name of the category
-            api_host: API host URL
-            job_id: Job ID for database updates
-            server_token: Server token for authentication
-            benchmark_id: Benchmark ID
-            task_id: Task ID (optional)
-        """
-        self.category_name = category_name
-        self.api_host = api_host
-        self.job_id = job_id
-        self.server_token = server_token
-        self.benchmark_id = benchmark_id
+        self.category = category
         self.task_id = task_id
+        self.source_pool_path = source_pool_path
+        self.results_dir = results_dir
 
-    def calculate_average_scores(self, results: Dict[str, Any]) -> Dict[str, float]:
-        """Calculate average scores across all tasks.
+    def export(self, results: Dict[str, Any], *, filename: str) -> str:
+        """Persist ``results`` to ``<results_dir>/<filename>``."""
+        results = self._strip_multimodal_data(results)
+        average_scores = self._calculate_average_scores(results)
+        if not average_scores:
+            raise RuntimeError(
+                "Evaluation produced no aggregate metrics; refusing to export result"
+            )
+        self._add_question_scores(results)
+        enriched = {
+            **results,
+            "average_scores": average_scores,
+            "category": self.category,
+            "task": self.task_id,
+            "pool_file": self.source_pool_path,
+        }
+        self._strip_audio_data(enriched)
 
-        Args:
-            results: Evaluation results dictionary
+        os.makedirs(self.results_dir, exist_ok=True)
+        path = os.path.join(self.results_dir, filename)
+        with open(path, "w", encoding="utf-8") as fp:
+            json.dump(
+                enriched,
+                fp,
+                ensure_ascii=False,
+                cls=_NumpyEncoder,
+                separators=(",", ":"),
+            )
+        logger.info("Wrote result file: %s", path)
+        return path
 
-        Returns:
-            Dictionary of metric name to average score
-        """
-        average_scores: dict[str, float] = {}
-        all_scores: dict[str, list[float]] = {}
+    # -- score aggregation ----------------------------------------------------
 
-        if "results" not in results:
-            logger.warning("No 'results' key in results for average calculation")
-            return average_scores
+    @staticmethod
+    def _add_question_scores(results: Dict[str, Any]) -> None:
+        """Calculate each sample's metrics instead of storing only raw inputs."""
+        samples = results.get("samples")
+        if not isinstance(samples, dict):
+            return
 
-        logger.info("Calculating averages for %s tasks", len(results["results"]))
-
-        for task_name, task_result in results["results"].items():
-            if not isinstance(task_result, dict):
-                logger.warning("Task '%s' has non-dict result, skipping", task_name)
+        for task_samples in samples.values():
+            if not isinstance(task_samples, list):
                 continue
-
-            for key, value in task_result.items():
-                # Only process metric keys ending with ",none"
-                if not key.endswith(",none"):
+            for sample in task_samples:
+                if not isinstance(sample, dict):
                     continue
-
-                metric_name = key.replace(",none", "")
-
-                # Handle dictionary values (ROUGE and potentially others)
-                if isinstance(value, dict):
-                    # For ROUGE, only use rougeLsum as the representative score
-                    if "rougeLsum" in value:
-                        if metric_name not in all_scores:
-                            all_scores[metric_name] = []
-                        all_scores[metric_name].append(value["rougeLsum"])
-                        logger.debug(
-                            "Task '%s': Added %s.rougeLsum=%s",
-                            task_name,
-                            metric_name,
-                            value["rougeLsum"],
+                question_scores: dict[str, Any] = {}
+                for metric_name in sample.get("metrics", []):
+                    if metric_name not in sample:
+                        raise RuntimeError(
+                            f"Required metric result is missing: {metric_name}"
                         )
-                    else:
-                        logger.warning(
-                            "Task '%s': Dict value for '%s' but rougeLsum not found. Keys: %s",
-                            task_name,
-                            key,
-                            list(value.keys()),
-                        )
-
-                # Handle numeric values (BLEU, accuracy, LLM judge scores, etc.)
-                elif isinstance(value, (int, float)):
-                    if metric_name not in all_scores:
-                        all_scores[metric_name] = []
-                    all_scores[metric_name].append(float(value))
-                    logger.debug("Task '%s': Added %s=%s", task_name, metric_name, value)
-
-                else:
-                    logger.warning(
-                        "Task '%s': Unexpected type for '%s': %s",
-                        task_name,
-                        key,
-                        type(value),
+                    metric = get_metrics_registry().get(metric_name)
+                    aggregation_name = (
+                        metric.config.aggregation_name if metric is not None else None
                     )
+                    aggregation = (
+                        get_aggregation(aggregation_name)
+                        if aggregation_name
+                        else get_metric_aggregation(metric_name)
+                    )
+                    if aggregation is None:
+                        raise RuntimeError(
+                            f"Required metric aggregation is unavailable: {metric_name}"
+                        )
+                    score = aggregation([sample[metric_name]])
+                    if isinstance(score, dict) and "rougeLsum" in score:
+                        score = score["rougeLsum"]
+                    if (
+                        isinstance(score, (bool, np.bool_))
+                        or not isinstance(score, (int, float, np.integer, np.floating))
+                        or not math.isfinite(score)
+                    ):
+                        raise RuntimeError(
+                            f"Invalid per-question metric value for {metric_name}"
+                        )
+                    question_scores[metric_name] = score
+                sample["scores"] = question_scores
 
-        # Calculate averages
-        for metric_name, scores in all_scores.items():
-            if scores:
-                avg = mean(scores)
-                average_scores[metric_name] = round(avg, 4)
-                logger.info(
-                    "Average %s: %s (from %s tasks, min=%.4f, max=%.4f)",
-                    metric_name,
-                    average_scores[metric_name],
-                    len(scores),
-                    min(scores),
-                    max(scores),
-                )
-            else:
-                logger.warning("No scores found for metric '%s'", metric_name)
+    def _calculate_average_scores(self, results: Dict[str, Any]) -> Dict[str, float]:
+        """Average ``key,none`` metrics across every per-task result block."""
+        averaged: dict[str, float] = {}
+        collected: dict[str, list[float]] = {}
 
-        logger.info(
-            "Calculated %s average metrics: %s",
-            len(average_scores),
-            list(average_scores.keys()),
-        )
-        return average_scores
+        per_task = results.get("results")
+        if not isinstance(per_task, dict):
+            raise RuntimeError("Evaluation results must contain task metric blocks")
 
-    def export_results(self, results: Dict[str, Any]) -> None:
-        """Export results to file and optionally to database.
-
-        Args:
-            results: Evaluation results to export
-        """
-        average_scores = self.calculate_average_scores(results)
-        results_with_averages = {**results, "average_scores": average_scores}
-
-        # Export to file
-        filename = (
-            f"{normalize_string(self.task_id)}.json"
-            if self.task_id
-            else f"{normalize_string(self.category_name)}.json"
-        )
-
-        filepath = (
-            os.path.join(".results", filename)
-            if not self.task_id
-            else filename
-        )
-
-        with open(filepath, "w", encoding="UTF-8") as fp:
-            json.dump(results_with_averages, fp, ensure_ascii=False)
-
-        logger.info("Results exported to %s", filename)
-
-        # Export to database if configured
-        if (
-            self.api_host
-            and self.job_id
-            and self.server_token
-            and self.benchmark_id
-            and "results" in results_with_averages
-        ):
-            for key, value in results_with_averages["results"].items():
-                task_id = (
-                    normalize_string(self.task_id)
-                    if self.task_id
-                    else value.get("task")
-                )
-
-                if not task_id:
-                    logger.warning("No task_id found for task '%s'", key)
+        for task_name, task_result in per_task.items():
+            if not isinstance(task_result, dict):
+                raise RuntimeError(f"Malformed aggregate block for task {task_name}")
+            task_metric_count = 0
+            for key, value in task_result.items():
+                if not key.endswith(",none") or key.endswith("_stderr,none"):
                     continue
-
-                add_results_to_db(
-                    api_host=self.api_host,
-                    job_id=self.job_id,
-                    task_id=task_id,
-                    server_token=self.server_token,
-                    result=value,
-                    category_name=self.category_name,
-                    benchmark_id=self.benchmark_id,
+                task_metric_count += 1
+                metric_name = key.replace(",none", "")
+                if isinstance(value, dict):
+                    if "rougeLsum" in value:
+                        score = value["rougeLsum"]
+                        if (
+                            isinstance(score, (bool, np.bool_))
+                            or not isinstance(
+                                score, (int, float, np.integer, np.floating)
+                            )
+                            or not math.isfinite(score)
+                        ):
+                            raise RuntimeError(f"Invalid aggregate metric value for {key}")
+                        collected.setdefault(metric_name, []).append(
+                            float(score))
+                        continue
+                    raise RuntimeError(f"Unsupported aggregate metric value for {key}")
+                if (
+                    isinstance(value, (int, float, np.integer, np.floating))
+                    and not isinstance(value, (bool, np.bool_))
+                    and math.isfinite(value)
+                ):
+                    collected.setdefault(metric_name, []).append(float(value))
+                    continue
+                if isinstance(value, (int, float, np.integer, np.floating)):
+                    raise RuntimeError(f"Invalid aggregate metric value for {key}")
+                raise RuntimeError(
+                    f"Unsupported aggregate metric value for {key}: {type(value).__name__}"
                 )
+            if task_metric_count == 0:
+                raise RuntimeError(f"Task {task_name} has no aggregate metric values")
+
+        for metric_name, scores in collected.items():
+            if scores:
+                averaged[metric_name] = round(mean(scores), 4)
+        return averaged
+
+    # -- payload cleanup ------------------------------------------------------
+
+    @staticmethod
+    def _strip_audio_data(results: Dict[str, Any]) -> None:
+        """Strip raw audio arrays so we don't bloat the result JSON."""
+        samples = results.get("samples") or {}
+        for task_samples in samples.values():
+            if not isinstance(task_samples, list):
+                continue
+            for sample in task_samples:
+                for arg_tuple in sample.get("arguments", []):
+                    if isinstance(arg_tuple, (list, tuple)) and len(arg_tuple) >= 3:
+                        aux = arg_tuple[2]
+                        if isinstance(aux, dict) and "audio" in aux:
+                            del aux["audio"]
+                doc = sample.get("doc")
+                if isinstance(doc, dict) and "audio" in doc:
+                    del doc["audio"]
+
+    @staticmethod
+    def _strip_multimodal_data(results: Dict[str, Any]) -> Dict[str, Any]:
+        """Drop audio / image / visuals payloads from sample arguments."""
+        samples = results.get("samples")
+        if not samples:
+            return results
+
+        cleaned_samples: dict[str, list[Any]] = {}
+        for task_name, task_samples in samples.items():
+            cleaned = []
+            for sample in task_samples:
+                sample = {**sample}
+                args = sample.get("arguments")
+                if isinstance(args, list):
+                    new_args = []
+                    for arg_group in args:
+                        if isinstance(arg_group, (list, tuple)):
+                            new_group = []
+                            for item in arg_group:
+                                if isinstance(item, dict):
+                                    item = {
+                                        k: v
+                                        for k, v in item.items()
+                                        if k not in ("audio", "images", "visuals")
+                                    }
+                                new_group.append(item)
+                            new_args.append(new_group)
+                        else:
+                            new_args.append(arg_group)
+                    sample["arguments"] = new_args
+                cleaned.append(sample)
+            cleaned_samples[task_name] = cleaned
+
+        return {**results, "samples": cleaned_samples}

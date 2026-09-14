@@ -2,6 +2,9 @@
 
 import logging
 import os
+from urllib.parse import urlsplit, urlunsplit
+
+from src.adapter_config import ASR_ADAPTERS
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +31,16 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
 
     # If IS_REASONING=1, use MAX_TOKENS if exists, otherwise default to 8192
     if is_reasoning_env:
-        max_tokens = int(os.getenv("MAX_TOKENS", "8192"))
+        raw_max_tokens = os.getenv("MAX_TOKENS", "8192")
+        try:
+            max_tokens = int(raw_max_tokens)
+        except ValueError as exc:
+            raise ValueError("MAX_TOKENS must be an integer") from exc
+        if max_tokens <= 0:
+            raise ValueError("MAX_TOKENS must be greater than zero")
         # For OpenAI reasoning models, use max_completion_tokens
-        if adapter == "openai-chat-completions":
-            return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
+        if adapter in ("openai-chat-completions", "openai", "azure-openai"):
+            return {"max_completion_tokens": max_tokens}
         return {"max_tokens": max_tokens}
 
     # Otherwise, use the current logic (IS_REASONING=0 or not set)
@@ -40,6 +49,20 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
     # Detect thinking/reasoning models by adapter and model name
     thinking_model_patterns = {
         "openai-chat-completions": [
+            "o1-",
+            "o3-",
+            "o4-",
+            "gpt-5",
+            "gpt5",
+        ],
+        "openai": [
+            "o1-",
+            "o3-",
+            "o4-",
+            "gpt-5",
+            "gpt5",
+        ],
+        "azure-openai": [
             "o1-",
             "o3-",
             "o4-",
@@ -56,6 +79,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         ],
         "gemini": ["thinking", "2.0-flash-thinking"],
         "anthropic-chat-completions": ["extended-thinking"],
+        "anthropic": ["extended-thinking"],
     }
 
     # Check if this is a thinking model for the current adapter
@@ -70,13 +94,19 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         if result:
             return result
 
-    # Adapter-specific output defaults for non-thinking models. Keep these below
-    # small 4096-token context windows so the prompt still fits.
+    # ASR adapters don't use max_tokens, return minimal config
+    if adapter in ASR_ADAPTERS:
+        return {"max_tokens": 1024}
+
+    # Adapter-specific defaults for non-thinking models
     adapter_defaults = {
         "gemini": 1024,
         "groq": 1024,
         "openai-chat-completions": 1024,
+        "openai": 1024,
         "anthropic-chat-completions": 1024,
+        "anthropic": 1024,
+        "cohere": 1024,
         "local-chat-completions": 1024,
     }
 
@@ -94,12 +124,12 @@ def _get_thinking_model_config(adapter: str, model_lower: str) -> dict | None:
     Returns:
         Dict with appropriate token config, or None if not a thinking model
     """
-    if adapter == "openai-chat-completions":
+    if adapter in ("openai-chat-completions", "openai", "azure-openai"):
         # GPT-5.2 supports up to 128,000 output tokens
         if "gpt-5.2" in model_lower or "gpt5.2" in model_lower:
-            return {"max_completion_tokens": 128000, "max_tokens": 128000}
+            return {"max_completion_tokens": 128000}
         # GPT-5 and o-series models
-        return {"max_completion_tokens": 8192, "max_tokens": 8192}
+        return {"max_completion_tokens": 8192}
 
     if adapter == "local-chat-completions":
         # DeepSeek R1, QwQ, Skywork-o1, etc.
@@ -107,30 +137,29 @@ def _get_thinking_model_config(adapter: str, model_lower: str) -> dict | None:
             return {"max_completion_tokens": 8192, "max_tokens": 8192}
         return {"max_tokens": 8192}
 
-    if adapter in ("gemini", "anthropic-chat-completions"):
+    if adapter in ("gemini", "anthropic-chat-completions", "anthropic"):
         return {"max_tokens": 8192}
 
     return None
 
 
 def convert_anthropic_url(url: str | None) -> str:
-    """Convert Anthropic API URL to OpenAI-compatible format.
+    """Resolve an Anthropic Messages endpoint without changing custom hosts.
 
     Args:
         url: The base URL (can be None, empty, or an Anthropic URL)
 
     Returns:
-        OpenAI-compatible Anthropic URL
+        Anthropic Messages API URL
 
     Examples:
         >>> convert_anthropic_url(None)
-        'https://api.anthropic.com/v1/chat/completions'
+        'https://api.anthropic.com/v1/messages'
 
         >>> convert_anthropic_url("https://api.anthropic.com/v1/messages")
-        'https://api.anthropic.com/v1/chat/completions'
+        'https://api.anthropic.com/v1/messages'
     """
-    # Default OpenAI-compatible Anthropic endpoint
-    default_url = "https://api.anthropic.com/v1/chat/completions"
+    default_url = "https://api.anthropic.com/v1/messages"
 
     # If URL is None or empty, use default
     if not url or url.strip() == "":
@@ -138,31 +167,20 @@ def convert_anthropic_url(url: str | None) -> str:
 
     url = url.strip()
 
-    # If it's already the chat/completions endpoint, return as-is
-    if "/chat/completions" in url:
-        return url
+    parsed = urlsplit(url)
+    if parsed.hostname == "api.anthropic.com":
+        path = parsed.path.rstrip("/")
+        if path in {"", "/v1", "/v1/messages", "/v1/chat/completions"}:
+            return urlunsplit(parsed._replace(path="/v1/messages"))
 
-    # Convert /v1/messages to /v1/chat/completions
-    if "/v1/messages" in url:
-        return url.replace("/v1/messages", "/v1/chat/completions")
-
-    # If it's just the base domain, add the path
-    if "api.anthropic.com" in url and "/v1" not in url:
-        url = url.rstrip("/")
-        return f"{url}/v1/chat/completions"
-
-    # If it has /v1 but no endpoint, add chat/completions
-    if url.endswith("/v1"):
-        return f"{url}/chat/completions"
-
-    # Fallback to default if we can't parse it
-    return default_url
+    # Custom gateways must remain custom. Rewriting them could leak credentials.
+    return url
 
 
 def process_adapter_and_url(
     adapter: str, base_url: str | None, verbose: bool = True
 ) -> tuple[str, str | None]:
-    """Process adapter and base_url, converting Anthropic to local-chat-completions.
+    """Normalize backend adapter aliases and provider endpoints.
 
     Args:
         adapter: The adapter type from environment
@@ -174,19 +192,26 @@ def process_adapter_and_url(
 
     Examples:
         >>> process_adapter_and_url("anthropic-chat-completions", None, verbose=False)
-        ('local-chat-completions', 'https://api.anthropic.com/v1/chat/completions')
+        ('anthropic', 'https://api.anthropic.com/v1/messages')
 
         >>> process_adapter_and_url("openai-chat-completions", "https://api.openai.com",
         ...                         verbose=False)
-        ('openai-chat-completions', 'https://api.openai.com')
+        ('openai', 'https://api.openai.com')
     """
     if adapter == "anthropic-chat-completions":
-        if verbose:
-            log_message = "Converting anthropic-chat-completions to local-chat-completions"
-            logger.info(log_message)
-            print(log_message)
+        custom_url = base_url.strip() if base_url else ""
+        parsed = urlsplit(custom_url) if custom_url else None
+        if parsed is not None and parsed.hostname != "api.anthropic.com":
+            return "local-chat-completions", custom_url
 
-        processed_adapter = "local-chat-completions"
+    if adapter in {"anthropic", "anthropic-chat-completions"}:
+        if verbose:
+            if adapter == "anthropic-chat-completions":
+                log_message = "Routing anthropic-chat-completions to native Anthropic Messages"
+                logger.info(log_message)
+                print(log_message)
+
+        processed_adapter = "anthropic"
         processed_base_url = convert_anthropic_url(base_url)
 
         if verbose:
@@ -195,5 +220,8 @@ def process_adapter_and_url(
             print(url_message)
 
         return processed_adapter, processed_base_url
+
+    if adapter == "openai-chat-completions":
+        return "openai", base_url
 
     return adapter, base_url

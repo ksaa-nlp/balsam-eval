@@ -1,356 +1,217 @@
-"""Evaluation job orchestration - refactored for cleaner code."""
+"""Single-file evaluation job used by the unified runner.
 
-import json
+One ``SingleFileEvaluationJob`` instance corresponds to one pool-dataset file
+and produces exactly one result JSON.
+"""
+
 import logging
 import os
-import re
-import traceback
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, cast
+from typing import Any, Dict, Optional, cast
 
 import lm_eval.evaluator
+import lm_eval.models  # noqa: F401  pylint: disable=unused-import  # registers models
 import lm_eval.tasks
-import lm_eval.models  # Register all lm_eval models
 import requests
+from lm_eval.api.registry import get_model
 
-# Import custom metrics package to auto-register all metrics
-import src.metrics  # Registers all metrics in src.metrics.impl.*  # pylint: disable=unused-import
-import src.gemini_adapter  # Registers the custom Gemini model  # pylint: disable=unused-import
-
-from src.adapter_utils import get_max_tokens_config
-from src.db_operations import JobStatus, update_status
-from src.processors.llm_judge_operations import LLMJudgeProcessor
+import src.adapters  # noqa: F401  pylint: disable=unused-import  # registers adapters
+import src.metrics  # noqa: F401  pylint: disable=unused-import  # registers custom metrics
+from src.adapter_config import API_KEY_ENV_BY_ADAPTER, ASR_ADAPTERS
+from src.adapters.utils import get_max_tokens_config
 from src.processors.result_processing import ResultProcessor
-from src.processors.task_operations import TaskOperations
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-if os.environ.get("ENV", "PROD") == "local":
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+_NON_BATCHING_ADAPTERS = {
+    "anthropic-chat-completions",
+    "cohere",
+    "local-chat-completions",
+    "openai",
+    "openai-chat-completions",
+}
 
-# Compatibility patches
-_original_relative_to = Path.relative_to
+
+def create_evaluation_model(
+    adapter: str, model_args: dict[str, Any], batch_size: int
+) -> Any:
+    """Initialize one lm-eval model for reuse across all pool files."""
+    args = dict(model_args)
+    args.setdefault("eos_string", "<|endoftext|>")
+    model_batch_size = 1 if adapter in _NON_BATCHING_ADAPTERS else batch_size
+    return get_model(adapter).create_from_arg_obj(
+        args,
+        {"batch_size": model_batch_size, "max_batch_size": None, "device": None},
+    )
 
 
-def _safe_relative_to(self, *args, **kwargs):
-    """Safely handle Path.relative_to with ValueError."""
+# --- Compatibility patches ---------------------------------------------------
+
+@contextmanager
+def _lm_eval_compatibility_patches():
+    """Apply legacy lm_eval workarounds only while it is executing."""
+    original_relative_to = Path.relative_to
+    original_post = requests.post
+
+    def safe_relative_to(self, *args, **kwargs):
+        try:
+            return original_relative_to(self, *args, **kwargs)
+        except ValueError as exc:
+            if "not in the subpath of" in str(exc):
+                return self
+            raise
+
+    def post_with_default_timeout(url, *args, **kwargs):
+        kwargs.setdefault("timeout", 5000)
+        return original_post(url, *args, **kwargs)
+
+    Path.relative_to = safe_relative_to  # type: ignore[method-assign]
+    requests.post = post_with_default_timeout  # type: ignore[assignment]
     try:
-        return _original_relative_to(self, *args, **kwargs)
-    except ValueError as e:
-        if "not in the subpath of" in str(e):
-            return self
-        raise e
+        yield
+    finally:
+        Path.relative_to = original_relative_to  # type: ignore[method-assign]
+        requests.post = original_post  # type: ignore[assignment]
 
 
-Path.relative_to = _safe_relative_to  # type: ignore[method-assign]
+def _set_api_key_env(adapter: str, api_key: Optional[str]) -> None:
+    if not api_key:
+        return
+    env_var = API_KEY_ENV_BY_ADAPTER.get(adapter)
+    if env_var:
+        os.environ[env_var] = api_key
 
-# Increase default timeout for requests.post
-requests.post = lambda url, timeout=5000, **kwargs: requests.request(
-    method="POST", url=url, timeout=timeout, **kwargs
-)
 
-
-class EvaluationJob:
-    """Orchestrates evaluation jobs with cleaner separation of concerns."""
+class SingleFileEvaluationJob:
+    """Evaluate exactly one pool-dataset file and persist its result."""
 
     def __init__(
         self,
-        tasks: List[str],
-        model_args: dict[str, Any],
-        category_name: str,
         *,
-        tasks_mapper_dict: Optional[dict] = None,
-        adapter: Literal[
-            "local-chat-completions",
-            "openai-chat-completions",
-            "anthropic-chat-completions",
-            "gemini",
-        ] = "local-chat-completions",
-        job_id: Optional[str] = None,
-        api_host: Optional[str] = None,
-        server_token: Optional[str] = None,
-        benchmark_id: Optional[str] = None,
-        llm_judge_model: Optional[str] = None,
-        llm_judge_provider: Optional[str] = None,
-        llm_judge_api_key: Optional[str] = None,
-        task_id: Optional[str] = None,
+        task_name: str,
+        category: str,
+        task_id: str,
+        source_pool_path: str,
+        adapter: str,
+        model_args: dict[str, Any],
+        model: Any = None,
+        batch_size: int = 8,
+        bootstrap_iters: int = 100000,
+        result_filename: str,
+        results_dir: str,
     ):
-        """Initialize evaluation job.
-
-        Args:
-            tasks: List of task names to evaluate
-            model_args: Model configuration arguments
-            category_name: Name of the category
-            tasks_mapper_dict: Optional dictionary mapping task names to task IDs
-            adapter: Model adapter type
-            job_id: Optional job ID for database updates
-            api_host: Optional API host URL
-            server_token: Optional server token for authentication
-            benchmark_id: Optional benchmark ID
-            llm_judge_model: Optional LLM judge model name
-            llm_judge_provider: Optional LLM judge provider
-            llm_judge_api_key: Optional LLM judge API key
-            task_id: Optional explicit task ID
         """
-        self.model_args = model_args or {}
-        self.tasks: List[str] = tasks
+        Args:
+            task_name: Generated lm_eval task name (LMHDataset.name).
+            category: Category identifier from the pool file (or fallback).
+            task_id: Task identifier from the pool file (or fallback).
+            source_pool_path: GCS path or local path the file came from
+                (preserved in the result file as ``pool_file``).
+            adapter: lm_eval adapter id (after any pre-processing).
+            model_args: Arguments passed to ``simple_evaluate``.
+            result_filename: Name of the result JSON written into ``results_dir``.
+            results_dir: Local directory where result JSONs are written.
+
+        Adapter-specific API-key env vars are populated by
+        ``core.common.set_api_key_for_adapter`` in ``run.py`` before this job
+        is constructed — we don't re-stamp them here.
+        """
+        self.task_name = task_name
+        self.category = category
+        self.task_id = task_id
+        self.source_pool_path = source_pool_path
         self.adapter = adapter
-        self.job_id = job_id
-        self.category_name = category_name
-        self.benchmark_id = benchmark_id
-        self.api_host = api_host
-        self.server_token = server_token
+        self.model_args = dict(model_args)
+        self.model = model
+        self.batch_size = batch_size
+        self.bootstrap_iters = bootstrap_iters
+        self.result_filename = result_filename
+        self.results_dir = results_dir
 
-        # Initialize helper classes
-        self.task_ops = TaskOperations(tasks_mapper_dict, task_id)
-        self.result_processor = ResultProcessor(
-            category_name=category_name,
-            api_host=api_host,
-            job_id=job_id,
-            server_token=server_token,
-            benchmark_id=benchmark_id,
-            task_id=task_id,
-        )
-        self.llm_judge_processor = LLMJudgeProcessor(
-            task_operations=self.task_ops,
-            llm_judge_api_key=llm_judge_api_key,
-            llm_judge_model=llm_judge_model,
-            llm_judge_provider=llm_judge_provider,
-        )
-
-        # Setup model args
         if "eos_string" not in self.model_args:
             self.model_args["eos_string"] = "<|endoftext|>"
-            logger.info("Added default eos_string='<|endoftext|>' to model_args")
 
-        # Set API key environment variables
-        api_key = os.getenv("API_KEY")
-        if api_key and self.adapter in ["openai-chat-completions", "local-chat-completions"]:
-            os.environ["OPENAI_API_KEY"] = api_key
-        if api_key and self.adapter == "anthropic-chat-completions":
-            os.environ["ANTHROPIC_API_KEY"] = api_key
-        if api_key and self.adapter == "gemini":
-            os.environ["GOOGLE_API_KEY"] = api_key
+        _set_api_key_env(self.adapter, os.getenv("API_KEY"))
 
-    def __call__(self) -> None:
-        """Run the evaluation job."""
-        # Update status to running
-        if self.api_host and self.job_id and self.server_token:
-            update_status(
-                api_host=self.api_host,
-                job_id=self.job_id,
-                server_token=self.server_token,
-                status=JobStatus.RUNNING,
-            )
+    def __call__(self) -> str:
+        """Run the evaluation. Returns the local path of the result JSON."""
+        logger.info(
+            "Running lm_eval (task=%s, category=%s, task_id=%s, source=%s)",
+            self.task_name,
+            self.category,
+            self.task_id,
+            self.source_pool_path,
+        )
 
-        try:
-            self._run_evaluation()
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            self._handle_error(e)
-
-    def _run_evaluation(self) -> None:
-        """Execute the evaluation workflow."""
-        logger.info("=" * 80)
-        logger.info("Starting evaluation job for category: %s", self.category_name)
-        logger.info("Tasks: %s", self.tasks)
-        logger.info("Adapter: %s", self.adapter)
-        logger.info("Model args: %s", self.model_args)
-        logger.info("=" * 80)
-
-        # Run lm_eval evaluation
         results = self._run_lm_eval()
-
-        # Add task information to results
-        results = self.task_ops.add_task_to_results(results)
-
         if not results:
-            logger.warning("No results found for the evaluation job.")
-            self._update_status(JobStatus.FAILED, "No results found for the evaluation job.")
-            return
+            raise RuntimeError(
+                f"lm_eval returned no results for {self.task_name}")
 
-        # Separate MCQ and generation tasks
-        mcq_tasks, generation_tasks = self.task_ops.separate_mcq_and_generation_tasks(results)
+        self._sanitize_results(results)
+        self._stamp_category_and_task(results)
 
-        # Process with LLM judge if configured
-        updated_results = results
-        updated_results = self.llm_judge_processor.process_generation_tasks(
-            updated_results, generation_tasks
-        )
-        updated_results = self.llm_judge_processor.process_mcq_tasks(
-            updated_results, mcq_tasks
-        )
+        return ResultProcessor(
+            category=self.category,
+            task_id=self.task_id,
+            source_pool_path=self.source_pool_path,
+            results_dir=self.results_dir,
+        ).export(results, filename=self.result_filename)
 
-        # Remove API key from results
-        self._sanitize_results(updated_results)
-
-        # Export results
-        self.result_processor.export_results(updated_results)
-
-        # Update status to completed
-        if self.api_host and self.job_id and self.server_token:
-            update_status(
-                api_host=self.api_host,
-                job_id=self.job_id,
-                server_token=self.server_token,
-                status=JobStatus.COMPLETED,
-            )
-
-        logger.info("✅ Evaluation job completed successfully")
+    # -- internal helpers ----------------------------------------------------
 
     def _run_lm_eval(self) -> Dict[str, Any]:
-        """Run the lm_eval evaluation.
-
-        Returns:
-            Evaluation results dictionary
-        """
         temp_dir = Path(".temp").resolve()
-
-        logger.info("Calling lm_eval.evaluator.simple_evaluate...")
-
-        results = cast(
-            dict[str, Any],
-            lm_eval.evaluator.simple_evaluate(
-                model=self.adapter,
-                model_args=self.model_args,
-                tasks=self.tasks,
-                apply_chat_template=True,
-                task_manager=lm_eval.tasks.TaskManager(
-                    include_path=str(temp_dir)
-                ),
-                batch_size=1,
-                gen_kwargs=get_max_tokens_config(self.adapter, self.model_args["model"]),
-            ),
+        use_chat_template = self.adapter not in ASR_ADAPTERS
+        model_batch_size = getattr(self.model, "batch_size", None)
+        effective_batch_size = (
+            model_batch_size
+            if isinstance(model_batch_size, (int, str))
+            else self.batch_size
         )
 
-        logger.info("✅ simple_evaluate completed successfully")
-        logger.info("Exporting results to %s.json", self.category_name)
+        with _lm_eval_compatibility_patches():
+            results = cast(
+                dict[str, Any],
+                lm_eval.evaluator.simple_evaluate(
+                    model=self.model if self.model is not None else self.adapter,
+                    model_args=None if self.model is not None else self.model_args,
+                    tasks=[self.task_name],
+                    apply_chat_template=use_chat_template,
+                    task_manager=lm_eval.tasks.TaskManager(
+                        include_path=str(temp_dir), include_defaults=False),
+                    batch_size=effective_batch_size,
+                    bootstrap_iters=self.bootstrap_iters,
+                    log_samples=True,
+                    gen_kwargs=get_max_tokens_config(
+                        self.adapter, self.model_args["model"]),
+                ),
+            )
 
+        # Reusing a model makes lm-eval report its class name and no arguments.
+        # Preserve result metadata produced before model reuse was introduced.
+        config = results.get("config")
+        if self.model is not None and isinstance(config, dict):
+            config["model"] = self.adapter
+            config["model_args"] = dict(self.model_args)
         return results
 
-    def _sanitize_results(self, results: Dict[str, Any]) -> None:
-        """Remove sensitive information from results.
+    @staticmethod
+    def _sanitize_results(results: Dict[str, Any]) -> None:
+        cfg = results.get("config")
+        if isinstance(cfg, dict):
+            model_args = cfg.get("model_args")
+            if isinstance(model_args, dict):
+                model_args.pop("api_key", None)
 
-        Args:
-            results: Results dictionary to sanitize (modified in-place)
-        """
-        if (
-            "config" in results
-            and "model_args" in results["config"]
-            and isinstance(results["config"]["model_args"], dict)
-            and "api_key" in results["config"]["model_args"]
-        ):
-            results["config"]["model_args"].pop("api_key")
-
-    def _update_status(
-        self, status: JobStatus, error_message: Optional[str] = None
-    ) -> None:
-        """Update job status.
-
-        Args:
-            status: New job status
-            error_message: Optional error message
-        """
-        if self.api_host and self.job_id and self.server_token:
-            update_status(
-                api_host=self.api_host,
-                job_id=self.job_id,
-                server_token=self.server_token,
-                status=status,
-                error_message=error_message,
-            )
-
-    def _handle_error(self, exception: Exception) -> None:
-        """Handle evaluation error.
-
-        Args:
-            exception: The exception that occurred
-        """
-        logger.error("❌ Error in evaluation job: %s", exception)
-        logger.error(traceback.format_exc())
-
-        api_error_data = self._extract_api_error_message(exception)
-
-        if self.api_host and self.job_id and self.server_token:
-            error_message = (
-                json.dumps(api_error_data)
-                if isinstance(api_error_data, dict)
-                else str(api_error_data)
-            )
-            self._update_status(JobStatus.FAILED, error_message)
-
-        error_message = (
-            json.dumps(api_error_data)
-            if isinstance(api_error_data, dict)
-            else str(api_error_data)
-        )
-        raise RuntimeError(error_message) from exception
-
-    def _extract_api_error_message(self, exception: Exception) -> Dict[str, Any]:
-        """Extract the full API error object from various exception types.
-
-        Args:
-            exception: The exception to extract error from
-
-        Returns:
-            Dictionary containing error information
-        """
-        try:
-            # Try to get error from response
-            if hasattr(exception, "response") and exception.response is not None:
-                try:
-                    error_data = cast(dict[str, Any], exception.response.json())
-                    if "error" in error_data:
-                        return error_data
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-            error_str = str(exception)
-
-            # Try to parse JSON from error string
-            if "API request failed with error message:" in error_str:
-                json_match = re.search(r"\{(?:[^{}]|{[^{}]*})*\}", error_str)
-                if json_match:
-                    try:
-                        error_json = cast(dict[str, Any], json.loads(json_match.group()))
-                        if "error" in error_json:
-                            return error_json
-                    except json.JSONDecodeError:
-                        pass
-
-            # Check exception args
-            if hasattr(exception, "args") and exception.args:
-                for arg in exception.args:
-                    if isinstance(arg, dict) and "error" in arg:
-                        return cast(dict[str, Any], arg)
-                    if isinstance(arg, str):
-                        try:
-                            parsed = cast(dict[str, Any], json.loads(arg))
-                            if "error" in parsed:
-                                return parsed
-                        except json.JSONDecodeError:
-                            pass
-
-            # Fallback error object
-            return {
-                "error": {
-                    "message": str(exception),
-                    "type": type(exception).__name__,
-                    "param": None,
-                    "code": "unknown",
-                }
-            }
-
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Error while extracting API error message: %s", e)
-            return {
-                "error": {
-                    "message": str(exception),
-                    "type": "extraction_error",
-                    "param": None,
-                    "code": "unknown",
-                }
-            }
+    def _stamp_category_and_task(self, results: Dict[str, Any]) -> None:
+        per_task = results.get("results") or {}
+        for task_block in per_task.values():
+            if isinstance(task_block, dict):
+                task_block.setdefault("task", self.task_id)
+                task_block.setdefault("category", self.category)
+        results["category"] = self.category
+        results["task"] = self.task_id
+        results["pool_file"] = self.source_pool_path

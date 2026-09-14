@@ -65,26 +65,36 @@ class LMHDataset:
     standardized JSON and YAML configurations.
     """
 
-    # Metadata keys from templates to exclude from final YAML
+    # Metadata keys from templates to exclude from final YAML.
+    # Matching is case-insensitive and treats spaces/underscores as equivalent —
+    # the backend emits "Type Of Result", the JSON template uses "Type of result",
+    # and the CSV/XML emit "type_of_result". All variants must be filtered so
+    # lm_eval's TaskConfig doesn't reject unknown kwargs.
     IGNORED_METADATA = {
         "author",
         "organization",
         "category",
         "version",
-        "Guidelines_creating_data",
-        "List_possible_outputs",
-        "Type of Data",
-        "Type of result",
-        "image_note",
-        "Type of input",
-        "Type of output",
-        "source",
-        "type_of_input",
-        "type_of_output",
-        "type_of_result",
+        "description",
         "guidelines_creating_data",
         "guidelines_creating_dataset",
+        "list_possible_outputs",
+        "type_of_data",
+        "type_of_result",
+        "type_of_input",
+        "type_of_output",
+        "image_note",
+        "source",
     }
+
+    @classmethod
+    def _normalize_meta_key(cls, key: str) -> str:
+        """Lowercase and collapse spaces to underscores for IGNORED_METADATA matching."""
+        return key.strip().lower().replace(" ", "_")
+
+    @classmethod
+    def _is_ignored_key(cls, key: str) -> bool:
+        return cls._normalize_meta_key(key) in cls.IGNORED_METADATA
 
     def __init__(
         self, file_name: str = "dataset-n", directory: str | None = None
@@ -123,10 +133,16 @@ class LMHDataset:
         # Generate unique task name
         task_part = task_dict.get("task", "Unknown_Task")
         category_part = task_dict.get("category", "Unknown_Category")
-        type_part = task_dict.get("Type of result", "")
+        type_part = next(
+            (
+                v for k, v in task_dict.items()
+                if self._normalize_meta_key(k) == "type_of_result"
+            ),
+            "",
+        )
 
-        # Handle metric(s) - support both string and list formats
-        metric_value = task_dict.get("metric", "")
+        # Handle metric(s) - support both "metric" and "metrics" keys, string and list formats
+        metric_value = task_dict.get("metric") or task_dict.get("metrics", "")
         if isinstance(metric_value, list):
             metric_part = "_".join([sanitize_config_name(m) for m in metric_value])
         else:
@@ -149,8 +165,11 @@ class LMHDataset:
         # Extract core harness fields
         task_dict.pop("name", "Unknown Task")
         self.task_id = task_dict.pop("task", "unknown_task_id")
-        self.metric = task_dict.pop("metric", None)
+        self.metric = task_dict.pop("metric", None) or task_dict.pop("metrics", None)
         self.category_id = task_dict.pop("category", None)
+
+        # Extract task-level custom_prompt before it goes into task_kwargs
+        self.custom_prompt: str | None = task_dict.pop("custom_prompt", None)
 
         # Handle data splitting (Taking last X elements for dev)
         raw_data = task_dict.pop("data", [])
@@ -158,7 +177,7 @@ class LMHDataset:
 
         # Filter remaining metadata to keep YAML clean
         self.task_kwargs = {
-            k: v for k, v in task_dict.items() if k not in self.IGNORED_METADATA
+            k: v for k, v in task_dict.items() if not self._is_ignored_key(k)
         }
 
     def _resolve_file_path(self, directory: str, file_name: str) -> Tuple[str, str]:
@@ -225,7 +244,7 @@ class LMHDataset:
             raise ValueError("CSV data section missing 'id' column header.")
 
         keys = reader[data_header_idx]
-        data_rows = []
+        splits: dict[str, list[dict[str, Any]]] = {"dev": [], "test": [], "train": []}
         for row in reader[data_header_idx + 1 :]:
             if not row or not any(row):
                 continue
@@ -248,50 +267,89 @@ class LMHDataset:
             mcq = [v for k, v in row_dict.items() if k.startswith("mcq_") and v]
             if mcq:
                 item["mcq"] = mcq
-            data_rows.append(item)
 
-        task["data"] = data_rows  # type: ignore[assignment]
+            # Backend writes split_type per row (defaults to "test"); bucket
+            # so downstream code can iterate self.data["test"]/self.data["dev"].
+            split = (row_dict.get("split_type") or "test").strip().lower()
+            if split not in splits:
+                split = "test"
+            splits[split].append(item)
+
+        task["data"] = splits  # type: ignore[assignment]
         return task
 
     def _load_xml(self, path: str) -> Dict[str, Any]:
         """Load XML file.
 
-        Args:
-            path: Path to XML file
+        Backend XML structure (see Benchmarks-Platform-backend
+        dataset-file-builder.util.ts):
+            <dataset>
+              <name/><version/>... <metrics><metric/>...</metrics>
+              <type_of_result/> <type_of_input/> <type_of_output/>
+              <guidelines_creating_data><guideline/>...</guidelines_creating_data>
+              <data>
+                <dev><item>...</item></dev>
+                <test><item>...</item></test>
+                <train><item>...</item></train>
+              </data>
+            </dataset>
 
-        Returns:
-            Task dictionary
+        Each <item> has:
+            <id/> <instruction/> <output/> <source/>
+            <experimental_prompts><prompt/>...</experimental_prompts>
+            <inputs><input/>...</inputs>
+            <mcq><option/>...</mcq>
         """
         tree = ET.parse(path)
         root = tree.getroot()
-        task = {
-            child.tag: child.text
-            for child in root
-            if child.tag not in ["data", "guidelines_creating_data"]
-        }
 
-        data_rows = []
+        task: Dict[str, Any] = {}
+        for child in root:
+            if child.tag in ("data", "guidelines_creating_data"):
+                continue
+            if child.tag == "metrics":
+                metrics = [m.text for m in child.findall("metric") if m.text]
+                if metrics:
+                    task["metrics"] = metrics
+            else:
+                task[child.tag] = child.text
+
+        def _parse_item(item_node: ET.Element) -> Dict[str, Any]:
+            item: Dict[str, Any] = {}
+            for child in item_node:
+                if child.tag == "experimental_prompts":
+                    item["Experimental prompts"] = [
+                        p.text for p in child.findall("prompt") if p.text
+                    ]
+                elif child.tag == "inputs":
+                    item["input"] = [
+                        v.text for v in child.findall("input") if v.text
+                    ]
+                elif child.tag == "mcq":
+                    item["mcq"] = [
+                        o.text for o in child.findall("option") if o.text
+                    ]
+                else:
+                    item[child.tag] = child.text
+            return item
+
+        splits: Dict[str, list[Dict[str, Any]]] = {"dev": [], "test": [], "train": []}
         data_node = root.find("data")
         if data_node is not None:
-            for item_node in data_node.findall("item"):
-                item: dict[str, Any] = {}
-                for child in item_node:
-                    if child.tag == "experimental_prompts":
-                        item["Experimental prompts"] = [
-                            p.text for p in child.findall("prompt") if p.text
-                        ]
-                    elif child.tag == "input":
-                        item["input"] = [
-                            v.text for v in child.findall("value") if v.text
-                        ]
-                    elif child.tag == "mcq":
-                        item["mcq"] = [
-                            o.text for o in child.findall("option") if o.text
-                        ]
-                    else:
-                        item[child.tag] = child.text
-                data_rows.append(item)
-        task["data"] = data_rows  # type: ignore[assignment]
+            for split_node in data_node:
+                split = split_node.tag.lower()
+                if split not in splits:
+                    continue
+                for item_node in split_node.findall("item"):
+                    splits[split].append(_parse_item(item_node))
+
+            # Fallback for legacy XML files that put <item> directly under <data>
+            # without a per-split wrapper — route them all into "test".
+            if not any(splits.values()):
+                for item_node in data_node.findall("item"):
+                    splits["test"].append(_parse_item(item_node))
+
+        task["data"] = splits  # type: ignore[assignment]
         return task
 
     def _escape_newline(self, task: Any) -> Any:
@@ -479,12 +537,18 @@ class LMHDataset:
                 it["output"] = it["output"][0]
             processed.append(it)
 
+        # Inject task-level custom_prompt into items that don't have their own
+        if self.custom_prompt:
+            for it in processed:
+                if not it.get("custom_prompt"):
+                    it["custom_prompt"] = self.custom_prompt
+
         # Normalize schema
         processed = self._normalize_schema(processed)
 
         out_path = f"{self.directory}/{self.file_name}_{split}.json"
         with open(out_path, "w", encoding="utf8") as f:
-            json.dump(processed, f, ensure_ascii=False, indent=2)
+            json.dump(processed, f, ensure_ascii=False, separators=(",", ":"))
 
         logger.info("Exported %s items to %s", len(processed), out_path)
 
@@ -615,6 +679,17 @@ class LMHDataset:
                 # Single custom metric - use its full config
                 final_yaml = metric_objects[0].get_yaml_config(base_yaml)
 
+                # Wire up process_results via the combined function wrapper
+                # so _write_yaml emits it as a !function tag
+                if metric_objects[0].config.process_results is not None:
+                    import src.metrics_combined as mc_module  # pylint: disable=import-outside-toplevel
+                    mc_module.CURRENT_COMBINED_FUNCTION = (
+                        metric_objects[0].config.process_results
+                    )
+                    final_yaml["process_results"] = (
+                        "!function src.metrics_combined._current_combined_process_results"
+                    )
+
         # Write YAML
         self._write_yaml(final_yaml)
 
@@ -645,6 +720,7 @@ class LMHDataset:
         has_images = any(
             _is_image_file(str(input_item))
             for items in self.data.values()
+            if items
             for item in items
             if isinstance(item.get("input"), list)
             for input_item in item["input"]
@@ -654,6 +730,7 @@ class LMHDataset:
         has_audio = any(
             _is_audio_file(str(input_item))
             for items in self.data.values()
+            if items
             for item in items
             if isinstance(item.get("input"), list)
             for input_item in item["input"]
@@ -669,12 +746,12 @@ class LMHDataset:
             "doc_to_text": doc_to_text,
             "doc_to_target": "output",
             "output_type": "generate_until",
-            "generation_kwargs": {"do_sample": False},
+            "generation_kwargs": {"do_sample": False, "until": []},
             "dataset_kwargs": {"data_files": data_files},
             "metadata": self.metadata,
             **self.task_kwargs,
         }
-        
+
         if has_images:
             yaml_config["doc_to_image"] = "!function multimodal_utils.doc_to_image"
             logger.info("Dataset contains images - adding doc_to_image function")
@@ -691,15 +768,15 @@ class LMHDataset:
             data: YAML configuration dictionary
         """
         out_path = Path(self.directory) / f"{self.file_name}.yaml"
-        
+
         doc_to_image_value = data.pop("doc_to_image", None)
         is_doc_to_image_function_tag = (
             doc_to_image_value
             and isinstance(doc_to_image_value, str)
             and doc_to_image_value.startswith("!function")
         )
-        
-        
+
+
         doc_to_audio_value = data.pop("doc_to_audio", None)
         is_doc_to_audio_function_tag = (
             doc_to_audio_value

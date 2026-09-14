@@ -1,14 +1,21 @@
 """BLEU metric implementation for text evaluation."""
 
+from functools import lru_cache
 from typing import Any, Dict, List, Tuple
-
-import evaluate
 
 from lm_eval.api import registry as le_registry
 from lm_eval.api.registry import register_aggregation, register_metric
 
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
-from src.metrics.metrics_utils import prepare_text_with_punctuation
+from src.metrics.metrics_utils import clamp_score, prepare_text_with_punctuation
+
+@lru_cache(maxsize=1)
+def _load_bleu_metric():
+    """Load and cache Hugging Face BLEU only when BLEU is requested."""
+    import evaluate  # pylint: disable=import-outside-toplevel
+
+    return evaluate.load("bleu")
+
 
 def compute_bleu_score(
     references: List[str],
@@ -29,7 +36,8 @@ def compute_bleu_score(
     Returns:
         Average BLEU score
     """
-    bleu = evaluate.load("bleu")
+    if len(references) != len(predictions):
+        raise ValueError("references and predictions must have the same length")
 
     def tokenizer(x):
         return x.split()
@@ -43,20 +51,22 @@ def compute_bleu_score(
         for p in predictions
     ]
 
+    if not refs:
+        return 0.0
+    bleu_metric = _load_bleu_metric()
     total = 0.0
-    valid = 0
     for ref, pred in zip(refs, preds):
         if not pred or not ref:
             continue
         try:
-            score = bleu.compute(
+            score = bleu_metric.compute(
                 references=[ref], predictions=[pred], tokenizer=tokenizer
             )
-            total += score["bleu"]
-            valid += 1
+            if score is not None:
+                total += score["bleu"]
         except ZeroDivisionError:
             continue
-    return total / valid if valid else 0.0
+    return clamp_score(total / len(refs)) if refs else 0.0
 
 
 def compute_bleu_aggregation(items: List[Tuple[Any, Any]]) -> float:
@@ -68,8 +78,10 @@ def compute_bleu_aggregation(items: List[Tuple[Any, Any]]) -> float:
     Returns:
         Average BLEU score
     """
-    refs = [r[0] if isinstance(r, (list, tuple)) else r for r, _ in items]
-    preds = [p for _, p in items]
+    if not all(isinstance(item, (list, tuple)) and len(item) == 2 for item in items):
+        raise ValueError("BLEU aggregation items must be [reference, prediction] pairs")
+    refs = [item[0] for item in items]
+    preds = [item[1] for item in items]
 
     return compute_bleu_score(
         references=refs,
@@ -107,7 +119,7 @@ def process_results(doc: Dict[str, Any], results: Any) -> Dict[str, List[str]]:
     Returns:
         Dictionary with BLEU data containing [reference, prediction]
     """
-    preds = results[0] if isinstance(results, list) else results
+    preds = results[0] if isinstance(results, list) and results else ""
     golds = doc["output"]
     return {"bleu": [golds, preds]}
 
@@ -134,9 +146,9 @@ class BleuMetric(BaseMetric):
         """Get generation kwargs for BLEU metric.
 
         Returns:
-            Generation parameters with sampling disabled
+            Generation parameters (no sampling, stop on empty string)
         """
-        return {"do_sample": False}
+        return {"do_sample": False, "until": []}
 
 
 # Register in custom registry

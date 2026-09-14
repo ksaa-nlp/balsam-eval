@@ -77,17 +77,24 @@ def create_combined_process_results(
                     try:
                         metric_data = process_results_fn(doc, results)
                         if isinstance(metric_data, dict):
+                            duplicate_keys = combined_data.keys() & metric_data.keys()
+                            if duplicate_keys:
+                                raise ValueError(
+                                    "Duplicate result keys from metric "
+                                    f"{metric_name!r}: {sorted(duplicate_keys)}"
+                                )
                             combined_data.update(metric_data)
                             logger.debug(
                                 "Successfully processed results for metric: %s",
                                 metric_name,
                             )
-                    except RuntimeError as e:
+                    except Exception as e:  # pylint: disable=broad-exception-caught
                         logger.error(
                             "Error calling process_results for metric %s: %s",
                             metric_name,
                             e,
                         )
+                        raise
                 else:
                     logger.debug("No process_results for metric: %s", metric_name)
 

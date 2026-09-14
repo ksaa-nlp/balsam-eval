@@ -19,7 +19,7 @@ def extract_text_from_prediction(pred: str) -> str:
         Extracted text content
     """
     if not isinstance(pred, str):
-        return str(pred) if pred else ""
+        return "" if pred is None else str(pred)
 
     pred = pred.strip()
 
@@ -32,7 +32,7 @@ def extract_text_from_prediction(pred: str) -> str:
                 text_value = parsed["text"]
                 if isinstance(text_value, str):
                     return text_value
-                return str(text_value) if text_value else ""
+                return "" if text_value is None else str(text_value)
             # Handle other dict formats - return first string value
             for v in parsed.values():
                 if isinstance(v, str):
@@ -68,7 +68,7 @@ def process_results_asr(
     Returns:
         Dictionary with metric data containing [reference, prediction]
     """
-    preds = results[0] if isinstance(results, list) else results
+    preds = results[0] if isinstance(results, list) and results else ""
     golds = doc["output"]
 
     # Extract actual text from prediction

@@ -5,8 +5,8 @@ Metric-specific functions should remain in their respective metric files.
 """
 
 import logging
+import math
 import re
-import sys
 import unicodedata
 
 logger = logging.getLogger(__name__)
@@ -16,13 +16,21 @@ try:
 except ImportError:
     araby = None
 
-# Punctuation handling - shared across BLEU and ROUGE metrics
-_PUNCT_TABLE = dict.fromkeys(
-    i for i in range(sys.maxunicode) if unicodedata.category(chr(i)).startswith("P")
+# Punctuation handling shared across BLEU and ROUGE metrics.
+all_punctuations = "".join(
+    chr(i) for i in range(0x110000) if unicodedata.category(chr(i)).startswith("P")
 )
-all_punctuations = "".join(chr(p) for p in _PUNCT_TABLE)
 OTHERS = """`÷×؛<>_()*&^%][ـ،/:"؟.,'{}~¦+|!"…"–ـ"""
-all_punctuations += "".join([o for o in OTHERS if o not in all_punctuations])
+all_punctuations += "".join(char for char in OTHERS if char not in all_punctuations)
+_PUNCTUATION_PATTERN = re.compile(f"([{re.escape(all_punctuations)}])")
+
+
+def clamp_score(score: float) -> float:
+    """Return a finite metric score constrained to the inclusive [0, 1] range."""
+    value = float(score)
+    if math.isnan(value):
+        return 0.0
+    return max(0.0, min(1.0, value))
 
 
 def prepare_text_with_punctuation(
@@ -46,7 +54,7 @@ def prepare_text_with_punctuation(
         text = str(text)
 
     # Add spaces around punctuation
-    text = re.sub("([" + all_punctuations + "])", " \\1 ", text)
+    text = _PUNCTUATION_PATTERN.sub(r" \1 ", text)
 
     if change_curly_braces:
         text = text.replace("{", "[").replace("}", "]")

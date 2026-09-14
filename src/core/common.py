@@ -1,12 +1,33 @@
 """Common utility functions shared across the project."""
 
+import hashlib
 import json
 import os
 import shutil
+import ssl
 
 from dotenv import load_dotenv
+from google.cloud import storage  # type: ignore[attr-defined]
+
+from src.adapter_config import API_KEY_ENV_BY_ADAPTER
 
 load_dotenv()
+
+
+def configure_ssl_certificates() -> None:
+    """Use certifi when framework Python has no usable system CA bundle."""
+    if os.getenv("SSL_CERT_FILE"):
+        return
+
+    default_cafile = ssl.get_default_verify_paths().cafile
+    if default_cafile and os.path.isfile(default_cafile):
+        return
+
+    import certifi  # pylint: disable=import-outside-toplevel
+
+    certifi_cafile = certifi.where()
+    if os.path.isfile(certifi_cafile):
+        os.environ["SSL_CERT_FILE"] = certifi_cafile
 
 
 def setup_directories(*dirs: str) -> None:
@@ -22,108 +43,255 @@ def copy_multimodal_utils_to_temp(temp_dir: str = ".temp") -> str | None:
         temp_dir: Directory to copy the file to
 
     Returns:
-        Path to the copied file, or None if source not found
+        Path to the copied or generated file.
     """
-    multimodal_utils_src = "src/core/multimodal_utils.py"
     multimodal_utils_dst = os.path.join(temp_dir, "multimodal_utils.py")
+    source_candidates = [
+        "src/core/multimodal_utils.py",
+        os.path.join(os.path.dirname(__file__), "multimodal_utils.py"),
+    ]
 
-    if os.path.exists(multimodal_utils_src):
-        os.makedirs(temp_dir, exist_ok=True)
+    os.makedirs(temp_dir, exist_ok=True)
+    for multimodal_utils_src in source_candidates:
+        if not os.path.exists(multimodal_utils_src):
+            continue
         shutil.copy2(multimodal_utils_src, multimodal_utils_dst)
         print(f"Copied multimodal_utils.py to {multimodal_utils_dst}")
         return multimodal_utils_dst
-    print(f"Warning: {multimodal_utils_src} not found")
+
+    fallback_content = '''"""Standalone multimodal helpers for lm_eval YAML imports."""
+
+import os
+
+from PIL import Image
+
+
+def doc_to_image(doc):
+    images = []
+    for path in doc.get("images", []):
+        try:
+            images.append(Image.open(path))
+        except (OSError, IOError) as exc:
+            print(f"Warning: Failed to load image {path}: {exc}")
+    return images
+
+
+def doc_to_audio(doc):
+    audios = []
+    for path in doc.get("audio", []):
+        if not os.path.exists(path):
+            print(f"Warning: Audio file not found: {path}")
+            continue
+        audio = load_audio_file(path)
+        if audio is not None:
+            audios.append(audio)
+    return audios
+
+
+def load_audio_file(file_path):
+    try:
+        import librosa
+
+        audio_array, sampling_rate = librosa.load(file_path, sr=None)
+        return {"array": audio_array, "sampling_rate": sampling_rate}
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        print(f"Warning: Failed to load audio with librosa: {exc}")
+
+    try:
+        import numpy as np
+        import soundfile as sf
+
+        audio_array, sampling_rate = sf.read(file_path)
+        if audio_array.dtype != np.float32:
+            audio_array = audio_array.astype(np.float32)
+        if len(audio_array.shape) > 1:
+            audio_array = audio_array[:, 0]
+        return {"array": audio_array, "sampling_rate": sampling_rate}
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        print(f"Warning: Failed to load audio with soundfile: {exc}")
+
+    return None
+'''
+    with open(multimodal_utils_dst, "w", encoding="utf-8") as f:
+        f.write(fallback_content)
+    print(f"Wrote fallback multimodal_utils.py to {multimodal_utils_dst}")
+    return multimodal_utils_dst
+
+
+def _normalise_remote_media_ref(
+    ref_str: str,
+    default_bucket: str,
+    object_prefix: str = "",
+) -> tuple[str, str]:
+    """Return the bucket and object name for a backend media reference."""
+    prefix = object_prefix.strip("/")
+    if not prefix:
+        raise ValueError("MEDIA_OBJECT_PREFIX is required for remote media resolution")
+    if ref_str.startswith("gs://"):
+        parts = ref_str.removeprefix("gs://").split("/", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError(f"GCS media URI must include a bucket and object: {ref_str}")
+        media_bucket, object_ref = parts
+        if media_bucket != default_bucket:
+            raise ValueError(
+                f"GCS media bucket {media_bucket!r} does not match configured "
+                f"GCLOUD_BUCKET {default_bucket!r}"
+            )
+        if not object_ref.startswith(f"{prefix}/"):
+            raise ValueError(
+                f"GCS media object {object_ref!r} is outside allowed prefix {prefix!r}"
+            )
+        return media_bucket, object_ref
+    if "file:" in ref_str:
+        ref_str = ref_str.split("file:", 1)[1]
+    object_ref = ref_str.lstrip("/")
+    if not object_ref.startswith(f"{prefix}/"):
+        object_ref = f"{prefix}/{object_ref}"
+    return default_bucket, object_ref
+
+
+def copy_metrics_combined_to_temp(temp_dir: str = ".temp") -> str | None:
+    """Write a proxy metrics_combined module to temp directory for lm_eval.
+
+    lm_eval resolves !function references relative to the YAML directory and
+    loads the module as a fresh instance. A plain copy would have
+    CURRENT_COMBINED_FUNCTION=None since task.py sets it on the original
+    module in sys.modules. This proxy delegates to the real module at call
+    time so the global is resolved correctly.
+
+    Args:
+        temp_dir: Directory to write the proxy to
+
+    Returns:
+        Path to the proxy file, or None if source not found
+    """
+    metrics_src = "src/metrics_combined.py"
+    metrics_dst = os.path.join(temp_dir, "src.metrics_combined.py")
+
+    if os.path.exists(metrics_src):
+        os.makedirs(temp_dir, exist_ok=True)
+        proxy_content = (
+            "import sys\n"
+            "\n"
+            "def _current_combined_process_results(doc, results):\n"
+            "    real = sys.modules['src.metrics_combined']\n"
+            "    return real._current_combined_process_results(doc, results)\n"
+        )
+        with open(metrics_dst, "w", encoding="utf-8") as f:
+            f.write(proxy_content)
+        print(f"Wrote metrics_combined proxy to {metrics_dst}")
+        return metrics_dst
+    print(f"Warning: {metrics_src} not found")
     return None
 
 
-def copy_images_to_temp(json_file_path: str, temp_dir: str) -> None:
-    """Copy images referenced in JSON file to temp directory.
+def _materialise_media(
+    json_file_path: str,
+    temp_dir: str,
+    item_key: str,
+    sub_dir: str,
+    bucket: str | None,
+    object_prefix: str = "",
+) -> None:
+    """Best-effort: pull every media reference into ``temp_dir/<sub_dir>``.
 
-    Args:
-        json_file_path: Path to JSON file containing image references
-        temp_dir: Directory to copy images to
+    Each item in the JSON list may contain a list under ``item_key`` (typically
+    ``images`` / ``audio``). Each reference is resolved in this order:
+
+    1. If it already exists on the local filesystem, copy it (local mode).
+    2. Otherwise, if ``bucket`` is set, try downloading from
+       ``gs://${bucket}/<reference>`` — pool files generated by the backend
+       store relative GCS object paths.
+    3. On any download failure, the reference is left untouched in the JSON
+       and a warning is logged so the downstream lm_eval failure (FileNotFound)
+       is easier to debug.
     """
-    with open(json_file_path, 'r', encoding='utf-8') as f:
+    with open(json_file_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    images_dir = os.path.join(temp_dir, "images")
-    os.makedirs(images_dir, exist_ok=True)
+    media_dir = os.path.join(temp_dir, sub_dir)
+    os.makedirs(media_dir, exist_ok=True)
 
+    # Lazy-init: avoid the import / auth cost when no media is needed.
+    storage_client = None
+
+    changed = False
     for item in data:
-        if 'images' in item and isinstance(item['images'], list):
-            for img_path in item['images']:
-                if os.path.exists(img_path):
-                    img_name = os.path.basename(img_path)
-                    dst_path = os.path.join(images_dir, img_name)
-                    if not os.path.exists(dst_path):
-                        shutil.copy2(img_path, dst_path)
-                        print(f"Copied image: {img_name} -> {dst_path}")
-                    # Update path in item to relative path
-                    item['images'] = [dst_path if p == img_path else p for p in item['images']]
+        refs = item.get(item_key)
+        if not isinstance(refs, list):
+            continue
+        new_refs: list[str] = []
+        for ref in refs:
+            ref_str = str(ref)
+            filename = os.path.basename(ref_str) or "media"
+            digest = hashlib.sha256(ref_str.encode("utf-8")).hexdigest()[:16]
+            dst_path = os.path.join(media_dir, f"{digest}-{filename}")
 
-    # Write back updated JSON
-    with open(json_file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+            if os.path.exists(ref_str):
+                if not os.path.exists(dst_path):
+                    shutil.copy2(ref_str, dst_path)
+                new_refs.append(dst_path)
+                changed = True
+                continue
+
+            if os.path.exists(dst_path):
+                new_refs.append(dst_path)
+                changed = True
+                continue
+
+            if bucket:
+                media_bucket, object_ref = _normalise_remote_media_ref(
+                    ref_str, bucket, object_prefix
+                )
+                if storage_client is None:
+                    try:
+                        storage_client = storage.Client()
+                    except Exception as e:  # pylint: disable=broad-exception-caught
+                        print(
+                            f"[WARN] Could not init GCS client for media: {e}")
+                        new_refs.append(ref_str)
+                        continue
+                try:
+                    storage_client.bucket(media_bucket).blob(object_ref).download_to_filename(
+                        dst_path
+                    )
+                    new_refs.append(dst_path)
+                    changed = True
+                    continue
+                except Exception as e:  # pylint: disable=broad-exception-caught
+                    print(f"[WARN] Could not fetch gs://{media_bucket}/{object_ref}: {e}")
+
+            # Couldn't resolve — leave the reference as-is. Downstream lm_eval
+            # will fail loudly with FileNotFound, which is more debuggable than
+            # silently dropping the item.
+            new_refs.append(ref_str)
+
+        if changed:
+            item[item_key] = new_refs
+
+    if changed:
+        with open(json_file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
 
 
-def copy_audio_to_temp(json_file_path: str, temp_dir: str) -> None:
-    """Copy audio files referenced in JSON file to temp directory.
-
-    Args:
-        json_file_path: Path to JSON file containing audio file references
-        temp_dir: Directory to copy audio files to
-    """
-    with open(json_file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    audio_dir = os.path.join(temp_dir, "audio")
-    os.makedirs(audio_dir, exist_ok=True)
-
-    for item in data:
-        if 'audio' in item and isinstance(item['audio'], list):
-            for audio_path in item['audio']:
-                if os.path.exists(audio_path):
-                    audio_name = os.path.basename(audio_path)
-                    dst_path = os.path.join(audio_dir, audio_name)
-                    if not os.path.exists(dst_path):
-                        shutil.copy2(audio_path, dst_path)
-                        print(f"Copied audio: {audio_name} -> {dst_path}")
-                    # Update path in item to relative path
-                    item['audio'] = [dst_path if p == audio_path else p for p in item['audio']]
-
-    # Write back updated JSON
-    with open(json_file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def copy_images_to_temp(
+    json_file_path: str,
+    temp_dir: str,
+    bucket: str | None = None,
+    object_prefix: str = "",
+) -> None:
+    """Resolve image references for ``json_file_path`` into ``temp_dir/images``."""
+    _materialise_media(json_file_path, temp_dir, "images", "images", bucket, object_prefix)
 
 
-def setup_environment() -> dict[str, str | None]:
-    """Load and return environment variables.
-
-    Returns:
-        Dictionary of environment variables
-
-    Raises:
-        ValueError: If required environment variables are missing
-    """
-    env_vars = {
-        'BASE_URL': os.getenv("BASE_URL"),
-        'API_KEY': os.getenv("API_KEY"),
-        'MODEL_NAME': os.getenv("MODEL"),
-        'ADAPTER': os.getenv("ADAPTER"),
-        'SERVER_TOKEN': os.getenv("SERVER_TOKEN"),
-        'API_HOST': os.getenv("API_HOST"),
-        'USER_ID': os.getenv("USER_ID"),
-        'BENCHMARK_ID': os.getenv("BENCHMARK_ID"),
-        'EVALUATION_TYPES': os.getenv("EVALUATION_TYPES"),
-        'LLM_JUDGE': os.getenv("JUDGE_MODEL"),
-        'LLM_JUDGE_PROVIDER': os.getenv("JUDGE_PROVIDER"),
-        'LLM_JUDGE_API_KEY': os.getenv("JUDGE_API_KEY"),
-        'CATEGORY_ID': os.getenv("CATEGORY"),
-        'JOB_ID': os.getenv("JOB_ID"),
-        'TEMPERATURE': os.getenv("TEMPERATURE"),
-    }
-
-    return env_vars
+def copy_audio_to_temp(
+    json_file_path: str,
+    temp_dir: str,
+    bucket: str | None = None,
+    object_prefix: str = "",
+) -> None:
+    """Resolve audio references for ``json_file_path`` into ``temp_dir/audio``."""
+    _materialise_media(json_file_path, temp_dir, "audio", "audio", bucket, object_prefix)
 
 
 def set_api_key_for_adapter(adapter: str, api_key: str | None) -> None:
@@ -136,15 +304,6 @@ def set_api_key_for_adapter(adapter: str, api_key: str | None) -> None:
     if not api_key:
         return
 
-    env_var_map = {
-        "openai-chat-completions": "OPENAI_API_KEY",
-        "local-chat-completions": "OPENAI_API_KEY",
-        "anthropic-chat-completions": "ANTHROPIC_API_KEY",
-        "gemini": "GOOGLE_API_KEY",
-        "groq": "GROQ_API_KEY",
-        "humain": "HUMAIN_API_KEY",
-    }
-
-    env_var = env_var_map.get(adapter)
+    env_var = API_KEY_ENV_BY_ADAPTER.get(adapter)
     if env_var:
         os.environ[env_var] = api_key

@@ -4,25 +4,38 @@ Refactored LLM Judge system with base class and specialized MCQ/Generative class
 The main improvement is separating concerns:
 - Base class handles common logic (model calling, aggregation, batch processing)
 - MCQ judge uses binary 0-1 scoring with simpler prompt
-- Generative judge uses 0-3 scoring with normalization to 0-1
+- Generative judge uses continuous 0-1 scoring for partial credit
 """
 
 import json
 import logging
+import math
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from statistics import mean, median
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union, cast
 
-from deepeval.models import AnthropicModel, GeminiModel, GPTModel, OllamaModel
-from deepeval.test_case import LLMTestCase
+import lm_eval.models  # noqa: F401  pylint: disable=unused-import
+from lm_eval.api.instance import Instance
+from lm_eval.api.registry import get_model
 from tqdm import tqdm
 
-from src.local_model import LocalModelEdited
+import src.adapters  # noqa: F401  pylint: disable=unused-import
+from src.adapters.chat._retry import is_retryable_error
 
 # Setup logging
 logger = logging.getLogger(__name__)
+
+PROVIDER_REGISTRY: Dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "gemini": "gemini",
+    "groq": "groq",
+    "local": "local-adapter",
+}
+
+JUDGE_MAX_GEN_TOKENS = 8192
 
 
 @dataclass
@@ -38,9 +51,12 @@ class EvaluationResult:
 class ModelConfig:
     """Configuration for a model to use with the LLMJudge."""
     name: str
-    provider: Literal["openai", "anthropic", "gemini", "ollama", "local_openai"] = "openai"
+    provider: Literal[
+        "openai", "anthropic", "gemini", "groq", "local",
+    ] = "openai"
     api_key: Optional[str] = None
     endpoint_url: Optional[str] = None
+    custom_prompt: Optional[str] = None
     other: Optional[Dict[str, Any]] = None
 
 
@@ -56,61 +72,70 @@ class TestCaseDict:
 
 
 def create_model_adapter(config: ModelConfig) -> Any:
-    """Create a model adapter based on the configuration."""
-    base_params = {}
+    """Create an lm-eval model adapter based on the configuration."""
+    model_key = PROVIDER_REGISTRY.get(config.provider)
+    if model_key is None:
+        raise ValueError(f"Unsupported provider: {config.provider}")
+
+    model_parameter = "model_name" if config.provider == "gemini" else "model"
+    params: Dict[str, Any] = {model_parameter: config.name}
+    if config.api_key and config.provider in {"gemini", "groq"}:
+        params["api_key"] = config.api_key
+    if config.endpoint_url:
+        params["base_url"] = config.endpoint_url
     if config.other:
-        base_params.update(config.other)
+        params.update(config.other)
 
-    if config.provider == "openai":
-        return GPTModel(
-            model=config.name,
-            _openai_api_key=config.api_key,
-            base_url=config.endpoint_url,
-            **base_params
-        )
-    if config.provider == "anthropic":
-        return AnthropicModel(
-            model=config.name,
-            _anthropic_api_key=config.api_key,
-            **base_params
-        )
-    if config.provider == "gemini":
-        return GeminiModel(
-            model=config.name,
-            api_key=config.api_key,
-            **base_params
-        )
-    if config.provider == "ollama":
-        return OllamaModel(
-            model=config.name,
-            base_url=config.endpoint_url,
-            **base_params
-        )
-    if config.provider == "local_openai":
-        return LocalModelEdited(
-            model_name=config.name,
-            local_model_api_key=config.api_key,
-            base_url=config.endpoint_url,
-            **base_params
-        )
-    raise ValueError(f"Unsupported provider: {config.provider}")
+    adapter = get_model(model_key)(**params)
+    if config.api_key and config.provider in {"openai", "anthropic", "local"}:
+        # lm-eval API adapters expose API keys as cached properties backed by env vars.
+        # Setting the instance value keeps each judge's credentials isolated.
+        setattr(adapter, "api_key", config.api_key)
+    return adapter
 
 
-def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) -> Dict[str, Any]:
+def call_model_adapter_with_retry(
+    adapter: Any,
+    prompt: str,
+    max_retries: int = 3,
+    max_score: float = 1.0,
+    provider: str | None = None,
+) -> Dict[str, Any]:
     """Call model adapter with retry logic."""
 
     for attempt in range(max_retries):
         try:
             # Try different methods to call the model based on its type
-            model_response = None
+            model_response: Any = None
 
-            # For DeepEval models, use the appropriate method
             if hasattr(adapter, 'generate'):
-                model_response = adapter.generate(prompt)
+                model_response = getattr(adapter, 'generate')(prompt)
+            elif hasattr(adapter, "generate_until"):
+                request_prompt: Any = prompt
+                if hasattr(adapter, "apply_chat_template"):
+                    request_prompt = getattr(adapter, "apply_chat_template")(
+                        [{"role": "user", "content": prompt}],
+                        add_generation_prompt=True,
+                    )
+                request = Instance(
+                    request_type="generate_until",
+                    doc={},
+                    arguments=(
+                        request_prompt,
+                        {
+                            "until": [],
+                            "do_sample": False,
+                            "max_gen_toks": JUDGE_MAX_GEN_TOKENS,
+                        },
+                    ),
+                    idx=0,
+                )
+                responses = getattr(adapter, "generate_until")([request])
+                model_response = responses[0] if responses else None
             elif hasattr(adapter, '_call'):  # pylint: disable=protected-access
-                model_response = adapter._call(prompt)
+                model_response = getattr(adapter, '_call')(prompt)
             elif hasattr(adapter, 'invoke'):
-                model_response = adapter.invoke(prompt)
+                model_response = getattr(adapter, 'invoke')(prompt)
             elif callable(adapter):
                 model_response = adapter(prompt)
             else:
@@ -152,10 +177,18 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                 raw_text = response_text.strip().replace("```json", "").replace("```", "").strip()
                 parsed = json.loads(raw_text)
 
-                if "score" in parsed and "explanation" in parsed:
+                score = parsed.get("score") if isinstance(parsed, dict) else None
+                explanation = parsed.get("explanation") if isinstance(parsed, dict) else None
+                if (
+                    isinstance(explanation, str)
+                    and not isinstance(score, bool)
+                    and isinstance(score, (int, float))
+                    and math.isfinite(score)
+                    and 0 <= score <= max_score
+                ):
                     return {
-                        "score": parsed["score"],
-                        "explanation": parsed["explanation"],
+                        "score": score,
+                        "explanation": explanation,
                     }
 
                 logger.warning("Missing keys in parsed output (attempt %d): %s", attempt+1, parsed)
@@ -163,18 +196,17 @@ def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) ->
                 logger.warning("JSON parsing or structure error (attempt %d): %s", attempt+1, e)
                 logger.debug("Raw response: %s", response_text)
 
-        except Exception:  # pylint: disable=broad-exception-caught
-            logger.error("Model call error (attempt %d)", attempt+1)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Model call error (attempt %d): %s", attempt+1, e)
+            if not is_retryable_error(e, provider=provider):
+                raise
 
-        # Wait before retry with exponential backoff
-        wait_time = min(2 ** attempt, 30)
-        logger.info("Retrying after %d seconds...", wait_time)
-        time.sleep(wait_time)
+        if attempt + 1 < max_retries:
+            wait_time = min(2 ** attempt, 30)
+            logger.info("Retrying after %d seconds...", wait_time)
+            time.sleep(wait_time)
 
-    return {
-        "score": None,
-        "explanation": "Error: Unable to parse a valid response after retries"
-    }
+    raise RuntimeError(f"LLM judge: unable to get a valid response after {max_retries} retries")
 
 
 class BaseLLMJudge(ABC):
@@ -200,6 +232,12 @@ class BaseLLMJudge(ABC):
         custom_prompt: Optional[str] = None,
         threshold: float = 0.7
     ):
+        if not model_configs:
+            raise ValueError("At least one judge model configuration is required")
+        if aggregation_method not in {"mean", "median"}:
+            raise ValueError("aggregation_method must be 'mean' or 'median'")
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1")
         self.model_configs = model_configs
         self.model_adapters = [create_model_adapter(config) for config in model_configs]
         self.aggregation_method = aggregation_method
@@ -233,11 +271,17 @@ class BaseLLMJudge(ABC):
         given_answer: str,
         context: Optional[str],
         config: ModelConfig,
-        adapter: Any
+        adapter: Any,
+        custom_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Evaluate using a single model with proper error handling."""
-        # Create the prompt
-        prompt = self.custom_prompt if self.custom_prompt else self.get_evaluation_prompt()
+        # Create the prompt (per-call > instance-level > default)
+        prompt = (
+            custom_prompt
+            or config.custom_prompt
+            or self.custom_prompt
+            or self.get_evaluation_prompt()
+        )
         prompt += f'\n\n[PROMPT]\n{question}\n[/PROMPT]\n'
         if context:
             prompt += f'\n[CONTEXT]\n{context}\n[/CONTEXT]\n'
@@ -246,13 +290,20 @@ class BaseLLMJudge(ABC):
 
         try:
             # Call the model with retry logic
-            result = call_model_adapter_with_retry(adapter, prompt)
+            result = call_model_adapter_with_retry(
+                adapter,
+                prompt,
+                max_score=self.get_max_score(),
+                provider=config.provider,
+            )
 
             raw_score = result["score"]
             explanation = result["explanation"]
 
             # Normalize score using subclass-specific logic
-            norm_score = self.normalize_score(raw_score) if raw_score is not None else 0
+            if raw_score is None:
+                raise RuntimeError(f"LLM judge {config.name} returned no score")
+            norm_score = self.normalize_score(raw_score)
             passed = norm_score >= self.threshold
 
             return {
@@ -264,16 +315,9 @@ class BaseLLMJudge(ABC):
                 "explanation": explanation
             }
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Error evaluating with %s: %s", config.name, e)
-            return {
-                "model": config.name,
-                "provider": config.provider,
-                "score": 0,
-                "raw_score": 0,
-                "passed": False,
-                "explanation": f"Error: {str(e)}"
-            }
+        except Exception:
+            logger.error("Error evaluating with %s", config.name, exc_info=True)
+            raise
 
     def evaluate_answer(
         self,
@@ -282,7 +326,8 @@ class BaseLLMJudge(ABC):
         given_answer: str,
         context: Optional[str] = None,
         test_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        custom_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Evaluate a single answer using multiple models."""
         model_results = []
@@ -290,7 +335,8 @@ class BaseLLMJudge(ABC):
         # Evaluate using each model
         for config, adapter in zip(self.model_configs, self.model_adapters):
             result = self._evaluate_single_model(
-                question, reference_answer, given_answer, context, config, adapter
+                question, reference_answer, given_answer, context, config, adapter,
+                custom_prompt=custom_prompt,
             )
             model_results.append(result)
 
@@ -316,18 +362,35 @@ class BaseLLMJudge(ABC):
 
     def _aggregate_model_results(self, model_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Aggregate results across models."""
-        scores = [res["score"] for res in model_results if res["score"] is not None]
-        raw_scores = [res["raw_score"] for res in model_results if res["raw_score"] is not None]
+        valid_results = [
+            res
+            for res in model_results
+            if res.get("score") is not None and res.get("raw_score") is not None
+        ]
+        if len(valid_results) != len(model_results):
+            raise RuntimeError(
+                "LLM judge coverage incomplete: "
+                f"expected {len(model_results)} scores, scored {len(valid_results)}"
+            )
+        scores = [res["score"] for res in valid_results]
+        raw_scores = [res["raw_score"] for res in valid_results]
 
-        if not scores:
-            return {
-                "overall_score": 0,
-                "overall_raw_score": 0,
-                "aggregated_explanation": "No valid scores"
-            }
+        if not model_results:
+            raise RuntimeError("LLM judge coverage incomplete: expected 0 scores, scored 0")
+        if any(
+            isinstance(score, bool)
+            or not isinstance(score, (int, float))
+            or not math.isfinite(score)
+            for score in [*scores, *raw_scores]
+        ):
+            raise RuntimeError("LLM judge produced invalid model scores")
 
-        agg_score = median(scores) if self.aggregation_method == "median" else mean(scores)
-        agg_raw = median(raw_scores) if self.aggregation_method == "median" else mean(raw_scores)
+        use_median = self.aggregation_method == "median"
+        agg_score = median(scores) if use_median else mean(scores)
+        agg_raw = (
+            (median(raw_scores) if use_median else mean(raw_scores))
+            if raw_scores else 0
+        )
 
         explanation = (f"Aggregated ({self.aggregation_method}) score: {agg_score:.4f}. " +
                       "; ".join(f"{res['model']}: {res['explanation']}" for res in model_results))
@@ -340,7 +403,7 @@ class BaseLLMJudge(ABC):
 
     def evaluate_batch(
         self,
-        test_cases: Union[List[LLMTestCase], List[Dict[str, Any]], List[TestCaseDict]],
+        test_cases: Union[List[Any], List[Dict[str, Any]], List[TestCaseDict]],
         show_progress: bool = True
     ) -> Dict[str, Any]:
         """Evaluate a batch of test cases."""
@@ -356,14 +419,18 @@ class BaseLLMJudge(ABC):
             test_id: str | None = None
             metadata: Dict[str, Any] | None = None
 
-            if isinstance(tc, LLMTestCase):
-                question = tc.input or ""
-                reference_answer = tc.expected_output or ""
-                given_answer = tc.actual_output or ""
-                context_list = tc.context
+            if all(
+                hasattr(tc, attr)
+                for attr in ("input", "expected_output", "actual_output")
+            ):
+                object_case = cast(Any, tc)
+                question = object_case.input or ""
+                reference_answer = object_case.expected_output or ""
+                given_answer = object_case.actual_output or ""
+                context_list = getattr(object_case, "context", None)
                 context = "\n".join(context_list) if context_list else None
-                test_id = getattr(tc, "id", None)
-                metadata = getattr(tc, "metadata", None)
+                test_id = getattr(object_case, "id", None)
+                metadata = getattr(object_case, "metadata", None)
             elif isinstance(tc, dict):
                 question = tc.get("question", "")
                 reference_answer = tc.get("reference_answer", "")

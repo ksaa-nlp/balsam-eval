@@ -15,6 +15,8 @@ Usage:
     >>> from src.metrics.metrics_utils import prepare_text_with_punctuation, all_punctuations
 """
 
+import lm_eval.api.metrics  # noqa: F401  pylint: disable=unused-import
+
 # Metric implementations
 from .accuracy_metric import (
     AccuracyMetric,
@@ -22,7 +24,13 @@ from .accuracy_metric import (
 )
 from .bleu_metric import BleuMetric, process_results as bleu_process_results
 from .cer_metric import CERMetric, process_results as cer_process_results
-from .new_metric import NewMetric, process_results as new_metric_process_results
+from .llm_judge_metric import (
+    LLMJudgeMetric,
+    process_results as llm_judge_process_results,
+)
+# ``new_metric.py`` is a template — intentionally NOT imported here, otherwise
+# its registration side-effects pollute every evaluation result with a
+# ``new_metric: 0.0`` row. Copy it to a new file and import that instead.
 from .rouge_metric import RougeMetric, process_results as rouge_process_results
 from .wer_metric import WERMetric, process_results as wer_process_results
 
@@ -39,12 +47,14 @@ __all__ = [
     "RougeMetric",
     "WERMetric",
     "CERMetric",
+    "LLMJudgeMetric",
     # Process results functions
     "accuracy_process_results",
     "bleu_process_results",
     "rouge_process_results",
     "wer_process_results",
     "cer_process_results",
+    "llm_judge_process_results",
     # Shared utilities (only truly shared)
     "prepare_text_with_punctuation",
     "all_punctuations",

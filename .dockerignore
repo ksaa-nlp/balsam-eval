@@ -22,8 +22,9 @@ __pycache__/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Virtual environments
-.env
+# Virtual environments and local environment files
+.env*
+!.env.example
 .venv/
 venv/
 env/
@@ -60,7 +61,6 @@ dist/
 docs/
 *.md
 *.rst
-*.txt
 LICENSE
 CHANGELOG*
 
@@ -107,4 +107,15 @@ docker-compose*
 *.backup
 *~
 
+.vscode
+.history
+.tasks_temp
+.tasks_images
+.temp
+.DS_Store
+.deepeval
+.results
 ignores
+.tasks_audio
+.tasks_ominiaudio
+temp.py
