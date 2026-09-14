@@ -15,6 +15,7 @@ import requests
 
 # Import custom metrics package to auto-register all metrics
 import src.metrics  # Registers all metrics in src.metrics.impl.*  # pylint: disable=unused-import
+import src.gemini_adapter  # Registers the custom Gemini model  # pylint: disable=unused-import
 
 from src.adapter_utils import get_max_tokens_config
 from src.db_operations import JobStatus, update_status
