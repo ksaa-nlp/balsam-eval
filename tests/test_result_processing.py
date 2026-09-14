@@ -16,6 +16,16 @@ def make_processor(tmp_path):
     )
 
 
+@pytest.fixture(autouse=True)
+def empty_custom_metric_registry(monkeypatch):
+    registry = Mock()
+    registry.get.return_value = None
+    monkeypatch.setattr(
+        "src.processors.result_processing.get_metrics_registry",
+        lambda: registry,
+    )
+
+
 def test_numpy_encoder_serializes_arrays_and_scalars():
     encoded = json.loads(
         json.dumps(
@@ -92,6 +102,34 @@ def test_add_question_scores_uses_registered_aggregation(monkeypatch, tmp_path):
     processor._add_question_scores({"samples": {"task": [sample]}})
 
     assert sample["scores"] == {"accuracy": 1.0}
+
+
+def test_add_question_scores_uses_custom_metric_aggregation(monkeypatch, tmp_path):
+    metric = Mock()
+    metric.config.aggregation_name = "custom_bleu"
+    registry = Mock()
+    registry.get.return_value = metric
+    custom_aggregation = Mock(return_value=0.70128)
+    default_aggregation = Mock(return_value=70.128)
+    monkeypatch.setattr(
+        "src.processors.result_processing.get_metrics_registry",
+        lambda: registry,
+    )
+    monkeypatch.setattr(
+        "src.processors.result_processing.get_aggregation",
+        lambda _name: custom_aggregation,
+    )
+    monkeypatch.setattr(
+        "src.processors.result_processing.get_metric_aggregation",
+        lambda _name: default_aggregation,
+    )
+    sample = {"metrics": ["bleu"], "bleu": ["reference", "prediction"]}
+
+    make_processor(tmp_path)._add_question_scores({"samples": {"task": [sample]}})
+
+    assert sample["scores"] == {"bleu": 0.70128}
+    custom_aggregation.assert_called_once_with([["reference", "prediction"]])
+    default_aggregation.assert_not_called()
 
 
 @pytest.mark.parametrize("failure", ["missing", "broken"])

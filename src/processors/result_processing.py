@@ -13,7 +13,9 @@ from statistics import mean
 from typing import Any, Dict
 
 import numpy as np
-from lm_eval.api.registry import get_metric_aggregation
+from lm_eval.api.registry import get_aggregation, get_metric_aggregation
+
+from src.metrics_registry import get_metrics_registry
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +101,15 @@ class ResultProcessor:
                         raise RuntimeError(
                             f"Required metric result is missing: {metric_name}"
                         )
-                    aggregation = get_metric_aggregation(metric_name)
+                    metric = get_metrics_registry().get(metric_name)
+                    aggregation_name = (
+                        metric.config.aggregation_name if metric is not None else None
+                    )
+                    aggregation = (
+                        get_aggregation(aggregation_name)
+                        if aggregation_name
+                        else get_metric_aggregation(metric_name)
+                    )
                     if aggregation is None:
                         raise RuntimeError(
                             f"Required metric aggregation is unavailable: {metric_name}"
