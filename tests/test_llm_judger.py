@@ -206,16 +206,14 @@ def test_single_model_prompt_precedence_and_normalized_result(monkeypatch):
     ("method", "expected_score", "expected_raw"),
     [("mean", 0.6, 1.5), ("median", 0.6, 1.5)],
 )
-def test_aggregation_ignores_none_scores_and_explains_models(method, expected_score, expected_raw):
+def test_aggregation_requires_complete_model_coverage(method, expected_score, expected_raw):
     judge = build_judge(aggregation_method=method)
-    result = judge._aggregate_model_results([
-        {"model": "a", "score": 0.2, "raw_score": 1, "explanation": "low"},
-        {"model": "b", "score": 1.0, "raw_score": 2, "explanation": "high"},
-        {"model": "c", "score": None, "raw_score": None, "explanation": "missing"},
-    ])
-    assert result["overall_score"] == expected_score
-    assert result["overall_raw_score"] == expected_raw
-    assert "a: low" in result["aggregated_explanation"]
+    with pytest.raises(RuntimeError, match="expected 3 scores, scored 2"):
+        judge._aggregate_model_results([
+            {"model": "a", "score": 0.2, "raw_score": 1, "explanation": "low"},
+            {"model": "b", "score": 1.0, "raw_score": 2, "explanation": "high"},
+            {"model": "c", "score": None, "raw_score": None, "explanation": "missing"},
+        ])
 
 
 def test_evaluate_answer_aggregates_models_and_metadata(monkeypatch):
@@ -261,11 +259,10 @@ def test_evaluate_batch_rejects_unknown_case_type():
         judge.evaluate_batch([object()], show_progress=False)
 
 
-def test_empty_aggregation_is_deterministic_and_empty_statistics_are_rejected():
+def test_empty_aggregation_and_statistics_are_rejected():
     judge = build_judge()
-    assert judge._aggregate_model_results([]) == {
-        "overall_score": 0, "overall_raw_score": 0, "aggregated_explanation": "No valid scores"
-    }
+    with pytest.raises(RuntimeError, match="expected 0 scores, scored 0"):
+        judge._aggregate_model_results([])
     with pytest.raises(StatisticsError):
         judge._calculate_batch_statistics([])
 

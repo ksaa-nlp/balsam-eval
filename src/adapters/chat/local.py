@@ -27,6 +27,7 @@ from lm_eval.models.api_models import JsonChatStr  # type: ignore[import-untyped
 from lm_eval.models.openai_completions import (  # type: ignore[import-untyped]
     LocalChatCompletion,
 )
+from src.adapters.chat._provider_utils import validate_generation_results
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +214,7 @@ class LocalAudioLM(LocalChatCompletion):
                 requests,
                 disable_tqdm=disable_tqdm,  # pyright: ignore[reportCallIssue]
             )
-            return result
+            return validate_generation_results(result, len(requests), "Local Chat")
 
         runtime = cast(_LocalChatRuntime, self)
         results: List[str] = []
@@ -239,22 +240,18 @@ class LocalAudioLM(LocalChatCompletion):
                 messages = _inject_media_into_messages(messages, media_parts)
 
             chat_str = JsonChatStr(json.dumps(messages))
-            try:
-                response = runtime.model_call(
-                    messages=[chat_str],
-                    generate=True,
-                    gen_kwargs=copy.deepcopy(gen_kwargs),
-                )
-                parsed = runtime.parse_generations(response)
-                results.append(parsed[0] if parsed else "")
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.error("Generation error: %s", e)
-                results.append("")
+            response = runtime.model_call(
+                messages=[chat_str],
+                generate=True,
+                gen_kwargs=copy.deepcopy(gen_kwargs),
+            )
+            parsed = runtime.parse_generations(response)
+            results.extend(validate_generation_results(parsed, 1, "Local Chat"))
 
         assert len(results) == len(requests), (
             f"Result count mismatch: {len(results)} vs {len(requests)}"
         )
-        return results
+        return validate_generation_results(results, len(requests), "Local Chat")
 
     # ------------------------------------------------------------------ #
     # Loglikelihood stubs
@@ -263,19 +260,13 @@ class LocalAudioLM(LocalChatCompletion):
     def loglikelihood(
         self, requests: list, **kwargs: Any
     ) -> List[Tuple[float, bool]]:
-        logger.warning(
-            "Local Chat API does not support loglikelihood. "
-            "Returning dummy values for %d requests.",
-            len(requests),
+        raise NotImplementedError(
+            "Local Chat API does not support loglikelihood"
         )
-        return [(0.0, True) for _ in requests]
 
     def loglikelihood_rolling(
         self, requests: list, disable_tqdm: bool = False
     ) -> List[float]:
-        logger.warning(
-            "Local Chat API does not support loglikelihood_rolling. "
-            "Returning dummy values for %d requests.",
-            len(requests),
+        raise NotImplementedError(
+            "Local Chat API does not support loglikelihood_rolling"
         )
-        return [0.0 for _ in requests]

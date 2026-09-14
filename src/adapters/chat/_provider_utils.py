@@ -9,6 +9,25 @@ from typing import Any
 import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
 from PIL import Image
+from lm_eval.models.api_models import LMEVAL_MODEL_NONE_ANSWER_PLACEHOLDER
+
+
+def validate_generation_results(
+    results: list[Any], expected_count: int, provider: str
+) -> list[str]:
+    """Reject missing, invalid, and lm-eval placeholder model outputs."""
+    if len(results) != expected_count:
+        raise RuntimeError(
+            f"{provider} returned {len(results)} predictions for {expected_count} requests"
+        )
+    if any(
+        not isinstance(result, str)
+        or result == LMEVAL_MODEL_NONE_ANSWER_PLACEHOLDER
+        or not result.strip()
+        for result in results
+    ):
+        raise RuntimeError(f"{provider} returned missing or invalid predictions")
+    return results
 
 
 def request_auxiliary(instance: Any) -> dict[str, Any]:

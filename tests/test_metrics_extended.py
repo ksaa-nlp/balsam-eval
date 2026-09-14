@@ -347,11 +347,9 @@ def test_parse_csv_env_trims_and_discards_empty_values(monkeypatch):
     assert llm_judge_metric._parse_csv_env("MISSING") == []
 
 
-def test_get_judge_configs_returns_empty_when_unconfigured(caplog):
-    with caplog.at_level(logging.WARNING):
-        assert llm_judge_metric._get_judge_configs() == []
-
-    assert "LLM judge not configured" in caplog.text
+def test_get_judge_configs_fails_when_unconfigured():
+    with pytest.raises(RuntimeError, match="required but not configured"):
+        llm_judge_metric._get_judge_configs()
 
 
 def test_get_judge_configs_broadcasts_legacy_values(monkeypatch):
@@ -481,6 +479,7 @@ def test_normalize_mcq_answer(answer, expected):
 def test_normalize_mcq_answer_preserves_answer_without_options():
     assert llm_judge_metric._normalize_mcq_answer(" A ", []) == " A "
     assert llm_judge_metric._normalize_mcq_answer(None, ["alpha"]) == ""
+    assert llm_judge_metric._normalize_mcq_answer(0, ["alpha"]) == "0"
 
 
 def test_llm_judge_aggregation_routes_mcq_and_generative_items(monkeypatch):
@@ -495,7 +494,6 @@ def test_llm_judge_aggregation_routes_mcq_and_generative_items(monkeypatch):
         [
             ("mcq question", "A", "b)", ["alpha", "beta"], "mcq prompt"),
             ("open question", "gold", "pred", None, "gen prompt"),
-            ("skipped", "", "pred", None, None),
         ]
     )
 
@@ -519,16 +517,73 @@ def test_llm_judge_aggregation_routes_mcq_and_generative_items(monkeypatch):
     generative.evaluate_answer.assert_called_once()
 
 
-def test_llm_judge_aggregation_returns_zero_when_no_scores(monkeypatch, caplog):
+def test_llm_judge_aggregation_fails_when_judge_unavailable(monkeypatch):
     monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=None))
 
-    with caplog.at_level(logging.WARNING):
-        result = llm_judge_metric.compute_llm_judge_aggregation(
+    with pytest.raises(RuntimeError, match="unavailable"):
+        llm_judge_metric.compute_llm_judge_aggregation(
             [("question", "gold", "pred", None, None)]
         )
 
-    assert result == 0.0
-    assert "produced no scores" in caplog.text
+
+def test_llm_judge_aggregation_fails_without_valid_coverage():
+    with pytest.raises(RuntimeError, match="expected 1 scores, scored 0"):
+        llm_judge_metric.compute_llm_judge_aggregation(
+            [("question", "", "prediction", None, None)]
+        )
+
+
+def test_llm_judge_aggregation_rejects_partial_coverage(monkeypatch):
+    judge = Mock()
+    judge.evaluate_answer.return_value = {"overall_score": 0.5}
+    monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=judge))
+
+    with pytest.raises(RuntimeError, match="expected 2 scores, scored 1"):
+        llm_judge_metric.compute_llm_judge_aggregation(
+            [
+                ("scored", "gold", "prediction", None, None),
+                ("missing", "", "prediction", None, None),
+            ]
+        )
+
+
+def test_llm_judge_aggregation_rejects_missing_judge_result(monkeypatch):
+    judge = Mock()
+    judge.evaluate_answer.return_value = {}
+    monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=judge))
+
+    with pytest.raises(RuntimeError, match="expected 1 scores, scored 0"):
+        llm_judge_metric.compute_llm_judge_aggregation(
+            [("question", "gold", "prediction", None, None)]
+        )
+
+
+def test_llm_judge_aggregation_preserves_legitimate_zero(monkeypatch):
+    judge = Mock()
+    judge.evaluate_answer.return_value = {"overall_score": 0.0}
+    monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=judge))
+
+    assert llm_judge_metric.compute_llm_judge_aggregation(
+        [("question", 0, 0, None, None)]
+    ) == 0.0
+    judge.evaluate_answer.assert_called_once_with(
+        question="question",
+        reference_answer="0",
+        given_answer="0",
+        custom_prompt=None,
+    )
+
+
+@pytest.mark.parametrize("score", [True, float("nan"), float("inf")])
+def test_llm_judge_rejects_invalid_overall_scores(monkeypatch, score):
+    judge = Mock()
+    judge.evaluate_answer.return_value = {"overall_score": score}
+    monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=judge))
+
+    with pytest.raises(RuntimeError, match="invalid overall score"):
+        llm_judge_metric.compute_llm_judge_aggregation(
+            [("question", "gold", "prediction", None, None)]
+        )
 
 
 @pytest.mark.parametrize(("judge_score", "expected"), [(-0.5, 0.0), (1.5, 1.0)])
@@ -544,26 +599,20 @@ def test_llm_judge_aggregation_clamps_scores(monkeypatch, judge_score, expected)
     assert result == expected
 
 
-def test_llm_judge_aggregation_skips_unavailable_mcq_judge(monkeypatch):
+def test_llm_judge_aggregation_fails_when_required_mcq_judge_unavailable(monkeypatch):
     generative = Mock()
     generative.evaluate_answer.return_value = {"overall_score": 0.5}
     monkeypatch.setattr(llm_judge_metric, "_get_mcq_judge", Mock(return_value=None))
     monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=generative))
 
-    result = llm_judge_metric.compute_llm_judge_aggregation(
-        [
-            ("mcq", "A", "A", ["alpha"], None),
-            ("generative", "gold", 123, None, None),
-        ]
-    )
-
-    assert result == 0.5
-    generative.evaluate_answer.assert_called_once_with(
-        question="generative",
-        reference_answer="gold",
-        given_answer="123",
-        custom_prompt=None,
-    )
+    with pytest.raises(RuntimeError, match="MCQ LLM judge is unavailable"):
+        llm_judge_metric.compute_llm_judge_aggregation(
+            [
+                ("mcq", "A", "A", ["alpha"], None),
+                ("generative", "gold", 123, None, None),
+            ]
+        )
+    generative.evaluate_answer.assert_not_called()
 
 
 def test_llm_judge_process_results_and_metric_export():

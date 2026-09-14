@@ -23,6 +23,8 @@ from PIL import Image
 from lm_eval.api.model import LM  # type: ignore[import-untyped]
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
 
+from src.adapters.chat._retry import is_retryable_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -365,6 +367,8 @@ class GeminiLM(LM):
                 except Exception as e:  # pylint: disable=broad-exception-caught
                     logger.error("Generation error idx=%d attempt=%d: %s", idx, attempt + 1, e)
                     last_error = e
+                    if not is_retryable_error(e, provider="gemini"):
+                        raise
                     if attempt < self.max_retries - 1:
                         time.sleep(self.retry_timeout * (attempt + 1))
 
@@ -534,6 +538,8 @@ class GeminiLM(LM):
                     self.max_retries,
                     e,
                 )
+                if not is_retryable_error(e, provider="gemini"):
+                    raise
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_timeout * (attempt + 1))
                 else:

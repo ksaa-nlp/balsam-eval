@@ -39,12 +39,17 @@ def test_failed_media_download_preserves_reference(monkeypatch, tmp_path, capsys
     )
     monkeypatch.setattr(common.storage, "Client", Mock(return_value=client))
 
-    common.copy_audio_to_temp(str(data_file), str(tmp_path / "temp"), bucket="bucket")
+    common.copy_audio_to_temp(
+        str(data_file),
+        str(tmp_path / "temp"),
+        bucket="bucket",
+        object_prefix="trusted",
+    )
 
     assert json.loads(data_file.read_text(encoding="utf-8")) == [
         {"audio": ["missing.wav"]}
     ]
-    assert "Could not fetch gs://bucket/missing.wav" in capsys.readouterr().out
+    assert "Could not fetch gs://bucket/trusted/missing.wav" in capsys.readouterr().out
 
 
 def test_missing_local_media_without_bucket_preserves_reference(tmp_path):

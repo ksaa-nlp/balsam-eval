@@ -13,13 +13,16 @@ import io
 import json
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional, Protocol, Tuple, cast
 
 import requests as http_requests
 from tqdm import tqdm
-
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
 from lm_eval.models.anthropic_llms import AnthropicChat  # type: ignore[import-untyped]
+
+from src.adapters.chat._provider_utils import validate_generation_results
+from src.adapters.chat._retry import is_retryable_error
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +230,7 @@ class AnthropicAudioLM(AnthropicChat):
                 requests,
                 disable_tqdm=disable_tqdm,  # pyright: ignore[reportCallIssue]
             )
-            return result
+            return validate_generation_results(result, len(requests), "Anthropic")
 
         runtime = cast(_AnthropicRuntime, self)
         results: List[str] = []
@@ -268,30 +271,43 @@ class AnthropicAudioLM(AnthropicChat):
                 stop_sequences=until,
             )
 
-            try:
-                resp = http_requests.post(
-                    runtime.base_url,
-                    json=payload,
-                    headers=runtime.header,
-                    verify=runtime.verify_certificate,
-                    timeout=runtime.timeout,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                text = ""
-                for block in data.get("content", []):
-                    if block.get("type") == "text":
-                        text = block.get("text", "")
+            last_error: Exception = RuntimeError("Anthropic returned empty content")
+            max_retries = max(1, getattr(runtime, "max_retries", 3))
+            for attempt in range(max_retries):
+                try:
+                    resp = http_requests.post(
+                        runtime.base_url,
+                        json=payload,
+                        headers=runtime.header,
+                        verify=runtime.verify_certificate,
+                        timeout=runtime.timeout,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    text = next(
+                        (block.get("text", "") for block in data.get("content", [])
+                         if block.get("type") == "text"),
+                        "",
+                    )
+                    if text:
+                        results.append(text)
                         break
-                results.append(text)
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.error("Anthropic generation error: %s", e)
-                results.append("")
+                    last_error = RuntimeError("Anthropic returned empty content")
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    last_error = exc
+                    if not is_retryable_error(exc, provider="anthropic"):
+                        raise
+                if attempt + 1 < max_retries:
+                    time.sleep(getattr(runtime, "retry_timeout", 1) * (attempt + 1))
+            else:
+                raise RuntimeError(
+                    f"Anthropic request failed after {max_retries} attempts"
+                ) from last_error
 
         assert len(results) == len(requests), (
             f"Result count mismatch: {len(results)} vs {len(requests)}"
         )
-        return results
+        return validate_generation_results(results, len(requests), "Anthropic")
 
     # ------------------------------------------------------------------ #
     # Loglikelihood stubs
@@ -300,19 +316,13 @@ class AnthropicAudioLM(AnthropicChat):
     def loglikelihood(
         self, requests: list, **kwargs: Any
     ) -> List[Tuple[float, bool]]:
-        logger.warning(
-            "Anthropic Messages API does not support loglikelihood. "
-            "Returning dummy values for %d requests.",
-            len(requests),
+        raise NotImplementedError(
+            "Anthropic Messages API does not support loglikelihood"
         )
-        return [(0.0, True) for _ in requests]
 
     def loglikelihood_rolling(
         self, requests: list, disable_tqdm: bool = False
     ) -> List[float]:
-        logger.warning(
-            "Anthropic Messages API does not support loglikelihood_rolling. "
-            "Returning dummy values for %d requests.",
-            len(requests),
+        raise NotImplementedError(
+            "Anthropic Messages API does not support loglikelihood_rolling"
         )
-        return [0.0 for _ in requests]

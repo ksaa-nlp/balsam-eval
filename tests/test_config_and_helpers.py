@@ -13,6 +13,7 @@ REMOTE_FIELDS = {
     "adapter": "openai",
     "model_name": "model",
     "bucket": "bucket",
+    "media_object_prefix": "development",
     "results_path": "results",
     "pool_files": ["pool.json"],
 }
@@ -22,6 +23,7 @@ def test_from_env_parses_scalar_and_csv_values(monkeypatch):
     monkeypatch.setenv("MODEL", "gpt-test")
     monkeypatch.setenv("ADAPTER", "openai")
     monkeypatch.setenv("POOL_FILES", " one.json, ,two.json ")
+    monkeypatch.setenv("MEDIA_OBJECT_PREFIX", "trusted/media")
     monkeypatch.setenv("JUDGE_MODEL", "judge-a,judge-b")
 
     config = EvalConfig.from_env()
@@ -29,6 +31,7 @@ def test_from_env_parses_scalar_and_csv_values(monkeypatch):
     assert config.model_name == "gpt-test"
     assert config.adapter == "openai"
     assert config.pool_files == ["one.json", "two.json"]
+    assert config.media_object_prefix == "trusted/media"
     assert config.llm_judge == ["judge-a", "judge-b"]
 
 

@@ -7,6 +7,7 @@ the API directly.
 
 import json
 import logging
+import math
 import os
 from statistics import mean
 from typing import Any, Dict
@@ -49,8 +50,12 @@ class ResultProcessor:
     def export(self, results: Dict[str, Any], *, filename: str) -> str:
         """Persist ``results`` to ``<results_dir>/<filename>``."""
         results = self._strip_multimodal_data(results)
-        self._add_question_scores(results)
         average_scores = self._calculate_average_scores(results)
+        if not average_scores:
+            raise RuntimeError(
+                "Evaluation produced no aggregate metrics; refusing to export result"
+            )
+        self._add_question_scores(results)
         enriched = {
             **results,
             "average_scores": average_scores,
@@ -91,23 +96,26 @@ class ResultProcessor:
                 question_scores: dict[str, Any] = {}
                 for metric_name in sample.get("metrics", []):
                     if metric_name not in sample:
-                        continue
+                        raise RuntimeError(
+                            f"Required metric result is missing: {metric_name}"
+                        )
                     aggregation = get_metric_aggregation(metric_name)
                     if aggregation is None:
-                        logger.warning(
-                            "Cannot calculate question score for metric %s",
-                            metric_name,
+                        raise RuntimeError(
+                            f"Required metric aggregation is unavailable: {metric_name}"
                         )
-                        continue
-                    try:
-                        question_scores[metric_name] = aggregation(
-                            [sample[metric_name]]
+                    score = aggregation([sample[metric_name]])
+                    if isinstance(score, dict) and "rougeLsum" in score:
+                        score = score["rougeLsum"]
+                    if (
+                        isinstance(score, (bool, np.bool_))
+                        or not isinstance(score, (int, float, np.integer, np.floating))
+                        or not math.isfinite(score)
+                    ):
+                        raise RuntimeError(
+                            f"Invalid per-question metric value for {metric_name}"
                         )
-                    except Exception:  # pylint: disable=broad-exception-caught
-                        logger.exception(
-                            "Failed to calculate question score for metric %s",
-                            metric_name,
-                        )
+                    question_scores[metric_name] = score
                 sample["scores"] = question_scores
 
     def _calculate_average_scores(self, results: Dict[str, Any]) -> Dict[str, float]:
@@ -117,29 +125,46 @@ class ResultProcessor:
 
         per_task = results.get("results")
         if not isinstance(per_task, dict):
-            return averaged
+            raise RuntimeError("Evaluation results must contain task metric blocks")
 
         for task_name, task_result in per_task.items():
             if not isinstance(task_result, dict):
-                continue
+                raise RuntimeError(f"Malformed aggregate block for task {task_name}")
+            task_metric_count = 0
             for key, value in task_result.items():
-                if not key.endswith(",none"):
+                if not key.endswith(",none") or key.endswith("_stderr,none"):
                     continue
+                task_metric_count += 1
                 metric_name = key.replace(",none", "")
                 if isinstance(value, dict):
                     if "rougeLsum" in value:
+                        score = value["rougeLsum"]
+                        if (
+                            isinstance(score, (bool, np.bool_))
+                            or not isinstance(
+                                score, (int, float, np.integer, np.floating)
+                            )
+                            or not math.isfinite(score)
+                        ):
+                            raise RuntimeError(f"Invalid aggregate metric value for {key}")
                         collected.setdefault(metric_name, []).append(
-                            value["rougeLsum"])
-                    continue
-                if isinstance(value, (int, float)):
+                            float(score))
+                        continue
+                    raise RuntimeError(f"Unsupported aggregate metric value for {key}")
+                if (
+                    isinstance(value, (int, float, np.integer, np.floating))
+                    and not isinstance(value, (bool, np.bool_))
+                    and math.isfinite(value)
+                ):
                     collected.setdefault(metric_name, []).append(float(value))
                     continue
-                logger.debug(
-                    "Skipping unexpected value type for %s in %s: %s",
-                    key,
-                    task_name,
-                    type(value),
+                if isinstance(value, (int, float, np.integer, np.floating)):
+                    raise RuntimeError(f"Invalid aggregate metric value for {key}")
+                raise RuntimeError(
+                    f"Unsupported aggregate metric value for {key}: {type(value).__name__}"
                 )
+            if task_metric_count == 0:
+                raise RuntimeError(f"Task {task_name} has no aggregate metric values")
 
         for metric_name, scores in collected.items():
             if scores:

@@ -21,6 +21,8 @@ from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
 from PIL import Image
 from tqdm import tqdm
 
+from src.adapters.chat._retry import is_retryable_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -365,6 +367,8 @@ class GroqLM(LM):
                 logger.error("API error (attempt %d): %s: %s", attempt + 1, type(e).__name__, e)
                 last_error = e
 
+                if not is_retryable_error(e, provider="groq"):
+                    raise
                 if attempt < self.max_retries - 1:
                     wait_time = self.retry_timeout * (attempt + 1)
                     logger.info("Waiting %.0fs before retry...", wait_time)

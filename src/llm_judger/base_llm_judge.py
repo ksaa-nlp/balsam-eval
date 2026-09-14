@@ -22,6 +22,7 @@ from lm_eval.api.registry import get_model
 from tqdm import tqdm
 
 import src.adapters  # noqa: F401  pylint: disable=unused-import
+from src.adapters.chat._retry import is_retryable_error
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -94,7 +95,11 @@ def create_model_adapter(config: ModelConfig) -> Any:
 
 
 def call_model_adapter_with_retry(
-    adapter: Any, prompt: str, max_retries: int = 3, max_score: float = 1.0
+    adapter: Any,
+    prompt: str,
+    max_retries: int = 3,
+    max_score: float = 1.0,
+    provider: str | None = None,
 ) -> Dict[str, Any]:
     """Call model adapter with retry logic."""
 
@@ -193,11 +198,13 @@ def call_model_adapter_with_retry(
 
         except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error("Model call error (attempt %d): %s", attempt+1, e)
+            if not is_retryable_error(e, provider=provider):
+                raise
 
-        # Wait before retry with exponential backoff
-        wait_time = min(2 ** attempt, 30)
-        logger.info("Retrying after %d seconds...", wait_time)
-        time.sleep(wait_time)
+        if attempt + 1 < max_retries:
+            wait_time = min(2 ** attempt, 30)
+            logger.info("Retrying after %d seconds...", wait_time)
+            time.sleep(wait_time)
 
     raise RuntimeError(f"LLM judge: unable to get a valid response after {max_retries} retries")
 
@@ -284,14 +291,19 @@ class BaseLLMJudge(ABC):
         try:
             # Call the model with retry logic
             result = call_model_adapter_with_retry(
-                adapter, prompt, max_score=self.get_max_score()
+                adapter,
+                prompt,
+                max_score=self.get_max_score(),
+                provider=config.provider,
             )
 
             raw_score = result["score"]
             explanation = result["explanation"]
 
             # Normalize score using subclass-specific logic
-            norm_score = self.normalize_score(raw_score) if raw_score is not None else 0
+            if raw_score is None:
+                raise RuntimeError(f"LLM judge {config.name} returned no score")
+            norm_score = self.normalize_score(raw_score)
             passed = norm_score >= self.threshold
 
             return {
@@ -350,15 +362,28 @@ class BaseLLMJudge(ABC):
 
     def _aggregate_model_results(self, model_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Aggregate results across models."""
-        scores = [res["score"] for res in model_results if res["score"] is not None]
-        raw_scores = [res["raw_score"] for res in model_results if res["raw_score"] is not None]
+        valid_results = [
+            res
+            for res in model_results
+            if res.get("score") is not None and res.get("raw_score") is not None
+        ]
+        if len(valid_results) != len(model_results):
+            raise RuntimeError(
+                "LLM judge coverage incomplete: "
+                f"expected {len(model_results)} scores, scored {len(valid_results)}"
+            )
+        scores = [res["score"] for res in valid_results]
+        raw_scores = [res["raw_score"] for res in valid_results]
 
-        if not scores:
-            return {
-                "overall_score": 0,
-                "overall_raw_score": 0,
-                "aggregated_explanation": "No valid scores"
-            }
+        if not model_results:
+            raise RuntimeError("LLM judge coverage incomplete: expected 0 scores, scored 0")
+        if any(
+            isinstance(score, bool)
+            or not isinstance(score, (int, float))
+            or not math.isfinite(score)
+            for score in [*scores, *raw_scores]
+        ):
+            raise RuntimeError("LLM judge produced invalid model scores")
 
         use_median = self.aggregation_method == "median"
         agg_score = median(scores) if use_median else mean(scores)

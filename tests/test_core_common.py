@@ -61,13 +61,13 @@ def test_copy_metrics_combined_returns_none_when_source_missing(monkeypatch, tmp
 @pytest.mark.parametrize(
     ("reference", "expected"),
     [
-        ("gs://other/path/file.png", ("other", "path/file.png")),
+        ("gs://default/path/file.png", ("default", "path/file.png")),
         ("file:/path/file.png", ("default", "path/file.png")),
         ("/path/file.png", ("default", "path/file.png")),
     ],
 )
 def test_normalise_remote_media_ref(reference, expected):
-    assert common._normalise_remote_media_ref(reference, "default") == expected
+    assert common._normalise_remote_media_ref(reference, "default", "path") == expected
 
 
 @pytest.mark.parametrize(
@@ -93,7 +93,26 @@ def test_normalise_remote_media_ref_applies_storage_prefix(reference, expected_o
 @pytest.mark.parametrize("reference", ["gs://", "gs://bucket", "gs:///object"])
 def test_normalise_remote_media_ref_rejects_incomplete_uri(reference):
     with pytest.raises(ValueError, match="must include a bucket and object"):
-        common._normalise_remote_media_ref(reference, "default")
+        common._normalise_remote_media_ref(reference, "default", "path")
+
+
+def test_normalise_remote_media_ref_requires_authoritative_prefix():
+    with pytest.raises(ValueError, match="MEDIA_OBJECT_PREFIX is required"):
+        common._normalise_remote_media_ref("media/file.png", "default")
+
+
+def test_normalise_remote_media_ref_rejects_other_bucket_and_prefix():
+    with pytest.raises(ValueError, match="does not match configured"):
+        common._normalise_remote_media_ref(
+            "gs://other/path/file.png", "default", "path"
+        )
+    with pytest.raises(ValueError, match="outside allowed prefix"):
+        common._normalise_remote_media_ref(
+            "gs://default/production/file.png", "default", "development"
+        )
+    assert common._normalise_remote_media_ref(
+        "gs://default/development/file.png", "default", "development"
+    ) == ("default", "development/file.png")
 
 
 def test_copy_images_materialises_local_files_and_rewrites_json(tmp_path):
@@ -133,7 +152,11 @@ def test_copy_audio_downloads_gcs_refs_with_lazy_single_client(monkeypatch, tmp_
     data_file = tmp_path / "data.json"
     data_file.write_text(
         json.dumps(
-            [{"audio": ["relative/a.wav", "relative/a.wav", "gs://other/b.wav"]}]
+            [{"audio": [
+                "relative/a.wav",
+                "relative/a.wav",
+                "gs://default/relative/b.wav",
+            ]}]
         ),
         encoding="utf-8",
     )
@@ -160,14 +183,16 @@ def test_copy_audio_downloads_gcs_refs_with_lazy_single_client(monkeypatch, tmp_
     client_type = Mock(return_value=client)
     monkeypatch.setattr(common.storage, "Client", client_type)
 
-    common.copy_audio_to_temp(str(data_file), str(tmp_path / "temp"), bucket="default")
+    common.copy_audio_to_temp(
+        str(data_file), str(tmp_path / "temp"), bucket="default", object_prefix="relative"
+    )
 
     refs = json.loads(data_file.read_text(encoding="utf-8"))[0]["audio"]
     assert all(Path(ref).read_bytes() == b"audio" for ref in refs)
     assert refs[0] == refs[1]
     assert [(bucket, obj) for bucket, obj, _path in downloads] == [
         ("default", "relative/a.wav"),
-        ("other", "b.wav"),
+        ("default", "relative/b.wav"),
     ]
     client_type.assert_called_once_with()
 
@@ -178,12 +203,13 @@ def test_materialise_media_preserves_refs_on_gcs_failures(monkeypatch, tmp_path,
     data_file.write_text(json.dumps(original), encoding="utf-8")
     monkeypatch.setattr(common.storage, "Client", Mock(side_effect=RuntimeError("no credentials")))
 
-    common.copy_images_to_temp(str(data_file), str(tmp_path / "temp"), bucket="bucket")
-
-    assert json.loads(data_file.read_text(encoding="utf-8")) == original
-    output = capsys.readouterr().out
-    assert "Could not resolve media reference" in output
-    assert "Could not init GCS client" in output
+    with pytest.raises(ValueError, match="must include a bucket and object"):
+        common.copy_images_to_temp(
+            str(data_file),
+            str(tmp_path / "temp"),
+            bucket="bucket",
+            object_prefix="trusted",
+        )
 
 
 @pytest.mark.parametrize(

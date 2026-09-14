@@ -21,6 +21,7 @@ from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
 from lm_eval.models.openai_completions import (  # type: ignore[import-untyped]
     LocalChatCompletion,
 )
+from src.adapters.chat._provider_utils import validate_generation_results
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ class CohereAudioLM(LocalChatCompletion):
                 requests,
                 disable_tqdm=disable_tqdm,  # pyright: ignore[reportCallIssue]
             )
-            return result
+            return validate_generation_results(result, len(requests), "Cohere")
         raise NotImplementedError(
             "Cohere Chat does not accept audio; use the cohere-asr adapter"
         )
@@ -252,19 +253,13 @@ class CohereAudioLM(LocalChatCompletion):
     def loglikelihood(
         self, requests: list, **kwargs: Any
     ) -> List[Tuple[float, bool]]:
-        logger.warning(
-            "Cohere Chat API does not support loglikelihood. "
-            "Returning dummy values for %d requests.",
-            len(requests),
+        raise NotImplementedError(
+            "Cohere Chat API does not support loglikelihood"
         )
-        return [(0.0, True) for _ in requests]
 
     def loglikelihood_rolling(
         self, requests: list, disable_tqdm: bool = False
     ) -> List[float]:
-        logger.warning(
-            "Cohere Chat API does not support loglikelihood_rolling. "
-            "Returning dummy values for %d requests.",
-            len(requests),
+        raise NotImplementedError(
+            "Cohere Chat API does not support loglikelihood_rolling"
         )
-        return [0.0 for _ in requests]

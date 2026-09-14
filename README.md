@@ -61,6 +61,7 @@ The runner picks its mode from the env. There is no flag.
 | `BENCHMARK_ID`          | remote  | Numeric benchmark id (informational).                                   |
 | `BENCHMARK_VERSION_ID`  | remote  | Numeric benchmark-version id (informational).                           |
 | `GCLOUD_BUCKET`         | remote  | GCS bucket for pool files + result uploads.                             |
+| `MEDIA_OBJECT_PREFIX`   | remote  | Authoritative GCS object prefix allowed for media, e.g. `development`. Backend must provide it. |
 | `RESULTS_PATH`          | remote  | Object-path prefix for result uploads (env-prefix included by backend). |
 | `POOL_FILES`            | remote  | Comma-separated GCS object paths to evaluate (one lm_eval call each).   |
 | `EVALUATION_TYPES`      | remote? | Optional filter; comma-separated.                                       |

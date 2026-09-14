@@ -38,6 +38,7 @@ class EvalConfig:
     # GCS coordinates (remote mode only)
     bucket: Optional[str] = None
     results_path: Optional[str] = None
+    media_object_prefix: Optional[str] = None
     pool_files: list[str] = field(default_factory=list)
 
     # Selection filters / metadata
@@ -72,6 +73,7 @@ class EvalConfig:
             category_id=os.getenv("CATEGORY"),
             bucket=os.getenv("GCLOUD_BUCKET"),
             results_path=os.getenv("RESULTS_PATH"),
+            media_object_prefix=os.getenv("MEDIA_OBJECT_PREFIX"),
             pool_files=cls._parse_csv_env("POOL_FILES"),
             evaluation_types=os.getenv("EVALUATION_TYPES"),
             modalities=os.getenv("MODALITIES"),
@@ -143,13 +145,14 @@ class EvalConfig:
             "model_name",
             "bucket",
             "results_path",
+            "media_object_prefix",
         ]
         missing = [attr for attr in required if not getattr(self, attr)]
         if missing:
             raise ValueError(
                 "Missing required environment variables for remote run: "
                 f"{', '.join(missing)}. Required: API_HOST, FINALIZE_TOKEN, JOB_ID, "
-                "ADAPTER, MODEL, GCLOUD_BUCKET, RESULTS_PATH"
+                "ADAPTER, MODEL, GCLOUD_BUCKET, RESULTS_PATH, MEDIA_OBJECT_PREFIX"
             )
         if not self.pool_files:
             raise ValueError("POOL_FILES is required for remote run")

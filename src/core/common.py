@@ -124,16 +124,28 @@ def _normalise_remote_media_ref(
     object_prefix: str = "",
 ) -> tuple[str, str]:
     """Return the bucket and object name for a backend media reference."""
+    prefix = object_prefix.strip("/")
+    if not prefix:
+        raise ValueError("MEDIA_OBJECT_PREFIX is required for remote media resolution")
     if ref_str.startswith("gs://"):
         parts = ref_str.removeprefix("gs://").split("/", 1)
         if len(parts) != 2 or not parts[0] or not parts[1]:
             raise ValueError(f"GCS media URI must include a bucket and object: {ref_str}")
-        return parts[0], parts[1]
+        media_bucket, object_ref = parts
+        if media_bucket != default_bucket:
+            raise ValueError(
+                f"GCS media bucket {media_bucket!r} does not match configured "
+                f"GCLOUD_BUCKET {default_bucket!r}"
+            )
+        if not object_ref.startswith(f"{prefix}/"):
+            raise ValueError(
+                f"GCS media object {object_ref!r} is outside allowed prefix {prefix!r}"
+            )
+        return media_bucket, object_ref
     if "file:" in ref_str:
         ref_str = ref_str.split("file:", 1)[1]
     object_ref = ref_str.lstrip("/")
-    prefix = object_prefix.strip("/")
-    if prefix and not object_ref.startswith(f"{prefix}/"):
+    if not object_ref.startswith(f"{prefix}/"):
         object_ref = f"{prefix}/{object_ref}"
     return default_bucket, object_ref
 
@@ -228,14 +240,9 @@ def _materialise_media(
                 continue
 
             if bucket:
-                try:
-                    media_bucket, object_ref = _normalise_remote_media_ref(
-                        ref_str, bucket, object_prefix
-                    )
-                except ValueError as exc:
-                    print(f"[WARN] Could not resolve media reference {ref_str!r}: {exc}")
-                    new_refs.append(ref_str)
-                    continue
+                media_bucket, object_ref = _normalise_remote_media_ref(
+                    ref_str, bucket, object_prefix
+                )
                 if storage_client is None:
                     try:
                         storage_client = storage.Client()

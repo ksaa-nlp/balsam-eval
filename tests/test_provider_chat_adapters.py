@@ -1,10 +1,11 @@
+import errno
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
 
-from src.adapters.chat import aixplain, azure_openai, huggingface_chat
+from src.adapters.chat import aixplain, azure_openai, gemini, groq, huggingface_chat
 from src.adapters.chat._provider_utils import generation_options, parse_messages
 
 
@@ -16,6 +17,12 @@ def completion(text):
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=text))]
     )
+
+
+class StatusError(Exception):
+    def __init__(self, status_code):
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
 
 
 def test_shared_prompt_and_generation_parsing():
@@ -32,7 +39,7 @@ def test_shared_prompt_and_generation_parsing():
 def test_azure_constructor_and_generate_retry(monkeypatch):
     client = MagicMock()
     create = client.chat.completions.create
-    create.side_effect = [OSError("busy"), completion("answer")]
+    create.side_effect = [ConnectionError("busy"), completion("answer")]
     sdk = MagicMock(return_value=client)
     monkeypatch.setattr(azure_openai, "AzureOpenAI", sdk)
     monkeypatch.setattr(azure_openai.time, "sleep", MagicMock())
@@ -128,6 +135,94 @@ def test_huggingface_endpoint_and_optional_dependency(monkeypatch):
     monkeypatch.setattr(huggingface_chat, "InferenceClient", None)
     with pytest.raises(ImportError, match="optional dependency"):
         huggingface_chat.HuggingFaceChatLM(model="m")
+
+
+@pytest.mark.parametrize(
+    ("module", "cls", "method_name"),
+    [
+        (azure_openai, azure_openai.AzureOpenAIChatLM, "_complete"),
+        (huggingface_chat, huggingface_chat.HuggingFaceChatLM, "_complete"),
+    ],
+)
+def test_provider_complete_does_not_retry_auth_errors(
+    module, cls, method_name, monkeypatch
+):
+    model = object.__new__(cls)
+    model.model_name = "model"
+    model.max_retries = 3
+    model.retry_timeout = 1
+    client = MagicMock()
+    if cls is azure_openai.AzureOpenAIChatLM:
+        request = client.chat.completions.create
+    else:
+        request = client.chat_completion
+    request.side_effect = StatusError(401)
+    model.client = client
+    sleep = MagicMock()
+    monkeypatch.setattr(module.time, "sleep", sleep)
+
+    with pytest.raises(StatusError):
+        getattr(model, method_name)([{"role": "user", "content": "hi"}], {})
+
+    assert request.call_count == 1
+    sleep.assert_not_called()
+
+
+def test_groq_does_not_retry_deterministic_client_error(monkeypatch):
+    model = object.__new__(groq.GroqLM)
+    model.model_name = "model"
+    model.temperature = 0
+    model.max_tokens = 8
+    model.max_retries = 3
+    model.retry_timeout = 1
+    model.client = MagicMock()
+    request = model.client.chat.completions.create
+    request.side_effect = StatusError(400)
+    sleep = MagicMock()
+    monkeypatch.setattr(groq.time, "sleep", sleep)
+
+    with pytest.raises(StatusError):
+        model._make_request_with_retry([{"role": "user", "content": "hi"}])
+
+    assert request.call_count == 1
+    sleep.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("provider", "status"),
+    [("openai", 409), ("azure", 409), ("anthropic", 529)],
+)
+def test_provider_specific_transient_statuses_are_retryable(provider, status):
+    from src.adapters.chat._retry import is_retryable_error
+
+    assert is_retryable_error(StatusError(status), provider=provider)
+    assert not is_retryable_error(StatusError(status), provider="gemini")
+
+
+def test_unclassified_os_error_is_not_retryable():
+    from src.adapters.chat._retry import is_retryable_error
+
+    assert not is_retryable_error(OSError("local filesystem failure"))
+    assert is_retryable_error(OSError(errno.ECONNRESET, "connection reset"))
+
+
+def test_gemini_does_not_retry_auth_error(monkeypatch):
+    model = object.__new__(gemini.GeminiLM)
+    model.model_name = "model"
+    model.max_retries = 3
+    model.retry_timeout = 1
+    model.client = MagicMock()
+    request = model.client.models.generate_content
+    request.side_effect = StatusError(403)
+    model._gen_config = MagicMock(return_value={})
+    sleep = MagicMock()
+    monkeypatch.setattr(gemini.time, "sleep", sleep)
+
+    with pytest.raises(StatusError):
+        model.generate_until([req("hello")])
+
+    assert request.call_count == 1
+    sleep.assert_not_called()
 
 
 def response(payload):

@@ -2,6 +2,7 @@
 
 import logging
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 from src.adapter_config import ASR_ADAPTERS
 
@@ -143,23 +144,22 @@ def _get_thinking_model_config(adapter: str, model_lower: str) -> dict | None:
 
 
 def convert_anthropic_url(url: str | None) -> str:
-    """Convert Anthropic API URL to OpenAI-compatible format.
+    """Resolve an Anthropic Messages endpoint without changing custom hosts.
 
     Args:
         url: The base URL (can be None, empty, or an Anthropic URL)
 
     Returns:
-        OpenAI-compatible Anthropic URL
+        Anthropic Messages API URL
 
     Examples:
         >>> convert_anthropic_url(None)
-        'https://api.anthropic.com/v1/chat/completions'
+        'https://api.anthropic.com/v1/messages'
 
         >>> convert_anthropic_url("https://api.anthropic.com/v1/messages")
-        'https://api.anthropic.com/v1/chat/completions'
+        'https://api.anthropic.com/v1/messages'
     """
-    # Default OpenAI-compatible Anthropic endpoint
-    default_url = "https://api.anthropic.com/v1/chat/completions"
+    default_url = "https://api.anthropic.com/v1/messages"
 
     # If URL is None or empty, use default
     if not url or url.strip() == "":
@@ -167,31 +167,20 @@ def convert_anthropic_url(url: str | None) -> str:
 
     url = url.strip()
 
-    # If it's already the chat/completions endpoint, return as-is
-    if url.split("?", 1)[0].rstrip("/").endswith("/chat/completions"):
-        return url
+    parsed = urlsplit(url)
+    if parsed.hostname == "api.anthropic.com":
+        path = parsed.path.rstrip("/")
+        if path in {"", "/v1", "/v1/messages", "/v1/chat/completions"}:
+            return urlunsplit(parsed._replace(path="/v1/messages"))
 
-    # Convert /v1/messages to /v1/chat/completions
-    if "/v1/messages" in url:
-        return url.replace("/v1/messages", "/v1/chat/completions")
-
-    # If it's just the base domain, add the path
-    if "api.anthropic.com" in url and "/v1" not in url:
-        url = url.rstrip("/")
-        return f"{url}/v1/chat/completions"
-
-    # If it has /v1 but no endpoint, add chat/completions
-    if url.endswith("/v1"):
-        return f"{url}/chat/completions"
-
-    # Fallback to default if we can't parse it
-    return default_url
+    # Custom gateways must remain custom. Rewriting them could leak credentials.
+    return url
 
 
 def process_adapter_and_url(
     adapter: str, base_url: str | None, verbose: bool = True
 ) -> tuple[str, str | None]:
-    """Process adapter and base_url, converting Anthropic to local-chat-completions.
+    """Normalize backend adapter aliases and provider endpoints.
 
     Args:
         adapter: The adapter type from environment
@@ -203,19 +192,26 @@ def process_adapter_and_url(
 
     Examples:
         >>> process_adapter_and_url("anthropic-chat-completions", None, verbose=False)
-        ('local-chat-completions', 'https://api.anthropic.com/v1/chat/completions')
+        ('anthropic', 'https://api.anthropic.com/v1/messages')
 
         >>> process_adapter_and_url("openai-chat-completions", "https://api.openai.com",
         ...                         verbose=False)
-        ('openai-chat-completions', 'https://api.openai.com')
+        ('openai', 'https://api.openai.com')
     """
     if adapter == "anthropic-chat-completions":
-        if verbose:
-            log_message = "Converting anthropic-chat-completions to local-chat-completions"
-            logger.info(log_message)
-            print(log_message)
+        custom_url = base_url.strip() if base_url else ""
+        parsed = urlsplit(custom_url) if custom_url else None
+        if parsed is not None and parsed.hostname != "api.anthropic.com":
+            return "local-chat-completions", custom_url
 
-        processed_adapter = "local-chat-completions"
+    if adapter in {"anthropic", "anthropic-chat-completions"}:
+        if verbose:
+            if adapter == "anthropic-chat-completions":
+                log_message = "Routing anthropic-chat-completions to native Anthropic Messages"
+                logger.info(log_message)
+                print(log_message)
+
+        processed_adapter = "anthropic"
         processed_base_url = convert_anthropic_url(base_url)
 
         if verbose:
@@ -224,5 +220,8 @@ def process_adapter_and_url(
             print(url_message)
 
         return processed_adapter, processed_base_url
+
+    if adapter == "openai-chat-completions":
+        return "openai", base_url
 
     return adapter, base_url

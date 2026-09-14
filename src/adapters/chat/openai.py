@@ -28,6 +28,7 @@ from lm_eval.models.api_models import JsonChatStr  # type: ignore[import-untyped
 from lm_eval.models.openai_completions import (  # type: ignore[import-untyped]
     OpenAIChatCompletion,
 )
+from src.adapters.chat._provider_utils import validate_generation_results
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,7 @@ class OpenAIAudioLM(OpenAIChatCompletion):
                 requests,
                 disable_tqdm=disable_tqdm,  # pyright: ignore[reportCallIssue]
             )
-            return result
+            return validate_generation_results(result, len(requests), "OpenAI")
 
         runtime = cast(_OpenAIChatRuntime, self)
         results: List[str] = []
@@ -254,7 +255,7 @@ class OpenAIAudioLM(OpenAIChatCompletion):
         assert len(results) == len(requests), (
             f"Result count mismatch: {len(results)} vs {len(requests)}"
         )
-        return results
+        return validate_generation_results(results, len(requests), "OpenAI")
 
     # ------------------------------------------------------------------ #
     # Loglikelihood stubs (API does not expose token logprobs)
@@ -263,19 +264,13 @@ class OpenAIAudioLM(OpenAIChatCompletion):
     def loglikelihood(
         self, requests: list, **kwargs: Any
     ) -> List[Tuple[float, bool]]:
-        logger.warning(
-            "OpenAI Chat API does not support loglikelihood. "
-            "Returning dummy values for %d requests.",
-            len(requests),
+        raise NotImplementedError(
+            "OpenAI Chat API does not support loglikelihood"
         )
-        return [(0.0, True) for _ in requests]
 
     def loglikelihood_rolling(
         self, requests: list, disable_tqdm: bool = False
     ) -> List[float]:
-        logger.warning(
-            "OpenAI Chat API does not support loglikelihood_rolling. "
-            "Returning dummy values for %d requests.",
-            len(requests),
+        raise NotImplementedError(
+            "OpenAI Chat API does not support loglikelihood_rolling"
         )
-        return [0.0 for _ in requests]

@@ -43,20 +43,6 @@ def test_slugify_source_is_stable_and_avoids_basename_collisions():
     assert first != second
 
 
-@pytest.mark.parametrize(
-    ("source", "expected"),
-    [
-        ("development/evaluation-datasets/5/4/data.json", "development"),
-        ("development/team/evaluation-datasets/5/4/data.json", "development/team"),
-        ("gs://bucket/development/evaluation-datasets/5/4/data.json", "development"),
-        ("evaluation-datasets/5/4/data.json", ""),
-        ("legacy/pools/data.json", ""),
-    ],
-)
-def test_storage_prefix_from_pool_source(source, expected):
-    assert run._storage_prefix_from_pool_source(source) == expected
-
-
 def test_materialise_local_file_normalises_legacy_payload(monkeypatch, tmp_path):
     temp = tmp_path / "temp"
     source = tmp_path / "pool.json"
@@ -113,7 +99,11 @@ def test_evaluate_one_file_exports_media_and_runs_job(monkeypatch, tmp_path):
     job = Mock(return_value="/results/result.json")
     job_type = Mock(return_value=job)
     monkeypatch.setattr(run, "_create_evaluation_job", job_type)
-    config = EvalConfig(bucket="media-bucket", category_id="fallback")
+    config = EvalConfig(
+        bucket="media-bucket",
+        category_id="fallback",
+        media_object_prefix="authoritative-prefix",
+    )
 
     result = run._evaluate_one_file(
         source="remote/pool.json",
@@ -128,11 +118,21 @@ def test_evaluate_one_file_exports_media_and_runs_job(monkeypatch, tmp_path):
     dataset.export.assert_called_once_with()
     expected_splits = [str(tmp_path / f"exported_{name}.json") for name in ("test", "dev")]
     assert images.call_args_list == [
-        call(path, str(tmp_path), bucket="media-bucket", object_prefix="")
+        call(
+            path,
+            str(tmp_path),
+            bucket="media-bucket",
+            object_prefix="authoritative-prefix",
+        )
         for path in expected_splits
     ]
     assert audio.call_args_list == [
-        call(path, str(tmp_path), bucket="media-bucket", object_prefix="")
+        call(
+            path,
+            str(tmp_path),
+            bucket="media-bucket",
+            object_prefix="authoritative-prefix",
+        )
         for path in expected_splits
     ]
     job_type.assert_called_once_with(
@@ -180,6 +180,7 @@ def _remote_config():
         adapter="openai",
         model_name="model",
         bucket="bucket",
+        media_object_prefix="development",
         results_path="results/path/",
         pool_files=["one.json", "two.json"],
     )

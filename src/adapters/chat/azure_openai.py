@@ -10,6 +10,8 @@ from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
 from openai import AzureOpenAI
 from tqdm import tqdm
 
+from src.adapters.chat._retry import is_retryable_error
+
 from src.adapters.chat._provider_utils import (
     chat_template,
     generation_options,
@@ -98,6 +100,8 @@ class AzureOpenAIChatLM(LM):
                 last_error = RuntimeError("Azure OpenAI returned empty content")
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 last_error = exc
+                if not is_retryable_error(exc, provider="azure"):
+                    raise
             if attempt + 1 < self.max_retries:
                 time.sleep(self.retry_timeout * (attempt + 1))
         raise RuntimeError(

@@ -61,25 +61,29 @@ def test_reasoning_env_rejects_invalid_max_tokens(monkeypatch, value):
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
-        (None, "https://api.anthropic.com/v1/chat/completions"),
-        ("  ", "https://api.anthropic.com/v1/chat/completions"),
+        (None, "https://api.anthropic.com/v1/messages"),
+        ("  ", "https://api.anthropic.com/v1/messages"),
         (
             "https://api.anthropic.com/v1/messages",
+            "https://api.anthropic.com/v1/messages",
+        ),
+        (
             "https://api.anthropic.com/v1/chat/completions",
+            "https://api.anthropic.com/v1/messages",
         ),
         (
             "https://api.anthropic.com",
-            "https://api.anthropic.com/v1/chat/completions",
+            "https://api.anthropic.com/v1/messages",
         ),
         (
             "https://api.anthropic.com/v1",
-            "https://api.anthropic.com/v1/chat/completions",
+            "https://api.anthropic.com/v1/messages",
         ),
         (
             "https://proxy/v1/chat/completions?key=x",
             "https://proxy/v1/chat/completions?key=x",
         ),
-        ("https://unknown.example/api", "https://api.anthropic.com/v1/chat/completions"),
+        ("https://unknown.example/api", "https://unknown.example/api"),
     ],
 )
 def test_convert_anthropic_url(url, expected):
@@ -92,14 +96,39 @@ def test_process_adapter_converts_anthropic_without_output(capsys):
     )
 
     assert result == (
-        "local-chat-completions",
-        "https://api.anthropic.com/v1/chat/completions",
+        "anthropic",
+        "https://api.anthropic.com/v1/messages",
     )
     assert capsys.readouterr().out == ""
 
 
 def test_process_adapter_preserves_other_adapters():
-    assert process_adapter_and_url("openai", "https://example", verbose=False) == (
+    assert process_adapter_and_url("gemini", "https://example", verbose=False) == (
+        "gemini",
+        "https://example",
+    )
+
+
+def test_process_openai_alias_uses_validating_adapter_and_preserves_url():
+    assert process_adapter_and_url(
+        "openai-chat-completions", "https://example", verbose=False
+    ) == (
         "openai",
         "https://example",
     )
+
+
+def test_process_native_anthropic_normalizes_public_url_and_preserves_custom_host():
+    assert process_adapter_and_url(
+        "anthropic", "https://api.anthropic.com/v1/chat/completions", verbose=False
+    ) == ("anthropic", "https://api.anthropic.com/v1/messages")
+    assert process_adapter_and_url(
+        "anthropic-chat-completions", "https://private.example/messages", verbose=False
+    ) == ("local-chat-completions", "https://private.example/messages")
+
+
+def test_anthropic_alias_preserves_custom_openai_compatible_endpoint_exactly():
+    endpoint = "https://gateway.example/v1/chat/completions?tenant=one"
+    assert process_adapter_and_url(
+        "anthropic-chat-completions", endpoint, verbose=False
+    ) == ("local-chat-completions", endpoint)

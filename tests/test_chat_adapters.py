@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from lm_eval.models.api_models import LMEVAL_MODEL_NONE_ANSWER_PLACEHOLDER
 
 from src.adapters.chat import anthropic, cohere, gemini, groq, local, openai
 
@@ -145,12 +146,13 @@ def test_openai_style_audio_generation_builds_chat_request(module, cls, monkeypa
     assert call["gen_kwargs"] == {"temperature": 0.3}
 
 
-def test_local_generation_converts_client_errors_to_empty(monkeypatch):
+def test_local_generation_propagates_client_errors(monkeypatch):
     model = object.__new__(local.LocalAudioLM)
     model.model = "model"
     model.model_call = MagicMock(side_effect=RuntimeError("offline"))
     monkeypatch.setattr(local, "_build_openai_audio_parts", lambda _: [])
-    assert model.generate_until([request(audio_items=[audio()])], disable_tqdm=True) == [""]
+    with pytest.raises(RuntimeError, match="offline"):
+        model.generate_until([request(audio_items=[audio()])], disable_tqdm=True)
 
 
 def test_cohere_rejects_audio_and_uses_native_wire_format():
@@ -277,6 +279,42 @@ def test_text_generation_delegates_to_parent(module, cls, parent, monkeypatch):
     assert calls == [(requests, True)]
 
 
+@pytest.mark.parametrize(
+    ("cls", "parent"),
+    [
+        (local.LocalAudioLM, local.LocalChatCompletion),
+        (anthropic.AnthropicAudioLM, anthropic.AnthropicChat),
+    ],
+)
+def test_critical_provider_text_generation_rejects_empty_parent_result(
+    cls, parent, monkeypatch
+):
+    monkeypatch.setattr(parent, "generate_until", MagicMock(return_value=[""]))
+
+    with pytest.raises(RuntimeError, match="missing or invalid predictions"):
+        object.__new__(cls).generate_until([request("text only")], disable_tqdm=True)
+
+
+@pytest.mark.parametrize(
+    ("cls", "parent"),
+    [
+        (openai.OpenAIAudioLM, openai.OpenAIChatCompletion),
+        (local.LocalAudioLM, local.LocalChatCompletion),
+        (cohere.CohereAudioLM, cohere.LocalChatCompletion),
+        (anthropic.AnthropicAudioLM, anthropic.AnthropicChat),
+    ],
+)
+def test_chat_adapters_reject_lm_eval_none_answer_sentinel(cls, parent, monkeypatch):
+    monkeypatch.setattr(
+        parent,
+        "generate_until",
+        MagicMock(return_value=[LMEVAL_MODEL_NONE_ANSWER_PLACEHOLDER]),
+    )
+
+    with pytest.raises(RuntimeError, match="missing or invalid predictions"):
+        object.__new__(cls).generate_until([request("text only")], disable_tqdm=True)
+
+
 def test_cohere_auth_prefers_provider_key(monkeypatch):
     monkeypatch.setenv("CO_API_KEY", "cohere-key")
     monkeypatch.setenv("API_KEY", "fallback")
@@ -381,7 +419,7 @@ def test_groq_request_retries_empty_response_then_succeeds(monkeypatch):
     sleep.assert_called_once_with(0)
 
 
-def test_groq_request_wraps_final_sdk_error(monkeypatch):
+def test_groq_request_does_not_retry_unclassified_os_error(monkeypatch):
     model = object.__new__(groq.GroqLM)
     model.model_name = "model"
     model.temperature = 0
@@ -392,10 +430,9 @@ def test_groq_request_wraps_final_sdk_error(monkeypatch):
     model.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
     monkeypatch.setattr(groq.time, "sleep", MagicMock())
 
-    with pytest.raises(RuntimeError, match="Groq API call failed after 2 retries") as exc:
+    with pytest.raises(OSError, match="offline"):
         model._make_request_with_retry([{"role": "user", "content": "hi"}])
-    assert isinstance(exc.value.__cause__, OSError)
-    assert create.call_count == 2
+    create.assert_called_once()
 
 
 def test_groq_request_reports_exhausted_empty_responses(monkeypatch):
@@ -558,7 +595,7 @@ def test_gemini_generation_retries_empty_and_sdk_errors(monkeypatch):
     model._gen_config = MagicMock(return_value="config")
     generate = MagicMock(side_effect=[
         SimpleNamespace(text=""),
-        OSError("offline"),
+        ConnectionError("offline"),
         SimpleNamespace(text="answer"),
     ])
     model.client = SimpleNamespace(models=SimpleNamespace(generate_content=generate))
@@ -585,18 +622,18 @@ def test_gemini_generation_wraps_exhausted_empty_responses(monkeypatch):
         model.generate_until(["prompt"])
 
 
-def test_gemini_generation_wraps_final_sdk_error(monkeypatch):
+def test_gemini_generation_wraps_final_transient_sdk_error(monkeypatch):
     model = object.__new__(gemini.GeminiLM)
     model.model_name = "models/test"
     model.max_retries = 1
     model.retry_timeout = 0
     model._gen_config = MagicMock(return_value="config")
     model.client = SimpleNamespace(models=SimpleNamespace(
-        generate_content=MagicMock(side_effect=OSError("offline"))
+        generate_content=MagicMock(side_effect=ConnectionError("offline"))
     ))
     with pytest.raises(RuntimeError, match="Generation failed for idx=0 after 1 retries") as exc:
         model.generate_until(["prompt"])
-    assert isinstance(exc.value.__cause__, OSError)
+    assert isinstance(exc.value.__cause__, ConnectionError)
 
 
 def test_gemini_likelihood_token_count_and_string_template_fallbacks():
@@ -679,9 +716,32 @@ def test_gemini_create_completion_reports_exhausted_empty_response():
     model.client = SimpleNamespace(models=SimpleNamespace(
         generate_content=MagicMock(return_value=SimpleNamespace(text=""))
     ))
-    with pytest.raises(RuntimeError, match="Gemini completion failed after 1 retries") as exc:
+    with pytest.raises(RuntimeError, match="attempts returned empty response"):
         model.create_completion("prompt")
-    assert "attempts returned empty response" in str(exc.value.__cause__)
+
+
+def test_gemini_create_completion_does_not_retry_auth_error(monkeypatch):
+    class AuthError(Exception):
+        status_code = 401
+
+    model = object.__new__(gemini.GeminiLM)
+    model.model_name = "models/test"
+    model.temperature = 0
+    model.max_tokens = 100
+    model.top_p = 0.9
+    model.top_k = 20
+    model.max_retries = 3
+    model.retry_timeout = 1
+    generate = MagicMock(side_effect=AuthError("bad key"))
+    model.client = SimpleNamespace(models=SimpleNamespace(generate_content=generate))
+    sleep = MagicMock()
+    monkeypatch.setattr(gemini.time, "sleep", sleep)
+
+    with pytest.raises(AuthError, match="bad key"):
+        model.create_completion("prompt")
+
+    generate.assert_called_once()
+    sleep.assert_not_called()
 
 
 def test_gemini_create_completion_wraps_final_sdk_error(monkeypatch):
@@ -693,18 +753,20 @@ def test_gemini_create_completion_wraps_final_sdk_error(monkeypatch):
     model.top_k = 20
     model.max_retries = 2
     model.retry_timeout = 0
-    generate = MagicMock(side_effect=OSError("offline"))
+    generate = MagicMock(side_effect=ConnectionError("offline"))
     model.client = SimpleNamespace(models=SimpleNamespace(generate_content=generate))
     monkeypatch.setattr(gemini.time, "sleep", MagicMock())
 
     with pytest.raises(RuntimeError, match="Gemini completion failed after 2 retries") as exc:
         model.create_completion("prompt")
-    assert isinstance(exc.value.__cause__, OSError)
+    assert isinstance(exc.value.__cause__, ConnectionError)
 
 
 @pytest.mark.parametrize("cls", [openai.OpenAIAudioLM, local.LocalAudioLM, cohere.CohereAudioLM, anthropic.AnthropicAudioLM])
-def test_chat_loglikelihood_stubs_preserve_cardinality(cls):
+def test_chat_adapters_reject_unsupported_loglikelihood(cls):
     model = object.__new__(cls)
     requests = [object(), object()]
-    assert model.loglikelihood(requests) == [(0.0, True), (0.0, True)]
-    assert model.loglikelihood_rolling(requests) == [0.0, 0.0]
+    with pytest.raises(NotImplementedError, match="loglikelihood"):
+        model.loglikelihood(requests)
+    with pytest.raises(NotImplementedError, match="loglikelihood"):
+        model.loglikelihood_rolling(requests)

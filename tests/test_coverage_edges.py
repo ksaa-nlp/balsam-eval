@@ -63,7 +63,7 @@ def test_gcs_upload_sets_json_content_type(monkeypatch):
     )
 
 
-def test_result_scoring_ignores_missing_and_malformed_sample_structures(tmp_path):
+def test_result_scoring_rejects_missing_metric_and_ignores_malformed_containers(tmp_path):
     processor = make_processor(tmp_path)
     sample = {"metrics": ["absent"], "scores": {"stale": True}}
     results = {
@@ -73,21 +73,25 @@ def test_result_scoring_ignores_missing_and_malformed_sample_structures(tmp_path
         }
     }
 
-    processor._add_question_scores(results)
+    with pytest.raises(RuntimeError, match="Required metric result is missing"):
+        processor._add_question_scores(results)
 
-    assert sample["scores"] == {}
+    assert sample["scores"] == {"stale": True}
     processor._add_question_scores({})
     processor._add_question_scores({"samples": []})
 
 
-def test_result_averaging_ignores_missing_and_unsupported_values(tmp_path):
+def test_result_averaging_rejects_missing_and_unsupported_values(tmp_path):
     processor = make_processor(tmp_path)
 
-    assert processor._calculate_average_scores({}) == {}
-    assert processor._calculate_average_scores({"results": []}) == {}
-    assert processor._calculate_average_scores(
-        {"results": {"task": {"rouge,none": {"rouge1": 1}, "score,none": None}}}
-    ) == {}
+    with pytest.raises(RuntimeError, match="must contain task metric blocks"):
+        processor._calculate_average_scores({})
+    with pytest.raises(RuntimeError, match="must contain task metric blocks"):
+        processor._calculate_average_scores({"results": []})
+    with pytest.raises(RuntimeError, match="Unsupported aggregate metric value"):
+        processor._calculate_average_scores(
+            {"results": {"task": {"rouge,none": {"rouge1": 1}}}}
+        )
 
 
 def test_result_cleanup_handles_missing_and_irregular_arguments(tmp_path):
@@ -129,10 +133,10 @@ def test_anthropic_conversion_verbose_mode_reports_adapter_and_url(capsys, caplo
             "anthropic-chat-completions", None, verbose=True
         )
 
-    expected_url = "https://api.anthropic.com/v1/chat/completions"
-    assert result == ("local-chat-completions", expected_url)
+    expected_url = "https://api.anthropic.com/v1/messages"
+    assert result == ("anthropic", expected_url)
     assert capsys.readouterr().out.splitlines() == [
-        "Converting anthropic-chat-completions to local-chat-completions",
+        "Routing anthropic-chat-completions to native Anthropic Messages",
         f"Using base_url: {expected_url}",
     ]
     assert "Using base_url" in caplog.text

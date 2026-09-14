@@ -85,14 +85,31 @@ def test_call_model_adapter_retries_call_exception_then_succeeds(monkeypatch):
     sleep.assert_called_once_with(1)
 
 
+def test_call_model_adapter_does_not_retry_deterministic_http_error(monkeypatch):
+    class AuthError(Exception):
+        status_code = 401
+
+    sleep = MagicMock()
+    monkeypatch.setattr(base.time, "sleep", sleep)
+    generate = MagicMock(side_effect=AuthError("bad key"))
+
+    with pytest.raises(AuthError, match="bad key"):
+        base.call_model_adapter_with_retry(
+            SimpleNamespace(generate=generate), "prompt", max_retries=3
+        )
+
+    generate.assert_called_once_with("prompt")
+    sleep.assert_not_called()
+
+
 def test_call_model_adapter_rejects_adapter_without_callable_method(monkeypatch):
     sleep = MagicMock()
     monkeypatch.setattr(base.time, "sleep", sleep)
 
-    with pytest.raises(RuntimeError, match="unable to get a valid response"):
+    with pytest.raises(ValueError, match="suitable method"):
         base.call_model_adapter_with_retry(object(), "prompt", max_retries=1)
 
-    sleep.assert_called_once_with(1)
+    sleep.assert_not_called()
 
 
 def test_call_model_adapter_retries_empty_text_response(monkeypatch):
@@ -103,7 +120,7 @@ def test_call_model_adapter_retries_empty_text_response(monkeypatch):
     with pytest.raises(RuntimeError, match="unable to get a valid response"):
         base.call_model_adapter_with_retry(adapter, "prompt", max_retries=2)
 
-    assert sleep.call_args_list == [call(1), call(2)]
+    assert sleep.call_args_list == [call(1)]
 
 
 @pytest.mark.parametrize(
@@ -154,10 +171,12 @@ def test_single_model_prompt_fallback_precedence(
     prompt = call.call_args.args[1]
     assert prompt.startswith(expected_start)
     assert "[CONTEXT]" not in prompt
-    call.assert_called_once_with(judge.model_adapters[0], prompt, max_score=1.0)
+    call.assert_called_once_with(
+        judge.model_adapters[0], prompt, max_score=1.0, provider="openai"
+    )
 
 
-def test_single_model_handles_none_raw_score_from_adapter(monkeypatch):
+def test_single_model_rejects_none_raw_score_from_adapter(monkeypatch):
     config = base.ModelConfig("judge")
     judge = build_judge(configs=[config])
     monkeypatch.setattr(
@@ -166,12 +185,10 @@ def test_single_model_handles_none_raw_score_from_adapter(monkeypatch):
         MagicMock(return_value={"score": None, "explanation": "missing"}),
     )
 
-    result = judge._evaluate_single_model(
-        "q", "r", "a", None, config, judge.model_adapters[0]
-    )
-
-    assert result["score"] == 0
-    assert result["passed"] is False
+    with pytest.raises(RuntimeError, match="returned no score"):
+        judge._evaluate_single_model(
+            "q", "r", "a", None, config, judge.model_adapters[0]
+        )
 
 
 def test_single_model_reraises_adapter_failure(monkeypatch):
@@ -189,15 +206,24 @@ def test_single_model_reraises_adapter_failure(monkeypatch):
         )
 
 
-def test_aggregate_model_results_defaults_raw_score_when_absent():
+def test_aggregate_model_results_rejects_missing_raw_score():
+    judge = build_judge()
+
+    with pytest.raises(RuntimeError, match="expected 1 scores, scored 0"):
+        judge._aggregate_model_results(
+            [{"model": "judge", "score": 0.75, "raw_score": None, "explanation": "ok"}]
+        )
+
+
+def test_aggregate_model_results_preserves_legitimate_zero_score():
     judge = build_judge()
 
     result = judge._aggregate_model_results(
-        [{"model": "judge", "score": 0.75, "raw_score": None, "explanation": "ok"}]
+        [{"model": "judge", "score": 0.0, "raw_score": 0.0, "explanation": "wrong"}]
     )
 
-    assert result["overall_score"] == 0.75
-    assert result["overall_raw_score"] == 0
+    assert result["overall_score"] == 0.0
+    assert result["overall_raw_score"] == 0.0
 
 
 def test_evaluate_batch_accepts_test_case_object_and_uses_progress(monkeypatch):

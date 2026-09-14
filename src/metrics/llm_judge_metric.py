@@ -11,6 +11,7 @@ JUDGE_MODEL, JUDGE_PROVIDER, and JUDGE_API_KEY variables.
 import base64
 import json
 import logging
+import math
 import os
 import re
 from statistics import mean
@@ -29,7 +30,7 @@ from src.metrics.metrics_utils import clamp_score
 logger = logging.getLogger(__name__)
 
 # (question, gold, pred, mcq_options | None, custom_prompt | None)
-JudgeItem = Tuple[str, str, str, Optional[list], Optional[str]]
+JudgeItem = Tuple[str, Any, Any, Optional[list], Optional[str]]
 JudgeCacheKey = Tuple[str, str, str, Tuple[str, ...], Optional[str]]
 _JUDGE_SCORE_CACHE: dict[JudgeCacheKey, Optional[float]] = {}
 
@@ -94,11 +95,10 @@ def _get_judge_configs() -> list[ModelConfig]:
     api_keys = _parse_csv_env("JUDGE_API_KEY")
 
     if not models or not providers:
-        logger.warning(
-            "LLM judge not configured — set JUDGE_MODEL, JUDGE_PROVIDER, "
-            "JUDGE_API_KEY env vars."
+        raise RuntimeError(
+            "LLM judge is required but not configured; set JUDGE_CONFIGS_B64 or "
+            "JUDGE_MODEL and JUDGE_PROVIDER"
         )
-        return []
 
     n = max(len(models), len(providers))
     invalid = [
@@ -159,21 +159,23 @@ def _get_mcq_judge() -> Optional[MCQLLMJudge]:
     return _MCQ_JUDGE
 
 
-def _normalize_mcq_answer(answer: str, mcq_options: list) -> str:
+def _normalize_mcq_answer(answer: Any, mcq_options: list) -> str:
     """Convert a single-letter answer (A/B/C/D) to its full text."""
-    if not answer or not mcq_options:
-        return answer or ""
-    answer = str(answer).strip()
+    if answer is None:
+        return ""
+    if not mcq_options:
+        return answer if isinstance(answer, str) else str(answer)
+    normalized_answer = str(answer).strip()
     mapping: Dict[str, str] = {chr(65 + i): str(opt) for i, opt in enumerate(mcq_options)}
 
-    if len(answer) == 1 and answer.upper() in mapping:
-        return mapping[answer.upper()]
+    if len(normalized_answer) == 1 and normalized_answer.upper() in mapping:
+        return mapping[normalized_answer.upper()]
 
-    match = re.match(r"^([A-Za-z])\)", answer)
+    match = re.match(r"^([A-Za-z])\)", normalized_answer)
     if match and match.group(1).upper() in mapping:
         return mapping[match.group(1).upper()]
 
-    return answer
+    return normalized_answer
 
 
 # ---------------------------------------------------------------------------
@@ -188,16 +190,16 @@ def _judge_cache_key(item: JudgeItem) -> JudgeCacheKey:
 
 def _score_judge_item(item: JudgeItem) -> Optional[float]:
     question, gold, pred, mcq_options, custom_prompt = item
-    if not gold or not pred:
+    if gold is None or pred is None or gold == "" or pred == "":
         return None
 
-    ref = gold
+    ref = gold if isinstance(gold, str) else str(gold)
     answer = str(pred)
 
     if mcq_options:
         mcq_judge = _get_mcq_judge()
         if mcq_judge is None:
-            return None
+            raise RuntimeError("Required MCQ LLM judge is unavailable")
         ref = _normalize_mcq_answer(ref, mcq_options)
         answer = _normalize_mcq_answer(answer, mcq_options)
         result = mcq_judge.evaluate_answer(
@@ -209,7 +211,7 @@ def _score_judge_item(item: JudgeItem) -> Optional[float]:
     else:
         gen_judge = _get_generative_judge()
         if gen_judge is None:
-            return None
+            raise RuntimeError("Required generative LLM judge is unavailable")
         result = gen_judge.evaluate_answer(
             question=question,
             reference_answer=ref,
@@ -217,7 +219,16 @@ def _score_judge_item(item: JudgeItem) -> Optional[float]:
             custom_prompt=custom_prompt,
         )
 
-    return clamp_score(result["overall_score"])
+    score = result.get("overall_score")
+    if score is None:
+        return None
+    if (
+        isinstance(score, bool)
+        or not isinstance(score, (int, float))
+        or not math.isfinite(score)
+    ):
+        raise RuntimeError("LLM judge returned an invalid overall score")
+    return clamp_score(score)
 
 
 def compute_llm_judge_aggregation(items: List[JudgeItem]) -> float:
@@ -235,9 +246,11 @@ def compute_llm_judge_aggregation(items: List[JudgeItem]) -> float:
         if score is not None:
             scores.append(score)
 
-    if not scores:
-        logger.warning("LLM judge produced no scores.")
-        return 0.0
+    if len(scores) != len(items):
+        raise RuntimeError(
+            "LLM judge coverage incomplete: "
+            f"expected {len(items)} scores, scored {len(scores)}"
+        )
 
     avg = round(clamp_score(mean(scores)), 4)
     logger.info("LLM-as-judge average: %.4f (%d samples)", avg, len(scores))
