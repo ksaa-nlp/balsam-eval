@@ -2,6 +2,7 @@
 
 import logging
 import os
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -195,5 +196,12 @@ def process_adapter_and_url(
             print(url_message)
 
         return processed_adapter, processed_base_url
+
+    if (
+        adapter in ("local-chat-completions", "openai-chat-completions")
+        and base_url
+    ):
+        if urlparse(base_url).hostname == "api.mistral.ai":
+            return "mistral-chat-completions", base_url
 
     return adapter, base_url

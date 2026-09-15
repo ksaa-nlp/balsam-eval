@@ -16,6 +16,7 @@ import requests
 # Import custom metrics package to auto-register all metrics
 import src.metrics  # Registers all metrics in src.metrics.impl.*  # pylint: disable=unused-import
 import src.gemini_adapter  # Registers the custom Gemini model  # pylint: disable=unused-import
+import src.mistral_adapter  # Registers Mistral model  # pylint: disable=unused-import
 
 from src.adapter_utils import get_max_tokens_config
 from src.db_operations import JobStatus, update_status
@@ -68,6 +69,7 @@ class EvaluationJob:
             "local-chat-completions",
             "openai-chat-completions",
             "anthropic-chat-completions",
+            "mistral-chat-completions",
             "gemini",
         ] = "local-chat-completions",
         job_id: Optional[str] = None,
@@ -129,7 +131,11 @@ class EvaluationJob:
 
         # Set API key environment variables
         api_key = os.getenv("API_KEY")
-        if api_key and self.adapter in ["openai-chat-completions", "local-chat-completions"]:
+        if api_key and self.adapter in [
+            "openai-chat-completions",
+            "local-chat-completions",
+            "mistral-chat-completions",
+        ]:
             os.environ["OPENAI_API_KEY"] = api_key
         if api_key and self.adapter == "anthropic-chat-completions":
             os.environ["ANTHROPIC_API_KEY"] = api_key
