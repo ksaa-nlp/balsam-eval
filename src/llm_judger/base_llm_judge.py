@@ -57,6 +57,7 @@ class ModelConfig:
     api_key: Optional[str] = None
     endpoint_url: Optional[str] = None
     custom_prompt: Optional[str] = None
+    max_output_tokens: Optional[int] = None
     other: Optional[Dict[str, Any]] = None
 
 
@@ -100,6 +101,7 @@ def call_model_adapter_with_retry(
     max_retries: int = 3,
     max_score: float = 1.0,
     provider: str | None = None,
+    max_gen_tokens: int = JUDGE_MAX_GEN_TOKENS,
 ) -> Dict[str, Any]:
     """Call model adapter with retry logic."""
 
@@ -125,7 +127,7 @@ def call_model_adapter_with_retry(
                         {
                             "until": [],
                             "do_sample": False,
-                            "max_gen_toks": JUDGE_MAX_GEN_TOKENS,
+                            "max_gen_toks": max_gen_tokens,
                         },
                     ),
                     idx=0,
@@ -290,12 +292,13 @@ class BaseLLMJudge(ABC):
 
         try:
             # Call the model with retry logic
-            result = call_model_adapter_with_retry(
-                adapter,
-                prompt,
-                max_score=self.get_max_score(),
-                provider=config.provider,
-            )
+            call_kwargs: Dict[str, Any] = {
+                "max_score": self.get_max_score(),
+                "provider": config.provider,
+            }
+            if config.max_output_tokens is not None:
+                call_kwargs["max_gen_tokens"] = config.max_output_tokens
+            result = call_model_adapter_with_retry(adapter, prompt, **call_kwargs)
 
             raw_score = result["score"]
             explanation = result["explanation"]

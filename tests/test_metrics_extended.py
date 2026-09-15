@@ -393,6 +393,7 @@ def test_get_judge_configs_decodes_cloud_payload(monkeypatch):
             "apiKeyEnv": "JUDGE_SECRET",
             "baseUrl": "https://judge.invalid/v1",
             "customPrompt": "Be strict",
+            "maxOutputTokens": 25000,
         }
     ]
     encoded = base64.b64encode(json.dumps(payload).encode()).decode()
@@ -406,6 +407,7 @@ def test_get_judge_configs_decodes_cloud_payload(monkeypatch):
     assert config.api_key == "secret"
     assert config.endpoint_url == "https://judge.invalid/v1"
     assert config.custom_prompt == "Be strict"
+    assert config.max_output_tokens == 25000
 
 
 @pytest.mark.parametrize(
@@ -430,6 +432,12 @@ def test_get_judge_configs_decodes_cloud_payload(monkeypatch):
         (
             base64.b64encode(b'[{"model":"m","provider":"openai","customPrompt":1}]').decode(),
             "invalid customPrompt",
+        ),
+        (
+            base64.b64encode(
+                b'[{"model":"m","provider":"openai","maxOutputTokens":0}]'
+            ).decode(),
+            "invalid maxOutputTokens",
         ),
     ],
 )
@@ -527,7 +535,7 @@ def test_llm_judge_aggregation_fails_when_judge_unavailable(monkeypatch):
 
 
 def test_llm_judge_aggregation_fails_without_valid_coverage():
-    with pytest.raises(RuntimeError, match="expected 1 scores, scored 0"):
+    with pytest.raises(ValueError, match="missing its reference answer"):
         llm_judge_metric.compute_llm_judge_aggregation(
             [("question", "", "prediction", None, None)]
         )
@@ -538,7 +546,7 @@ def test_llm_judge_aggregation_rejects_partial_coverage(monkeypatch):
     judge.evaluate_answer.return_value = {"overall_score": 0.5}
     monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=judge))
 
-    with pytest.raises(RuntimeError, match="expected 2 scores, scored 1"):
+    with pytest.raises(ValueError, match="missing its reference answer"):
         llm_judge_metric.compute_llm_judge_aggregation(
             [
                 ("scored", "gold", "prediction", None, None),
@@ -552,10 +560,20 @@ def test_llm_judge_aggregation_rejects_missing_judge_result(monkeypatch):
     judge.evaluate_answer.return_value = {}
     monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=judge))
 
-    with pytest.raises(RuntimeError, match="expected 1 scores, scored 0"):
+    with pytest.raises(RuntimeError, match="returned no overall score"):
         llm_judge_metric.compute_llm_judge_aggregation(
             [("question", "gold", "prediction", None, None)]
         )
+
+
+def test_llm_judge_aggregation_scores_empty_prediction_as_zero(monkeypatch):
+    judge = Mock()
+    monkeypatch.setattr(llm_judge_metric, "_get_generative_judge", Mock(return_value=judge))
+
+    assert llm_judge_metric.compute_llm_judge_aggregation(
+        [("question", "gold", "", None, None)]
+    ) == 0.0
+    judge.evaluate_answer.assert_not_called()
 
 
 def test_llm_judge_aggregation_preserves_legitimate_zero(monkeypatch):

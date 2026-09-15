@@ -112,6 +112,20 @@ def test_call_model_adapter_generate_until_without_chat_template():
     )
 
 
+def test_call_model_adapter_uses_configured_generation_limit():
+    generate_until = MagicMock(
+        return_value=['{"score": 1, "explanation": "ok"}']
+    )
+    adapter = SimpleNamespace(generate_until=generate_until)
+
+    base.call_model_adapter_with_retry(
+        adapter, "prompt", max_retries=1, max_gen_tokens=25000
+    )
+
+    request = generate_until.call_args.args[0][0]
+    assert request.args[1]["max_gen_toks"] == 25000
+
+
 @pytest.mark.parametrize("method", ["_call", "invoke", "__call__"])
 def test_call_model_adapter_routes_available_call_styles(method):
     response = '{"score": 1, "explanation": "ok"}'

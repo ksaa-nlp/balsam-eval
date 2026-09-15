@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # (question, gold, pred, mcq_options | None, custom_prompt | None)
 JudgeItem = Tuple[str, Any, Any, Optional[list], Optional[str]]
 JudgeCacheKey = Tuple[str, str, str, Tuple[str, ...], Optional[str]]
-_JUDGE_SCORE_CACHE: dict[JudgeCacheKey, Optional[float]] = {}
+_JUDGE_SCORE_CACHE: dict[JudgeCacheKey, float] = {}
 
 
 def _parse_csv_env(name: str) -> list[str]:
@@ -78,6 +78,18 @@ def _get_judge_configs() -> list[ModelConfig]:
             custom_prompt = raw_config.get("customPrompt")
             if custom_prompt is not None and not isinstance(custom_prompt, str):
                 raise ValueError(f"Judge config at index {index} has invalid customPrompt")
+            max_output_tokens = raw_config.get("maxOutputTokens")
+            if (
+                max_output_tokens is not None
+                and (
+                    isinstance(max_output_tokens, bool)
+                    or not isinstance(max_output_tokens, int)
+                    or max_output_tokens <= 0
+                )
+            ):
+                raise ValueError(
+                    f"Judge config at index {index} has invalid maxOutputTokens"
+                )
 
             configs.append(
                 ModelConfig(
@@ -86,6 +98,7 @@ def _get_judge_configs() -> list[ModelConfig]:
                     api_key=os.getenv(api_key_env) if api_key_env else None,
                     endpoint_url=base_url,
                     custom_prompt=custom_prompt,
+                    max_output_tokens=max_output_tokens,
                 )
             )
         return configs
@@ -188,10 +201,13 @@ def _judge_cache_key(item: JudgeItem) -> JudgeCacheKey:
     return str(question), str(gold), str(pred), options, custom_prompt
 
 
-def _score_judge_item(item: JudgeItem) -> Optional[float]:
+def _score_judge_item(item: JudgeItem) -> float:
     question, gold, pred, mcq_options, custom_prompt = item
-    if gold is None or pred is None or gold == "" or pred == "":
-        return None
+    if gold is None or (isinstance(gold, str) and not gold.strip()):
+        raise ValueError("LLM judge item is missing its reference answer")
+    if pred is None or (isinstance(pred, str) and not pred.strip()):
+        logger.warning("LLM judge received an empty prediction; assigning score 0")
+        return 0.0
 
     ref = gold if isinstance(gold, str) else str(gold)
     answer = str(pred)
@@ -221,7 +237,7 @@ def _score_judge_item(item: JudgeItem) -> Optional[float]:
 
     score = result.get("overall_score")
     if score is None:
-        return None
+        raise RuntimeError("LLM judge returned no overall score")
     if (
         isinstance(score, bool)
         or not isinstance(score, (int, float))
@@ -240,17 +256,7 @@ def compute_llm_judge_aggregation(items: List[JudgeItem]) -> float:
         key = _judge_cache_key(item)
         _JUDGE_SCORE_CACHE[key] = _score_judge_item(item)
 
-    scores: list[float] = []
-    for key in keys:
-        score = _JUDGE_SCORE_CACHE[key]
-        if score is not None:
-            scores.append(score)
-
-    if len(scores) != len(items):
-        raise RuntimeError(
-            "LLM judge coverage incomplete: "
-            f"expected {len(items)} scores, scored {len(scores)}"
-        )
+    scores = [_JUDGE_SCORE_CACHE[key] for key in keys]
 
     avg = round(clamp_score(mean(scores)), 4)
     logger.info("LLM-as-judge average: %.4f (%d samples)", avg, len(scores))
