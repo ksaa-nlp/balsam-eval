@@ -26,49 +26,12 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         Dict with the appropriate parameter name and value
         Example: {"max_tokens": 4096} or {"max_completion_tokens": 8192}
     """
-    # Check if IS_REASONING environment variable is set to 1
-    is_reasoning_env = os.getenv("IS_REASONING", "0").strip() == "1"
-
-    # If IS_REASONING=1, use MAX_TOKENS if exists, otherwise default to 8192
-    if is_reasoning_env:
-        raw_max_tokens = os.getenv("MAX_TOKENS", "8192")
-        try:
-            max_tokens = int(raw_max_tokens)
-        except ValueError as exc:
-            raise ValueError("MAX_TOKENS must be an integer") from exc
-        if max_tokens <= 0:
-            raise ValueError("MAX_TOKENS must be greater than zero")
-        # For OpenAI reasoning models, use max_completion_tokens
-        if adapter in ("openai-chat-completions", "openai", "azure-openai"):
-            return {"max_completion_tokens": max_tokens}
-        return {"max_tokens": max_tokens}
-
-    # Otherwise, use the current logic (IS_REASONING=0 or not set)
     model_lower = model_name.lower()
 
-    # Detect thinking/reasoning models by adapter and model name
     thinking_model_patterns = {
-        "openai-chat-completions": [
-            "o1-",
-            "o3-",
-            "o4-",
-            "gpt-5",
-            "gpt5",
-        ],
-        "openai": [
-            "o1-",
-            "o3-",
-            "o4-",
-            "gpt-5",
-            "gpt5",
-        ],
-        "azure-openai": [
-            "o1-",
-            "o3-",
-            "o4-",
-            "gpt-5",
-            "gpt5",
-        ],
+        "openai-chat-completions": ["o1-", "o3-", "o4-", "gpt-5", "gpt5"],
+        "openai": ["o1-", "o3-", "o4-", "gpt-5", "gpt5"],
+        "azure-openai": ["o1-", "o3-", "o4-", "gpt-5", "gpt5"],
         "local-chat-completions": [
             "deepseek-r1",
             "deepseek-reasoner",
@@ -82,11 +45,31 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         "anthropic": ["extended-thinking"],
     }
 
-    # Check if this is a thinking model for the current adapter
+    is_reasoning_env = os.getenv("IS_REASONING", "0").strip() == "1"
     is_thinking_model = (
         adapter in thinking_model_patterns
         and any(pattern in model_lower for pattern in thinking_model_patterns[adapter])
     )
+    raw_max_tokens = os.getenv("MAX_TOKENS")
+
+    if raw_max_tokens:
+        try:
+            max_tokens = int(raw_max_tokens)
+        except ValueError as exc:
+            raise ValueError("MAX_TOKENS must be an integer") from exc
+        if max_tokens <= 0:
+            raise ValueError("MAX_TOKENS must be greater than zero")
+        if (
+            adapter in ("openai-chat-completions", "openai", "azure-openai")
+            and (is_reasoning_env or is_thinking_model)
+        ):
+            return {"max_completion_tokens": max_tokens}
+        return {"max_tokens": max_tokens}
+
+    if is_reasoning_env:
+        if adapter in ("openai-chat-completions", "openai", "azure-openai"):
+            return {"max_completion_tokens": 8192}
+        return {"max_tokens": 8192}
 
     # Handle thinking models with model-specific token limits
     if is_thinking_model:

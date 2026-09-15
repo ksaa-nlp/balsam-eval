@@ -49,6 +49,22 @@ def test_reasoning_env_uses_standard_token_name_for_other_adapters(monkeypatch):
     assert get_max_tokens_config("gemini", "anything") == {"max_tokens": 8192}
 
 
+@pytest.mark.parametrize(
+    ("adapter", "model", "expected_key"),
+    [
+        ("openai", "gpt-5-nano", "max_completion_tokens"),
+        ("openai", "gpt-4o", "max_tokens"),
+        ("gemini", "gemini-2.5-pro", "max_tokens"),
+    ],
+)
+def test_explicit_max_tokens_is_honored_without_reasoning_flag(
+    monkeypatch, adapter, model, expected_key
+):
+    monkeypatch.setenv("MAX_TOKENS", "25000")
+
+    assert get_max_tokens_config(adapter, model) == {expected_key: 25000}
+
+
 @pytest.mark.parametrize("value", ["invalid", "0", "-1"])
 def test_reasoning_env_rejects_invalid_max_tokens(monkeypatch, value):
     monkeypatch.setenv("IS_REASONING", "1")
