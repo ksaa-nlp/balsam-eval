@@ -237,9 +237,21 @@ balsam-eval --model gpt-4o-mini --adapter openai-chat-completions \
   ./pool-dataset.json
 ```
 
-For multiple judges, provide comma-separated model, provider, and key values
-in matching order. A single provider or API key may be shared when supported
-by the judge configuration.
+Judge-based scoring requires one or more explicitly supplied judge models and
+providers. `JUDGE_CONFIGS_B64` must encode a non-empty JSON array; each entry
+supports `model`, `provider`, `apiKeyEnv`, `baseUrl`, `customPrompt`, and
+`maxOutputTokens`. Multiple judges are scored independently and combined using
+the arithmetic mean. Legacy comma-separated model/provider/key variables remain
+supported when each list has either one value or one value per judge. Objective
+metrics do not require judge configuration.
+
+Supported judge providers are `openai`, `anthropic`, `cohere`, `gemini`,
+`groq`, and `local`. Cohere uses `CO_API_KEY` when invoked directly;
+runner-provided judge credentials are isolated on the adapter instance. Judge
+model and provider are retained in internal per-model results, but current
+backend result artifacts contain only the aggregated metric score; backend
+contracts needing per-judge provenance must add explicit non-secret result
+fields before relying on it.
 
 API keys can appear in shell history when passed as arguments. Prefer `.env`
 or environment variables on shared systems.

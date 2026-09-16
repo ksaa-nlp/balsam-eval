@@ -385,6 +385,18 @@ def test_get_judge_configs_rejects_incompatible_legacy_lengths(monkeypatch):
         llm_judge_metric._get_judge_configs()
 
 
+def test_get_judge_configs_accepts_one_legacy_judge(monkeypatch):
+    monkeypatch.setenv("JUDGE_MODEL", "command-r")
+    monkeypatch.setenv("JUDGE_PROVIDER", "cohere")
+    monkeypatch.setenv("JUDGE_API_KEY", "secret")
+
+    configs = llm_judge_metric._get_judge_configs()
+
+    assert [(c.name, c.provider, c.api_key) for c in configs] == [
+        ("command-r", "cohere", "secret")
+    ]
+
+
 def test_get_judge_configs_decodes_cloud_payload(monkeypatch):
     payload = [
         {
@@ -408,6 +420,26 @@ def test_get_judge_configs_decodes_cloud_payload(monkeypatch):
     assert config.endpoint_url == "https://judge.invalid/v1"
     assert config.custom_prompt == "Be strict"
     assert config.max_output_tokens == 25000
+
+
+def test_get_judge_configs_accepts_multiple_cloud_judges(monkeypatch):
+    payload = [
+        {"model": "command-r", "provider": "cohere", "apiKeyEnv": "COHERE_KEY"},
+        {"model": "gpt-4o", "provider": "openai", "apiKeyEnv": "OPENAI_KEY"},
+    ]
+    monkeypatch.setenv(
+        "JUDGE_CONFIGS_B64",
+        base64.b64encode(json.dumps(payload).encode()).decode(),
+    )
+    monkeypatch.setenv("COHERE_KEY", "cohere-secret")
+    monkeypatch.setenv("OPENAI_KEY", "openai-secret")
+
+    configs = llm_judge_metric._get_judge_configs()
+
+    assert [(c.name, c.provider, c.api_key) for c in configs] == [
+        ("command-r", "cohere", "cohere-secret"),
+        ("gpt-4o", "openai", "openai-secret"),
+    ]
 
 
 @pytest.mark.parametrize(

@@ -42,6 +42,20 @@ def test_create_model_adapter_builds_provider_specific_parameters(monkeypatch):
     )
 
 
+def test_create_model_adapter_uses_cohere_adapter_and_isolated_api_key(monkeypatch):
+    adapter = MagicMock()
+    factory = MagicMock(return_value=adapter)
+    get_model = MagicMock(return_value=factory)
+    monkeypatch.setattr(base, "get_model", get_model)
+
+    config = base.ModelConfig(name="command-r", provider="cohere", api_key="key")
+
+    assert base.create_model_adapter(config) is adapter
+    get_model.assert_called_once_with("cohere")
+    factory.assert_called_once_with(model="command-r")
+    assert adapter.api_key == "key"
+
+
 def test_create_model_adapter_rejects_unknown_provider():
     config = base.ModelConfig("judge")
     config.provider = "unknown"

@@ -16,20 +16,20 @@ def response(status_code=200, text="ok"):
 
 
 def test_request_returns_non_retryable_response_immediately(monkeypatch):
-    request = Mock(return_value=response(500))
+    request = Mock(return_value=response(501))
     sleep = Mock()
     monkeypatch.setattr(db.requests, "request", request)
     monkeypatch.setattr(db.time, "sleep", sleep)
 
     result = _request_with_retry("GET", "https://example")
 
-    assert result.status_code == 500
+    assert result.status_code == 501
     request.assert_called_once()
     sleep.assert_not_called()
 
 
 def test_request_retries_transient_status_with_backoff_and_timeout(monkeypatch):
-    request = Mock(side_effect=[response(503), response(429), response(200)])
+    request = Mock(side_effect=[response(500), response(429), response(200)])
     sleep = Mock()
     monkeypatch.setattr(db.requests, "request", request)
     monkeypatch.setattr(db.time, "sleep", sleep)

@@ -44,8 +44,7 @@ def _parse_csv_env(name: str) -> list[str]:
 def _get_judge_configs() -> list[ModelConfig]:
     """Build ModelConfig list from env vars.
 
-    Supports comma-separated values for multiple judges.
-    A single API key is broadcast to all judges.
+    One or more judges must be explicitly configured.
     """
     encoded_configs = os.getenv("JUDGE_CONFIGS_B64")
     if encoded_configs:
@@ -56,7 +55,6 @@ def _get_judge_configs() -> list[ModelConfig]:
 
         if not isinstance(raw_configs, list) or not raw_configs:
             raise ValueError("JUDGE_CONFIGS_B64 must contain a non-empty JSON array")
-
         configs: list[ModelConfig] = []
         for index, raw_config in enumerate(raw_configs):
             if not isinstance(raw_config, dict):
@@ -113,7 +111,7 @@ def _get_judge_configs() -> list[ModelConfig]:
             "JUDGE_MODEL and JUDGE_PROVIDER"
         )
 
-    n = max(len(models), len(providers))
+    count = max(len(models), len(providers))
     invalid = [
         name
         for name, values in (
@@ -121,26 +119,26 @@ def _get_judge_configs() -> list[ModelConfig]:
             ("JUDGE_PROVIDER", providers),
             ("JUDGE_API_KEY", api_keys),
         )
-        if values and len(values) not in (1, n)
+        if values and len(values) not in (1, count)
     ]
     if invalid:
         raise ValueError(
-            f"Judge configuration lengths must be 1 or {n}: {', '.join(invalid)}"
+            f"Judge configuration lengths must be 1 or {count}: {', '.join(invalid)}"
         )
     if len(models) == 1:
-        models *= n
+        models *= count
     if len(providers) == 1:
-        providers *= n
+        providers *= count
     if len(api_keys) <= 1:
-        api_keys = (api_keys or [""]) * n
+        api_keys = (api_keys or [""]) * count
 
     return [
         ModelConfig(
-            name=models[i],
-            provider=providers[i],  # type: ignore[arg-type]
-            api_key=api_keys[i] or None,
+            name=models[index],
+            provider=providers[index],  # type: ignore[arg-type]
+            api_key=api_keys[index] or None,
         )
-        for i in range(n)
+        for index in range(count)
     ]
 
 

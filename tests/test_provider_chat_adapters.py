@@ -199,6 +199,15 @@ def test_provider_specific_transient_statuses_are_retryable(provider, status):
     assert not is_retryable_error(StatusError(status), provider="gemini")
 
 
+@pytest.mark.parametrize(
+    "provider", ["openai", "anthropic", "cohere", "gemini", "groq", "local"]
+)
+def test_generic_http_500_is_retryable_for_all_providers(provider):
+    from src.adapters.chat._retry import is_retryable_error
+
+    assert is_retryable_error(StatusError(500), provider=provider)
+
+
 def test_unclassified_os_error_is_not_retryable():
     from src.adapters.chat._retry import is_retryable_error
 

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 PROVIDER_REGISTRY: Dict[str, str] = {
     "openai": "openai",
     "anthropic": "anthropic",
+    "cohere": "cohere",
     "gemini": "gemini",
     "groq": "groq",
     "local": "local-adapter",
@@ -52,7 +53,7 @@ class ModelConfig:
     """Configuration for a model to use with the LLMJudge."""
     name: str
     provider: Literal[
-        "openai", "anthropic", "gemini", "groq", "local",
+        "openai", "anthropic", "cohere", "gemini", "groq", "local",
     ] = "openai"
     api_key: Optional[str] = None
     endpoint_url: Optional[str] = None
@@ -88,7 +89,9 @@ def create_model_adapter(config: ModelConfig) -> Any:
         params.update(config.other)
 
     adapter = get_model(model_key)(**params)
-    if config.api_key and config.provider in {"openai", "anthropic", "local"}:
+    if config.api_key and config.provider in {
+        "openai", "anthropic", "cohere", "local",
+    }:
         # lm-eval API adapters expose API keys as cached properties backed by env vars.
         # Setting the instance value keeps each judge's credentials isolated.
         setattr(adapter, "api_key", config.api_key)

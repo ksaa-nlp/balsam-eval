@@ -41,7 +41,7 @@ def _request_with_retry(
                 json=json_data,
                 timeout=timeout,
             )
-            if response.status_code not in {429, 502, 503, 504}:
+            if response.status_code not in {429, 500, 502, 503, 504}:
                 return response
             last_exc = requests.HTTPError(f"HTTP {response.status_code}")
         except (requests.Timeout, requests.ConnectionError) as e:
