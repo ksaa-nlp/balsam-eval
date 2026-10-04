@@ -9,6 +9,7 @@ The main improvement is separating concerns:
 
 import json
 import logging
+import math
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -96,85 +97,80 @@ def create_model_adapter(config: ModelConfig) -> Any:
     raise ValueError(f"Unsupported provider: {config.provider}")
 
 
-def call_model_adapter_with_retry(adapter, prompt: str, max_retries: int = 3) -> Dict[str, Any]:
-    """Call model adapter with retry logic."""
+def call_model_adapter(adapter, prompt: str) -> Dict[str, Any]:
+    """Call the judge once, propagating model and response errors immediately."""
+    model_response = None
+
+    if hasattr(adapter, 'generate'):
+        model_response = adapter.generate(prompt)
+    elif hasattr(adapter, '_call'):  # pylint: disable=protected-access
+        model_response = adapter._call(prompt)
+    elif hasattr(adapter, 'invoke'):
+        model_response = adapter.invoke(prompt)
+    elif callable(adapter):
+        model_response = adapter(prompt)
+    else:
+        for method_name in ['generate', 'call', 'predict', 'complete']:
+            method = getattr(adapter, method_name, None)
+            if callable(method):
+                model_response = method(prompt)
+                break
+
+    if model_response is None:
+        raise ValueError("LLM judge adapter returned no response or has no supported call method")
+
+    if isinstance(model_response, tuple):
+        response_text = model_response[0]
+    elif isinstance(model_response, str):
+        response_text = model_response
+    elif hasattr(model_response, 'text'):
+        response_text = model_response.text
+    elif hasattr(model_response, 'content'):
+        response_text = model_response.content
+    else:
+        response_text = str(model_response)
+
+    if not isinstance(response_text, str) or not response_text.strip():
+        raise ValueError("LLM judge returned empty or non-text response")
+
+    raw_text = response_text.strip().replace("```json", "").replace("```", "").strip()
+    parsed = json.loads(raw_text)
+    if not isinstance(parsed, dict) or "score" not in parsed or "explanation" not in parsed:
+        raise ValueError("LLM judge response must contain score and explanation")
+    if not isinstance(parsed["explanation"], str):
+        raise ValueError("LLM judge explanation must be a string")
+
+    return {"score": parsed["score"], "explanation": parsed["explanation"]}
+
+
+def call_model_adapter_with_retry(
+    adapter, prompt: str, max_retries: int = 3, max_score: Optional[float] = None
+) -> Dict[str, Any]:
+    """Retry judge calls and invalid responses, raising the final error on exhaustion."""
+    if max_retries < 1:
+        raise ValueError("max_retries must be at least 1")
 
     for attempt in range(max_retries):
         try:
-            # Try different methods to call the model based on its type
-            model_response = None
+            result = call_model_adapter(adapter, prompt)
+            raw_score = result["score"]
+            if (
+                isinstance(raw_score, bool)
+                or not isinstance(raw_score, (int, float))
+                or not math.isfinite(raw_score)
+                or not 0 <= raw_score <= (max_score if max_score is not None else math.inf)
+            ):
+                raise ValueError(f"LLM judge returned invalid score: {raw_score!r}")
+            return result
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("LLM judge attempt %d/%d failed: %s", attempt + 1, max_retries, e)
+            if attempt == max_retries - 1:
+                raise
+            wait_time = min(2 ** attempt, 30)
+            logger.info("Retrying after %d seconds...", wait_time)
+            time.sleep(wait_time)
 
-            # For DeepEval models, use the appropriate method
-            if hasattr(adapter, 'generate'):
-                model_response = adapter.generate(prompt)
-            elif hasattr(adapter, '_call'):  # pylint: disable=protected-access
-                model_response = adapter._call(prompt)
-            elif hasattr(adapter, 'invoke'):
-                model_response = adapter.invoke(prompt)
-            elif callable(adapter):
-                model_response = adapter(prompt)
-            else:
-                # Try to find any callable method
-                for method_name in ['generate', 'call', 'predict', 'complete']:
-                    if hasattr(adapter, method_name):
-                        method = getattr(adapter, method_name)
-                        if callable(method):
-                            model_response = method(prompt)
-                            break
-
-            if model_response is None:
-                raise ValueError("Could not find a suitable method to call the model adapter")
-
-            # Handle different response formats
-            response_text = None
-            if isinstance(model_response, tuple):
-                response_text = model_response[0]
-                logger.debug(
-                    "Model returned tuple, using first element: %s",
-                    type(model_response[0]),
-                )
-            elif isinstance(model_response, str):
-                response_text = model_response
-            elif hasattr(model_response, 'text'):
-                response_text = model_response.text
-            elif hasattr(model_response, 'content'):
-                response_text = model_response.content
-            else:
-                response_text = str(model_response)
-
-            if response_text is None:
-                logger.warning("Received empty response text (attempt %d)", attempt+1)
-                response_text = ""
-
-            # Parse the response
-            try:
-                # Clean the response text
-                raw_text = response_text.strip().replace("```json", "").replace("```", "").strip()
-                parsed = json.loads(raw_text)
-
-                if "score" in parsed and "explanation" in parsed:
-                    return {
-                        "score": parsed["score"],
-                        "explanation": parsed["explanation"],
-                    }
-
-                logger.warning("Missing keys in parsed output (attempt %d): %s", attempt+1, parsed)
-            except (json.JSONDecodeError, ValueError, KeyError) as e:  # pylint: disable=broad-exception-caught
-                logger.warning("JSON parsing or structure error (attempt %d): %s", attempt+1, e)
-                logger.debug("Raw response: %s", response_text)
-
-        except Exception:  # pylint: disable=broad-exception-caught
-            logger.error("Model call error (attempt %d)", attempt+1)
-
-        # Wait before retry with exponential backoff
-        wait_time = min(2 ** attempt, 30)
-        logger.info("Retrying after %d seconds...", wait_time)
-        time.sleep(wait_time)
-
-    return {
-        "score": None,
-        "explanation": "Error: Unable to parse a valid response after retries"
-    }
+    raise RuntimeError("LLM judge retry loop exited unexpectedly")
 
 
 class BaseLLMJudge(ABC):
@@ -245,14 +241,15 @@ class BaseLLMJudge(ABC):
         prompt += f'[GENERATED OUTPUT]\n{given_answer}\n[/GENERATED OUTPUT]'
 
         try:
-            # Call the model with retry logic
-            result = call_model_adapter_with_retry(adapter, prompt)
+            result = call_model_adapter_with_retry(
+                adapter, prompt, max_score=self.get_max_score()
+            )
 
             raw_score = result["score"]
             explanation = result["explanation"]
 
             # Normalize score using subclass-specific logic
-            norm_score = self.normalize_score(raw_score) if raw_score is not None else 0
+            norm_score = self.normalize_score(raw_score)
             passed = norm_score >= self.threshold
 
             return {
@@ -266,14 +263,7 @@ class BaseLLMJudge(ABC):
 
         except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error("Error evaluating with %s: %s", config.name, e)
-            return {
-                "model": config.name,
-                "provider": config.provider,
-                "score": 0,
-                "raw_score": 0,
-                "passed": False,
-                "explanation": f"Error: {str(e)}"
-            }
+            raise
 
     def evaluate_answer(
         self,

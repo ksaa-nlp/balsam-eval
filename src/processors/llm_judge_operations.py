@@ -234,10 +234,7 @@ class LLMJudgeProcessor:
                     )
                     logger.error("  Traceback: %s", traceback.format_exc())
 
-                    sample[f"{prefix}llm_score"] = None
-                    sample[f"{prefix}llm_score_raw"] = None
-                    sample[f"{prefix}llm_explanation"] = f"Error during LLM evaluation: {str(e)}"
-                    sample[f"{prefix}llm_judge_details"] = {"error": str(e)}
+                    raise
             else:
                 logger.warning("Sample %s: Missing expected_output or response", sample_key)
                 logger.warning(
