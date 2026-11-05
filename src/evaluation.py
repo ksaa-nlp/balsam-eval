@@ -17,6 +17,7 @@ import requests
 import src.metrics  # Registers all metrics in src.metrics.impl.*  # pylint: disable=unused-import
 import src.gemini_adapter  # Registers the custom Gemini model  # pylint: disable=unused-import
 import src.mistral_adapter  # Registers Mistral model  # pylint: disable=unused-import
+import src.adapters.chat.anthropic  # Registers Anthropic chat adapter  # pylint: disable=unused-import
 
 from src.adapter_utils import get_max_tokens_config
 from src.db_operations import JobStatus, update_status
@@ -69,6 +70,7 @@ class EvaluationJob:
             "local-chat-completions",
             "openai-chat-completions",
             "anthropic-chat-completions",
+            "anthropic",
             "mistral-chat-completions",
             "gemini",
         ] = "local-chat-completions",
@@ -137,7 +139,7 @@ class EvaluationJob:
             "mistral-chat-completions",
         ]:
             os.environ["OPENAI_API_KEY"] = api_key
-        if api_key and self.adapter == "anthropic-chat-completions":
+        if api_key and self.adapter in ("anthropic-chat-completions", "anthropic"):
             os.environ["ANTHROPIC_API_KEY"] = api_key
         if api_key and self.adapter == "gemini":
             os.environ["GOOGLE_API_KEY"] = api_key

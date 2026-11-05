@@ -140,6 +140,7 @@ def set_api_key_for_adapter(adapter: str, api_key: str | None) -> None:
         "openai-chat-completions": "OPENAI_API_KEY",
         "local-chat-completions": "OPENAI_API_KEY",
         "anthropic-chat-completions": "ANTHROPIC_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
         "gemini": "GOOGLE_API_KEY",
         "groq": "GROQ_API_KEY",
         "humain": "HUMAIN_API_KEY",
