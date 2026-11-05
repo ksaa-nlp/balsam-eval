@@ -39,8 +39,37 @@ class _AnthropicRuntime(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Reasoning model detection
+# ---------------------------------------------------------------------------
+
+_REASONING_MODEL_KEYWORDS = (
+    "fable",
+    "haiku-5",
+    "opus-4",
+    "opus-5",
+    "sonnet-4",
+    "sonnet-5",
+    "claude-4",
+    "claude-5",
+    "thinking",
+    "reasoning",
+)
+
+
+def _is_reasoning_model(model_name: Optional[str]) -> bool:
+    """Check if model string or IS_REASONING env indicates an Anthropic reasoning model."""
+    if os.environ.get("IS_REASONING", "").lower() in ("1", "true", "yes"):
+        return True
+    if not model_name:
+        return False
+    lower = model_name.lower()
+    return any(keyword in lower for keyword in _REASONING_MODEL_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
 # Multimodal helpers (self-contained, no external src.* imports)
 # ---------------------------------------------------------------------------
+
 
 
 def _build_anthropic_image_parts(images: List[Any]) -> List[dict]:
@@ -132,7 +161,7 @@ def _messages_to_anthropic_payload(
     messages: List[dict],
     model: str,
     max_tokens: int,
-    temperature: float,
+    temperature: Optional[float],
     stop_sequences: List[str],
 ) -> dict:
     """Build an Anthropic Messages API payload from chat messages.
@@ -163,8 +192,9 @@ def _messages_to_anthropic_payload(
         "model": model,
         "messages": cleaned,
         "max_tokens": max_tokens,
-        "temperature": temperature,
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
     if stop_sequences:
         payload["stop_sequences"] = stop_sequences
     if system:
@@ -203,12 +233,47 @@ class AnthropicAudioLM(AnthropicChat):
             tokenizer_backend=tokenizer_backend,  # pyright: ignore[reportCallIssue]
             **kwargs,
         )
+        self._force_reasoning: bool = False
         runtime = cast(_AnthropicRuntime, self)
         logger.info(
             "Initialized AnthropicAudioLM with model '%s' at %s",
             runtime.model,
             runtime.base_url,
         )
+
+    @property
+    def is_reasoning(self) -> bool:
+        """Indicates if reasoning model behavior is active or auto-detected."""
+        runtime = cast(_AnthropicRuntime, self)
+        return getattr(self, "_force_reasoning", False) or _is_reasoning_model(
+            getattr(runtime, "model", None)
+        )
+
+    def _create_payload(
+        self,
+        messages: List[Dict],
+        *,
+        generate: bool = True,
+        gen_kwargs: Optional[dict] = None,
+        seed: int = 1234,
+        eos: Optional[str] = None,
+        **kwargs: Any,
+    ) -> dict:
+        """Build Messages API payload, stripping sampling parameters for reasoning models."""
+        payload = super()._create_payload(
+            messages,
+            generate=generate,
+            gen_kwargs=gen_kwargs,
+            seed=seed,
+            eos=eos,
+            **kwargs,
+        )
+        if self.is_reasoning:
+            # Modern Claude reasoning models strictly reject temperature, top_p, and top_k
+            payload.pop("temperature", None)
+            payload.pop("top_p", None)
+            payload.pop("top_k", None)
+        return payload
 
     # ------------------------------------------------------------------ #
     # Generation
