@@ -265,7 +265,7 @@ class AnthropicAudioLM(AnthropicChat):
 
     def _create_payload(
         self,
-        messages: List[Dict],
+        messages: Any,
         *,
         generate: bool = True,
         gen_kwargs: Optional[dict] = None,
@@ -275,6 +275,10 @@ class AnthropicAudioLM(AnthropicChat):
     ) -> dict:
         """Build Messages API payload, stripping sampling parameters for reasoning models."""
         gen_kwargs = copy.deepcopy(gen_kwargs) if gen_kwargs is not None else {}
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
+        elif isinstance(messages, list) and messages and isinstance(messages[0], str):
+            messages = [{"role": "user", "content": m} for m in messages]
         payload = super()._create_payload(
             messages,
             generate=generate,
