@@ -7,6 +7,7 @@ Anthropic's hosted Messages API does not support audio input.
 Dependencies: lm-eval[api], pillow
 """
 
+import asyncio
 import base64
 import copy
 import io
@@ -14,17 +15,25 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional, Protocol, Tuple, cast
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Tuple, cast
 
+import aiohttp
 import requests as http_requests
 from tqdm import tqdm
-from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
+from tqdm.asyncio import tqdm_asyncio
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
+from lm_eval.api.registry import MODEL_REGISTRY, register_model  # type: ignore[import-untyped]
 from lm_eval.models.anthropic_llms import AnthropicChat  # type: ignore[import-untyped]
+from lm_eval.models.utils import chunks
 
 from src.adapters.chat._provider_utils import validate_generation_results
 from src.adapters.chat._retry import is_retryable_error
 
 logger = logging.getLogger(__name__)
+
+
+class AnthropicNonRetriableError(RuntimeError):
+    """Raised when Anthropic returns a non-retriable client error (4xx)."""
 
 
 class _AnthropicRuntime(Protocol):
@@ -36,11 +45,45 @@ class _AnthropicRuntime(Protocol):
     verify_certificate: bool
     timeout: float
     _max_gen_toks: int
+    _seed: int
+    _concurrent: int
+    _batch_size: int
+    max_retries: int
+    cache_hook: Any
+
+
+# ---------------------------------------------------------------------------
+# Reasoning model detection
+# ---------------------------------------------------------------------------
+
+_REASONING_MODEL_KEYWORDS = (
+    "fable",
+    "haiku-5",
+    "opus-4",
+    "opus-5",
+    "sonnet-4",
+    "sonnet-5",
+    "claude-4",
+    "claude-5",
+    "thinking",
+    "reasoning",
+)
+
+
+def _is_reasoning_model(model_name: Optional[str]) -> bool:
+    """Check if model string or IS_REASONING env indicates an Anthropic reasoning model."""
+    if os.environ.get("IS_REASONING", "").lower() in ("1", "true", "yes"):
+        return True
+    if not model_name:
+        return False
+    lower = model_name.lower()
+    return any(keyword in lower for keyword in _REASONING_MODEL_KEYWORDS)
 
 
 # ---------------------------------------------------------------------------
 # Multimodal helpers (self-contained, no external src.* imports)
 # ---------------------------------------------------------------------------
+
 
 
 def _build_anthropic_image_parts(images: List[Any]) -> List[dict]:
@@ -132,7 +175,7 @@ def _messages_to_anthropic_payload(
     messages: List[dict],
     model: str,
     max_tokens: int,
-    temperature: float,
+    temperature: Optional[float],
     stop_sequences: List[str],
 ) -> dict:
     """Build an Anthropic Messages API payload from chat messages.
@@ -163,8 +206,9 @@ def _messages_to_anthropic_payload(
         "model": model,
         "messages": cleaned,
         "max_tokens": max_tokens,
-        "temperature": temperature,
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
     if stop_sequences:
         payload["stop_sequences"] = stop_sequences
     if system:
@@ -203,12 +247,70 @@ class AnthropicAudioLM(AnthropicChat):
             tokenizer_backend=tokenizer_backend,  # pyright: ignore[reportCallIssue]
             **kwargs,
         )
+        self._force_reasoning: bool = False
         runtime = cast(_AnthropicRuntime, self)
         logger.info(
             "Initialized AnthropicAudioLM with model '%s' at %s",
             runtime.model,
             runtime.base_url,
         )
+
+    @property
+    def is_reasoning(self) -> bool:
+        """Indicates if reasoning model behavior is active or auto-detected."""
+        runtime = cast(_AnthropicRuntime, self)
+        return getattr(self, "_force_reasoning", False) or _is_reasoning_model(
+            getattr(runtime, "model", None)
+        )
+
+    def _create_payload(
+        self,
+        messages: Any,
+        *,
+        generate: bool = True,
+        gen_kwargs: Optional[dict] = None,
+        seed: int = 1234,
+        eos: Optional[str] = None,
+        **kwargs: Any,
+    ) -> dict:
+        """Build Messages API payload, stripping sampling parameters for reasoning models."""
+        gen_kwargs = copy.deepcopy(gen_kwargs) if gen_kwargs is not None else {}
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
+        elif isinstance(messages, list) and messages and isinstance(messages[0], str):
+            messages = [{"role": "user", "content": m} for m in messages]
+        payload = super()._create_payload(
+            messages,
+            generate=generate,
+            gen_kwargs=gen_kwargs,
+            seed=seed,
+            eos=eos,
+            **kwargs,
+        )
+        if self.is_reasoning:
+            # Modern Claude reasoning models strictly reject temperature, top_p, and top_k
+            payload.pop("temperature", None)
+            payload.pop("top_p", None)
+            payload.pop("top_k", None)
+        return payload
+
+    def parse_generations(
+        self, outputs: Any, **kwargs: Any
+    ) -> List[str]:
+        """Extract text from Anthropic content blocks, safely handling thinking/reasoning blocks."""
+        res: List[str] = []
+        if not isinstance(outputs, list):
+            outputs = [outputs]
+        for out in outputs:
+            if not isinstance(out, dict):
+                continue
+            text_blocks = [
+                block.get("text", "")
+                for block in out.get("content", [])
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            res.append("".join(text_blocks))
+        return res
 
     # ------------------------------------------------------------------ #
     # Generation
@@ -258,7 +360,7 @@ class AnthropicAudioLM(AnthropicChat):
                 "max_tokens",
                 gen_kwargs.pop("max_gen_toks", runtime._max_gen_toks),
             )
-            temperature = gen_kwargs.pop("temperature", 0)
+            temperature = None if self.is_reasoning else gen_kwargs.pop("temperature", 0)
             until = gen_kwargs.pop("until", ["\n\nHuman:"])
             if isinstance(until, str):
                 until = [until]
@@ -282,6 +384,29 @@ class AnthropicAudioLM(AnthropicChat):
                         verify=runtime.verify_certificate,
                         timeout=runtime.timeout,
                     )
+                    # Check for 400 deprecation error to auto-correct
+                    if (
+                        resp.status_code == 400
+                        and "deprecated" in resp.text
+                        and any(p in resp.text for p in ("temperature", "top_p", "top_k"))
+                    ):
+                        logger.warning(
+                            "Anthropic visual request returned 400 for model '%s': %s. "
+                            "Auto-correcting payload by stripping deprecated parameters and retrying...",
+                            runtime.model,
+                            resp.text,
+                        )
+                        self._force_reasoning = True
+                        payload.pop("temperature", None)
+                        payload.pop("top_p", None)
+                        payload.pop("top_k", None)
+                        resp = http_requests.post(
+                            runtime.base_url,
+                            json=payload,
+                            headers=runtime.header,
+                            verify=runtime.verify_certificate,
+                            timeout=runtime.timeout,
+                        )
                     resp.raise_for_status()
                     data = resp.json()
                     text = next(
@@ -310,6 +435,152 @@ class AnthropicAudioLM(AnthropicChat):
         return validate_generation_results(results, len(requests), "Anthropic")
 
     # ------------------------------------------------------------------ #
+    # Async batch execution and fail-fast retry handling
+    # ------------------------------------------------------------------ #
+
+    async def amodel_call(
+        self,
+        session: aiohttp.ClientSession,
+        sem: asyncio.Semaphore,
+        messages: Any,
+        *,
+        generate: bool = True,
+        cache_keys: Optional[list] = None,
+        ctxlens: Optional[List[int]] = None,
+        gen_kwargs: Optional[Dict] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Call Anthropic API with 400 auto-correction and fail-fast client error handling."""
+        runtime = cast(_AnthropicRuntime, self)
+        gen_kwargs = copy.deepcopy(gen_kwargs) if gen_kwargs is not None else {}
+        payload = self._create_payload(
+            self.create_message(messages),
+            generate=generate,
+            gen_kwargs=gen_kwargs,
+            seed=getattr(runtime, "_seed", 1234),
+            **kwargs,
+        )
+        cache_method = "generate_until" if generate else "loglikelihood"
+        acquired = await sem.acquire()
+        try:
+            async with session.post(
+                runtime.base_url,
+                json=payload,
+                headers=runtime.header,
+            ) as response:
+                if not response.ok:
+                    error_text = await response.text()
+                    # Check if Anthropic rejected deprecated sampling parameters
+                    if (
+                        response.status == 400
+                        and "deprecated" in error_text
+                        and any(p in error_text for p in ("temperature", "top_p", "top_k"))
+                    ):
+                        logger.warning(
+                            "Anthropic API returned 400 for model '%s': %s. "
+                            "Auto-correcting payload by stripping deprecated parameters and retrying...",
+                            runtime.model,
+                            error_text,
+                        )
+                        self._force_reasoning = True
+                        payload.pop("temperature", None)
+                        payload.pop("top_p", None)
+                        payload.pop("top_k", None)
+                        async with session.post(
+                            runtime.base_url,
+                            json=payload,
+                            headers=runtime.header,
+                        ) as retry_response:
+                            if not retry_response.ok:
+                                retry_error_text = await retry_response.text()
+                                if 400 <= retry_response.status < 500 and retry_response.status != 429:
+                                    raise AnthropicNonRetriableError(
+                                        f"Anthropic client error ({retry_response.status}): {retry_error_text}"
+                                    )
+                                retry_response.raise_for_status()
+                            outputs = await retry_response.json()
+                    else:
+                        # Fail fast on non-retriable 4xx client errors to stop infinite tenacity retries
+                        if 400 <= response.status < 500 and response.status != 429:
+                            raise AnthropicNonRetriableError(
+                                f"Anthropic client error ({response.status}): {error_text}"
+                            )
+                        response.raise_for_status()
+                        outputs = await response.json()
+                else:
+                    outputs = await response.json()
+
+            answers = (
+                self.parse_generations(outputs=outputs)
+                if generate
+                else self.parse_logprobs(
+                    outputs=outputs,
+                    tokens=messages,
+                    ctxlens=ctxlens,
+                )
+            )
+            if cache_keys:
+                for res, cache in zip(answers, cache_keys):
+                    self.cache_hook.add_partial(cache_method, cache, res)
+            return answers
+        except AnthropicNonRetriableError:
+            raise
+        except BaseException as e:
+            logger.error("Anthropic exception: %r, retrying.", e)
+            raise e
+        finally:
+            if acquired:
+                sem.release()
+
+    async def get_batched_requests(
+        self,
+        requests: list,
+        cache_keys: list,
+        *,
+        generate: bool = True,
+        ctxlens: Optional[List[int]] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Execute batched requests, stopping tenacity from retrying client errors."""
+        runtime = cast(_AnthropicRuntime, self)
+        ctxlens = ctxlens if ctxlens else [None] * len(requests)
+        conn = aiohttp.TCPConnector(
+            limit=runtime._concurrent, ssl=runtime.verify_certificate
+        )
+        sem = asyncio.Semaphore(runtime._concurrent)
+        async with aiohttp.ClientSession(
+            connector=conn, timeout=aiohttp.ClientTimeout(total=runtime.timeout)
+        ) as session:
+            retry_: Callable[..., Awaitable[Any]] = retry(
+                stop=stop_after_attempt(getattr(runtime, "max_retries", 3)),
+                wait=wait_exponential(multiplier=0.5, min=1, max=10),
+                retry=retry_if_not_exception_type(AnthropicNonRetriableError),
+                reraise=True,
+                before_sleep=lambda retry_state: logger.info(
+                    "Anthropic retry attempt %d", retry_state.attempt_number
+                ),
+            )(self.amodel_call)
+            tasks = [
+                asyncio.create_task(
+                    retry_(
+                        session=session,
+                        sem=sem,
+                        messages=message,
+                        cache_keys=cache_key,
+                        generate=generate,
+                        ctxlens=ctxlen,
+                        **kwargs,
+                    )
+                )
+                for message, cache_key, ctxlen in zip(
+                    chunks(requests, n=runtime._batch_size),
+                    chunks(cache_keys, n=runtime._batch_size),
+                    chunks(ctxlens, n=runtime._batch_size),
+                )
+            ]
+            return await tqdm_asyncio.gather(*tasks, desc="Requesting Anthropic API")
+
+    # ------------------------------------------------------------------ #
     # Loglikelihood stubs
     # ------------------------------------------------------------------ #
 
@@ -326,3 +597,11 @@ class AnthropicAudioLM(AnthropicChat):
         raise NotImplementedError(
             "Anthropic Messages API does not support loglikelihood_rolling"
         )
+
+
+# Override lm-eval's default AnthropicChat so anthropic-chat-completions also uses AnthropicAudioLM
+try:
+    MODEL_REGISTRY._objs["anthropic-chat-completions"] = AnthropicAudioLM
+except Exception:  # pylint: disable=broad-exception-caught
+    pass
+

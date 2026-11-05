@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 _NON_BATCHING_ADAPTERS = {
+    "anthropic",
     "anthropic-chat-completions",
     "cohere",
     "local-chat-completions",
