@@ -7,6 +7,7 @@ Anthropic's hosted Messages API does not support audio input.
 Dependencies: lm-eval[api], pillow
 """
 
+import asyncio
 import base64
 import copy
 import io
@@ -14,17 +15,25 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional, Protocol, Tuple, cast
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Tuple, cast
 
+import aiohttp
 import requests as http_requests
 from tqdm import tqdm
+from tqdm.asyncio import tqdm_asyncio
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
 from lm_eval.models.anthropic_llms import AnthropicChat  # type: ignore[import-untyped]
+from lm_eval.models.utils import chunks
 
 from src.adapters.chat._provider_utils import validate_generation_results
 from src.adapters.chat._retry import is_retryable_error
 
 logger = logging.getLogger(__name__)
+
+
+class AnthropicNonRetriableError(RuntimeError):
+    """Raised when Anthropic returns a non-retriable client error (4xx)."""
 
 
 class _AnthropicRuntime(Protocol):
@@ -36,6 +45,11 @@ class _AnthropicRuntime(Protocol):
     verify_certificate: bool
     timeout: float
     _max_gen_toks: int
+    _seed: int
+    _concurrent: int
+    _batch_size: int
+    max_retries: int
+    cache_hook: Any
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +337,7 @@ class AnthropicAudioLM(AnthropicChat):
                 "max_tokens",
                 gen_kwargs.pop("max_gen_toks", runtime._max_gen_toks),
             )
-            temperature = gen_kwargs.pop("temperature", 0)
+            temperature = None if self.is_reasoning else gen_kwargs.pop("temperature", 0)
             until = gen_kwargs.pop("until", ["\n\nHuman:"])
             if isinstance(until, str):
                 until = [until]
@@ -347,6 +361,29 @@ class AnthropicAudioLM(AnthropicChat):
                         verify=runtime.verify_certificate,
                         timeout=runtime.timeout,
                     )
+                    # Check for 400 deprecation error to auto-correct
+                    if (
+                        resp.status_code == 400
+                        and "deprecated" in resp.text
+                        and any(p in resp.text for p in ("temperature", "top_p", "top_k"))
+                    ):
+                        logger.warning(
+                            "Anthropic visual request returned 400 for model '%s': %s. "
+                            "Auto-correcting payload by stripping deprecated parameters and retrying...",
+                            runtime.model,
+                            resp.text,
+                        )
+                        self._force_reasoning = True
+                        payload.pop("temperature", None)
+                        payload.pop("top_p", None)
+                        payload.pop("top_k", None)
+                        resp = http_requests.post(
+                            runtime.base_url,
+                            json=payload,
+                            headers=runtime.header,
+                            verify=runtime.verify_certificate,
+                            timeout=runtime.timeout,
+                        )
                     resp.raise_for_status()
                     data = resp.json()
                     text = next(
@@ -373,6 +410,152 @@ class AnthropicAudioLM(AnthropicChat):
             f"Result count mismatch: {len(results)} vs {len(requests)}"
         )
         return validate_generation_results(results, len(requests), "Anthropic")
+
+    # ------------------------------------------------------------------ #
+    # Async batch execution and fail-fast retry handling
+    # ------------------------------------------------------------------ #
+
+    async def amodel_call(
+        self,
+        session: aiohttp.ClientSession,
+        sem: asyncio.Semaphore,
+        messages: Any,
+        *,
+        generate: bool = True,
+        cache_keys: Optional[list] = None,
+        ctxlens: Optional[List[int]] = None,
+        gen_kwargs: Optional[Dict] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Call Anthropic API with 400 auto-correction and fail-fast client error handling."""
+        runtime = cast(_AnthropicRuntime, self)
+        gen_kwargs = copy.deepcopy(gen_kwargs)
+        payload = self._create_payload(
+            self.create_message(messages),
+            generate=generate,
+            gen_kwargs=gen_kwargs,
+            seed=getattr(runtime, "_seed", 1234),
+            **kwargs,
+        )
+        cache_method = "generate_until" if generate else "loglikelihood"
+        acquired = await sem.acquire()
+        try:
+            async with session.post(
+                runtime.base_url,
+                json=payload,
+                headers=runtime.header,
+            ) as response:
+                if not response.ok:
+                    error_text = await response.text()
+                    # Check if Anthropic rejected deprecated sampling parameters
+                    if (
+                        response.status == 400
+                        and "deprecated" in error_text
+                        and any(p in error_text for p in ("temperature", "top_p", "top_k"))
+                    ):
+                        logger.warning(
+                            "Anthropic API returned 400 for model '%s': %s. "
+                            "Auto-correcting payload by stripping deprecated parameters and retrying...",
+                            runtime.model,
+                            error_text,
+                        )
+                        self._force_reasoning = True
+                        payload.pop("temperature", None)
+                        payload.pop("top_p", None)
+                        payload.pop("top_k", None)
+                        async with session.post(
+                            runtime.base_url,
+                            json=payload,
+                            headers=runtime.header,
+                        ) as retry_response:
+                            if not retry_response.ok:
+                                retry_error_text = await retry_response.text()
+                                if 400 <= retry_response.status < 500 and retry_response.status != 429:
+                                    raise AnthropicNonRetriableError(
+                                        f"Anthropic client error ({retry_response.status}): {retry_error_text}"
+                                    )
+                                retry_response.raise_for_status()
+                            outputs = await retry_response.json()
+                    else:
+                        # Fail fast on non-retriable 4xx client errors to stop infinite tenacity retries
+                        if 400 <= response.status < 500 and response.status != 429:
+                            raise AnthropicNonRetriableError(
+                                f"Anthropic client error ({response.status}): {error_text}"
+                            )
+                        response.raise_for_status()
+                        outputs = await response.json()
+                else:
+                    outputs = await response.json()
+
+            answers = (
+                self.parse_generations(outputs=outputs)
+                if generate
+                else self.parse_logprobs(
+                    outputs=outputs,
+                    tokens=messages,
+                    ctxlens=ctxlens,
+                )
+            )
+            if cache_keys:
+                for res, cache in zip(answers, cache_keys):
+                    self.cache_hook.add_partial(cache_method, cache, res)
+            return answers
+        except AnthropicNonRetriableError:
+            raise
+        except BaseException as e:
+            logger.error("Anthropic exception: %r, retrying.", e)
+            raise e
+        finally:
+            if acquired:
+                sem.release()
+
+    async def get_batched_requests(
+        self,
+        requests: list,
+        cache_keys: list,
+        *,
+        generate: bool = True,
+        ctxlens: Optional[List[int]] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Execute batched requests, stopping tenacity from retrying client errors."""
+        runtime = cast(_AnthropicRuntime, self)
+        ctxlens = ctxlens if ctxlens else [None] * len(requests)
+        conn = aiohttp.TCPConnector(
+            limit=runtime._concurrent, ssl=runtime.verify_certificate
+        )
+        sem = asyncio.Semaphore(runtime._concurrent)
+        async with aiohttp.ClientSession(
+            connector=conn, timeout=aiohttp.ClientTimeout(total=runtime.timeout)
+        ) as session:
+            retry_: Callable[..., Awaitable[Any]] = retry(
+                stop=stop_after_attempt(getattr(runtime, "max_retries", 3)),
+                wait=wait_exponential(multiplier=0.5, min=1, max=10),
+                retry=retry_if_not_exception_type(AnthropicNonRetriableError),
+                reraise=True,
+                before_sleep=lambda retry_state: logger.info(
+                    "Anthropic retry attempt %d", retry_state.attempt_number
+                ),
+            )(self.amodel_call)
+            tasks = [
+                asyncio.create_task(
+                    retry_(
+                        session=session,
+                        sem=sem,
+                        messages=message,
+                        cache_keys=cache_key,
+                        generate=generate,
+                        ctxlens=ctxlen,
+                        **kwargs,
+                    )
+                )
+                for message, cache_key, ctxlen in zip(
+                    chunks(requests, n=runtime._batch_size),
+                    chunks(cache_keys, n=runtime._batch_size),
+                    chunks(ctxlens, n=runtime._batch_size),
+                )
+            ]
+            return await tqdm_asyncio.gather(*tasks, desc="Requesting Anthropic API")
 
     # ------------------------------------------------------------------ #
     # Loglikelihood stubs
