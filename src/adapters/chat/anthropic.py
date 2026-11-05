@@ -274,6 +274,7 @@ class AnthropicAudioLM(AnthropicChat):
         **kwargs: Any,
     ) -> dict:
         """Build Messages API payload, stripping sampling parameters for reasoning models."""
+        gen_kwargs = copy.deepcopy(gen_kwargs) if gen_kwargs is not None else {}
         payload = super()._create_payload(
             messages,
             generate=generate,
@@ -429,7 +430,7 @@ class AnthropicAudioLM(AnthropicChat):
     ) -> Any:
         """Call Anthropic API with 400 auto-correction and fail-fast client error handling."""
         runtime = cast(_AnthropicRuntime, self)
-        gen_kwargs = copy.deepcopy(gen_kwargs)
+        gen_kwargs = copy.deepcopy(gen_kwargs) if gen_kwargs is not None else {}
         payload = self._create_payload(
             self.create_message(messages),
             generate=generate,

@@ -1,7 +1,8 @@
+import asyncio
 import base64
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
@@ -770,3 +771,164 @@ def test_chat_adapters_reject_unsupported_loglikelihood(cls):
         model.loglikelihood(requests)
     with pytest.raises(NotImplementedError, match="loglikelihood"):
         model.loglikelihood_rolling(requests)
+
+
+# ---------------------------------------------------------------------------
+# Anthropic Reasoning Model & Error Handling Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("model_name", "expected"),
+    [
+        ("claude-fable-5-1", True),
+        ("claude-haiku-5-5", True),
+        ("claude-3-7-sonnet-thinking", True),
+        ("claude-opus-4-1", True),
+        ("claude-opus-5", True),
+        ("claude-sonnet-4", True),
+        ("claude-5-sonnet", True),
+        ("claude-3-sonnet-20240229", False),
+        ("claude-3-5-sonnet-20241022", False),
+        ("claude-3-haiku-20240307", False),
+    ],
+)
+def test_anthropic_is_reasoning_model_detection(monkeypatch, model_name, expected):
+    monkeypatch.delenv("IS_REASONING", raising=False)
+    assert anthropic._is_reasoning_model(model_name) is expected
+
+
+def test_anthropic_is_reasoning_model_env_override(monkeypatch):
+    monkeypatch.setenv("IS_REASONING", "1")
+    assert anthropic._is_reasoning_model("claude-3-sonnet-20240229") is True
+
+
+def test_anthropic_create_payload_reasoning_strips_parameters():
+    model = object.__new__(anthropic.AnthropicAudioLM)
+    model.model = "claude-fable-5-1"
+    model._max_gen_toks = 4096
+    model._force_reasoning = False
+
+    messages = [{"role": "user", "content": "hello"}]
+    gen_kwargs = {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_tokens": 8192,
+        "until": ["\n\nHuman:"],
+    }
+
+    payload = model._create_payload(messages, gen_kwargs=gen_kwargs)
+    assert payload["model"] == "claude-fable-5-1"
+    assert payload["max_tokens"] == 8192
+    assert "temperature" not in payload
+    assert "top_p" not in payload
+    assert "top_k" not in payload
+
+
+def test_anthropic_create_payload_standard_preserves_temperature():
+    model = object.__new__(anthropic.AnthropicAudioLM)
+    model.model = "claude-3-sonnet-20240229"
+    model._max_gen_toks = 4096
+    model._force_reasoning = False
+
+    messages = [{"role": "user", "content": "hello"}]
+    gen_kwargs = {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "max_tokens": 2048,
+        "until": ["\n\nHuman:"],
+    }
+
+    payload = model._create_payload(messages, gen_kwargs=gen_kwargs)
+    assert payload["model"] == "claude-3-sonnet-20240229"
+    assert payload["temperature"] == 0.7
+    assert payload["top_p"] == 0.9
+
+
+def test_anthropic_amodel_call_auto_corrects_on_deprecation_400():
+    async def _test():
+        model = object.__new__(anthropic.AnthropicAudioLM)
+        model.model = "claude-unknown-reasoning"
+        model.base_url = "https://api.anthropic.com/v1/messages"
+        model.header = {"x-api-key": "test"}
+        model._max_gen_toks = 4096
+        model._force_reasoning = False
+        model.cache_hook = MagicMock()
+        model.create_message = lambda m: m
+        model.parse_generations = lambda outputs: ["generated text"]
+
+        first_resp = MagicMock()
+        first_resp.ok = False
+        first_resp.status = 400
+        first_resp.text = AsyncMock(
+            return_value='{"type":"error","error":{"type":"invalid_request_error","message":"`temperature` is deprecated for this model."}}'
+        )
+
+        second_resp = MagicMock()
+        second_resp.ok = True
+        second_resp.status = 200
+        second_resp.json = AsyncMock(return_value={"content": [{"type": "text", "text": "generated text"}]})
+
+        session = MagicMock()
+        session.post = MagicMock(
+            side_effect=[
+                AsyncMock(__aenter__=AsyncMock(return_value=first_resp), __aexit__=AsyncMock()),
+                AsyncMock(__aenter__=AsyncMock(return_value=second_resp), __aexit__=AsyncMock()),
+            ]
+        )
+        sem = asyncio.Semaphore(1)
+
+        result = await model.amodel_call(
+            session=session,
+            sem=sem,
+            messages=[{"role": "user", "content": "hi"}],
+            generate=True,
+            gen_kwargs={"temperature": 0.5},
+        )
+
+        assert result == ["generated text"]
+        assert model._force_reasoning is True
+        assert session.post.call_count == 2
+        second_call_json = session.post.call_args_list[1][1]["json"]
+        assert "temperature" not in second_call_json
+
+    asyncio.run(_test())
+
+
+def test_anthropic_amodel_call_fails_fast_on_non_deprecated_400():
+    async def _test():
+        model = object.__new__(anthropic.AnthropicAudioLM)
+        model.model = "claude-3-sonnet-20240229"
+        model.base_url = "https://api.anthropic.com/v1/messages"
+        model.header = {"x-api-key": "test"}
+        model._max_gen_toks = 4096
+        model._force_reasoning = False
+        model.create_message = lambda m: m
+
+        resp = MagicMock()
+        resp.ok = False
+        resp.status = 400
+        resp.text = AsyncMock(
+            return_value='{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens exceeds limit"}}'
+        )
+
+        session = MagicMock()
+        session.post = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=resp),
+                __aexit__=AsyncMock(return_value=False),
+            )
+        )
+        sem = asyncio.Semaphore(1)
+
+        with pytest.raises(anthropic.AnthropicNonRetriableError, match="Anthropic client error \\(400\\)"):
+            await model.amodel_call(
+                session=session,
+                sem=sem,
+                messages=[{"role": "user", "content": "hi"}],
+                generate=True,
+            )
+
+    asyncio.run(_test())
+
