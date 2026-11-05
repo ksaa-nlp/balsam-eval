@@ -932,3 +932,40 @@ def test_anthropic_amodel_call_fails_fast_on_non_deprecated_400():
 
     asyncio.run(_test())
 
+
+def test_anthropic_parse_generations_handles_thinking_blocks():
+    model = object.__new__(anthropic.AnthropicAudioLM)
+    outputs = {
+        "content": [
+            {
+                "type": "thinking",
+                "thinking": "Step 1: Compute collatz steps for 1..7.\nStep 2: Sum the values.",
+            },
+            {
+                "type": "text",
+                "text": "39",
+            },
+        ]
+    }
+    assert model.parse_generations(outputs) == ["39"]
+
+
+def test_anthropic_parse_generations_handles_multiple_outputs_and_text_blocks():
+    model = object.__new__(anthropic.AnthropicAudioLM)
+    outputs = [
+        {
+            "content": [
+                {"type": "thinking", "thinking": "Let's think..."},
+                {"type": "text", "text": "Hello "},
+                {"type": "text", "text": "World!"},
+            ]
+        },
+        {
+            "content": [
+                {"type": "text", "text": "Direct answer"},
+            ]
+        },
+    ]
+    assert model.parse_generations(outputs) == ["Hello World!", "Direct answer"]
+
+

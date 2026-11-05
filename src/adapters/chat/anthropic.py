@@ -294,6 +294,24 @@ class AnthropicAudioLM(AnthropicChat):
             payload.pop("top_k", None)
         return payload
 
+    def parse_generations(
+        self, outputs: Any, **kwargs: Any
+    ) -> List[str]:
+        """Extract text from Anthropic content blocks, safely handling thinking/reasoning blocks."""
+        res: List[str] = []
+        if not isinstance(outputs, list):
+            outputs = [outputs]
+        for out in outputs:
+            if not isinstance(out, dict):
+                continue
+            text_blocks = [
+                block.get("text", "")
+                for block in out.get("content", [])
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            res.append("".join(text_blocks))
+        return res
+
     # ------------------------------------------------------------------ #
     # Generation
     # ------------------------------------------------------------------ #
