@@ -22,7 +22,7 @@ import requests as http_requests
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
-from lm_eval.api.registry import register_model  # type: ignore[import-untyped]
+from lm_eval.api.registry import MODEL_REGISTRY, register_model  # type: ignore[import-untyped]
 from lm_eval.models.anthropic_llms import AnthropicChat  # type: ignore[import-untyped]
 from lm_eval.models.utils import chunks
 
@@ -574,3 +574,11 @@ class AnthropicAudioLM(AnthropicChat):
         raise NotImplementedError(
             "Anthropic Messages API does not support loglikelihood_rolling"
         )
+
+
+# Override lm-eval's default AnthropicChat so anthropic-chat-completions also uses AnthropicAudioLM
+try:
+    MODEL_REGISTRY._objs["anthropic-chat-completions"] = AnthropicAudioLM
+except Exception:  # pylint: disable=broad-exception-caught
+    pass
+
