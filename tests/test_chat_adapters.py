@@ -969,3 +969,43 @@ def test_anthropic_parse_generations_handles_multiple_outputs_and_text_blocks():
     assert model.parse_generations(outputs) == ["Hello World!", "Direct answer"]
 
 
+def test_anthropic_parse_generations_handles_refusals():
+    model = object.__new__(anthropic.AnthropicAudioLM)
+    outputs = {
+        "model": "claude-fable-5-1",
+        "stop_reason": "refusal",
+        "stop_details": {
+            "type": "refusal",
+            "category": "cyber",
+            "explanation": "This request was blocked under Anthropic's Usage Policy.",
+        },
+        "content": [],
+    }
+    assert model.parse_generations(outputs) == [
+        "This request was blocked under Anthropic's Usage Policy."
+    ]
+
+
+def test_anthropic_parse_generations_handles_refusal_without_explanation():
+    model = object.__new__(anthropic.AnthropicAudioLM)
+    outputs = {
+        "model": "claude-fable-5-1",
+        "stop_reason": "refusal",
+        "content": [],
+    }
+    assert model.parse_generations(outputs) == [
+        "[Refusal: request blocked under Anthropic Usage Policy]"
+    ]
+
+
+def test_anthropic_parse_generations_handles_thinking_only_output():
+    model = object.__new__(anthropic.AnthropicAudioLM)
+    outputs = {
+        "model": "claude-fable-5-1",
+        "stop_reason": "max_tokens",
+        "content": [{"type": "thinking", "thinking": "Thinking process only..."}],
+    }
+    assert model.parse_generations(outputs) == ["Thinking process only..."]
+
+
+

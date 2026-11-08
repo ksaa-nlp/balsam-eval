@@ -65,6 +65,8 @@ _REASONING_MODEL_KEYWORDS = (
     "sonnet-5",
     "claude-4",
     "claude-5",
+    "claude-3-7",
+    "claude-3.7",
     "thinking",
     "reasoning",
 )
@@ -297,7 +299,7 @@ class AnthropicAudioLM(AnthropicChat):
     def parse_generations(
         self, outputs: Any, **kwargs: Any
     ) -> List[str]:
-        """Extract text from Anthropic content blocks, safely handling thinking/reasoning blocks."""
+        """Extract text from Anthropic content blocks, safely handling thinking/reasoning blocks and refusals."""
         res: List[str] = []
         if not isinstance(outputs, list):
             outputs = [outputs]
@@ -309,7 +311,29 @@ class AnthropicAudioLM(AnthropicChat):
                 for block in out.get("content", [])
                 if isinstance(block, dict) and block.get("type") == "text"
             ]
-            res.append("".join(text_blocks))
+            text = "".join(text_blocks)
+            if not text.strip():
+                # Handle refusal responses where Anthropic provides no text content blocks
+                if out.get("stop_reason") == "refusal":
+                    stop_details = out.get("stop_details")
+                    explanation = ""
+                    if isinstance(stop_details, dict):
+                        explanation = stop_details.get("explanation", "")
+                    text = explanation or "[Refusal: request blocked under Anthropic Usage Policy]"
+                else:
+                    # Check if thinking was produced without a text block (e.g. hit token limit during thinking)
+                    thinking_blocks = [
+                        block.get("thinking", "")
+                        for block in out.get("content", [])
+                        if isinstance(block, dict) and block.get("type") == "thinking"
+                    ]
+                    if thinking_blocks and "".join(thinking_blocks).strip():
+                        text = "".join(thinking_blocks)
+                    elif out.get("stop_reason"):
+                        text = f"[Stopped: {out.get('stop_reason')}]"
+                    else:
+                        text = "[No response generated]"
+            res.append(text)
         return res
 
     # ------------------------------------------------------------------ #
@@ -414,6 +438,23 @@ class AnthropicAudioLM(AnthropicChat):
                          if block.get("type") == "text"),
                         "",
                     )
+                    if not text.strip():
+                        if data.get("stop_reason") == "refusal":
+                            stop_details = data.get("stop_details")
+                            explanation = ""
+                            if isinstance(stop_details, dict):
+                                explanation = stop_details.get("explanation", "")
+                            text = explanation or "[Refusal: request blocked under Anthropic Usage Policy]"
+                        else:
+                            thinking_blocks = [
+                                block.get("thinking", "")
+                                for block in data.get("content", [])
+                                if isinstance(block, dict) and block.get("type") == "thinking"
+                            ]
+                            if thinking_blocks and "".join(thinking_blocks).strip():
+                                text = "".join(thinking_blocks)
+                            elif data.get("stop_reason"):
+                                text = f"[Stopped: {data.get('stop_reason')}]"
                     if text:
                         results.append(text)
                         break
