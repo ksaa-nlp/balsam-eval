@@ -57,6 +57,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         ],
         "gemini": ["thinking", "2.0-flash-thinking"],
         "anthropic-chat-completions": ["extended-thinking"],
+        "anthropic": ["extended-thinking"],
     }
 
     # Check if this is a thinking model for the current adapter
@@ -78,6 +79,7 @@ def get_max_tokens_config(adapter: str, model_name: str) -> dict:
         "groq": 1024,
         "openai-chat-completions": 1024,
         "anthropic-chat-completions": 1024,
+        "anthropic": 1024,
         "local-chat-completions": 1024,
     }
 
@@ -108,62 +110,45 @@ def _get_thinking_model_config(adapter: str, model_lower: str) -> dict | None:
             return {"max_completion_tokens": 8192, "max_tokens": 8192}
         return {"max_tokens": 8192}
 
-    if adapter in ("gemini", "anthropic-chat-completions"):
+    if adapter in ("gemini", "anthropic-chat-completions", "anthropic"):
         return {"max_tokens": 8192}
 
     return None
 
 
 def convert_anthropic_url(url: str | None) -> str:
-    """Convert Anthropic API URL to OpenAI-compatible format.
+    """Resolve Anthropic Messages endpoint.
 
     Args:
         url: The base URL (can be None, empty, or an Anthropic URL)
 
     Returns:
-        OpenAI-compatible Anthropic URL
+        Anthropic Messages API URL
 
     Examples:
         >>> convert_anthropic_url(None)
-        'https://api.anthropic.com/v1/chat/completions'
+        'https://api.anthropic.com/v1/messages'
 
         >>> convert_anthropic_url("https://api.anthropic.com/v1/messages")
-        'https://api.anthropic.com/v1/chat/completions'
+        'https://api.anthropic.com/v1/messages'
     """
-    # Default OpenAI-compatible Anthropic endpoint
-    default_url = "https://api.anthropic.com/v1/chat/completions"
+    default_url = "https://api.anthropic.com/v1/messages"
 
-    # If URL is None or empty, use default
     if not url or url.strip() == "":
         return default_url
 
     url = url.strip()
 
-    # If it's already the chat/completions endpoint, return as-is
-    if "/chat/completions" in url:
-        return url
+    if "api.anthropic.com" in url:
+        return default_url
 
-    # Convert /v1/messages to /v1/chat/completions
-    if "/v1/messages" in url:
-        return url.replace("/v1/messages", "/v1/chat/completions")
-
-    # If it's just the base domain, add the path
-    if "api.anthropic.com" in url and "/v1" not in url:
-        url = url.rstrip("/")
-        return f"{url}/v1/chat/completions"
-
-    # If it has /v1 but no endpoint, add chat/completions
-    if url.endswith("/v1"):
-        return f"{url}/chat/completions"
-
-    # Fallback to default if we can't parse it
-    return default_url
+    return url
 
 
 def process_adapter_and_url(
     adapter: str, base_url: str | None, verbose: bool = True
 ) -> tuple[str, str | None]:
-    """Process adapter and base_url, converting Anthropic to local-chat-completions.
+    """Process adapter and base_url.
 
     Args:
         adapter: The adapter type from environment
@@ -175,19 +160,19 @@ def process_adapter_and_url(
 
     Examples:
         >>> process_adapter_and_url("anthropic-chat-completions", None, verbose=False)
-        ('local-chat-completions', 'https://api.anthropic.com/v1/chat/completions')
+        ('anthropic', 'https://api.anthropic.com/v1/messages')
 
         >>> process_adapter_and_url("openai-chat-completions", "https://api.openai.com",
         ...                         verbose=False)
         ('openai-chat-completions', 'https://api.openai.com')
     """
-    if adapter == "anthropic-chat-completions":
+    if adapter in {"anthropic", "anthropic-chat-completions"}:
         if verbose:
-            log_message = "Converting anthropic-chat-completions to local-chat-completions"
+            log_message = "Routing to native Anthropic Messages adapter"
             logger.info(log_message)
             print(log_message)
 
-        processed_adapter = "local-chat-completions"
+        processed_adapter = "anthropic"
         processed_base_url = convert_anthropic_url(base_url)
 
         if verbose:
