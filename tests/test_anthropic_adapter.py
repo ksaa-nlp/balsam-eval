@@ -119,6 +119,37 @@ class TestAnthropicPayloadCreation:
             {"role": "user", "content": [{"type": "text", "text": "Simple string prompt"}]}
         ]
 
+    def test_filters_whitespace_only_stop_sequences(self) -> None:
+        model = object.__new__(AnthropicAudioLM)
+        model.model = "claude-3-5-sonnet-20241022"
+        model._max_gen_toks = 4096
+        model._force_reasoning = False
+
+        messages = [{"role": "user", "content": "Hello"}]
+        # lm-eval defaults until to ["\n\n"] when omitted; Anthropic rejects pure-whitespace stop sequences
+        gen_kwargs = {
+            "max_tokens": 512,
+            "until": ["\n\n", "  ", "\t", ""],
+        }
+
+        payload = model._create_payload(messages, gen_kwargs=gen_kwargs)
+        assert "stop_sequences" not in payload
+
+    def test_preserves_valid_non_whitespace_stop_sequences(self) -> None:
+        model = object.__new__(AnthropicAudioLM)
+        model.model = "claude-3-5-sonnet-20241022"
+        model._max_gen_toks = 4096
+        model._force_reasoning = False
+
+        messages = [{"role": "user", "content": "Hello"}]
+        gen_kwargs = {
+            "max_tokens": 512,
+            "until": ["\n\n", "\n\nHuman:", "  ", "Assistant:"],
+        }
+
+        payload = model._create_payload(messages, gen_kwargs=gen_kwargs)
+        assert payload.get("stop_sequences") == ["\n\nHuman:", "Assistant:"]
+
 
 class TestAnthropicParseGenerations:
     """Test parse_generations handling thinking and reasoning blocks."""
