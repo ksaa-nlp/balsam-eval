@@ -687,8 +687,26 @@ def test_llm_judge_process_results_and_metric_export():
         "llm_as_judge": ("", "", "", None, None)
     }
     metric = llm_judge_metric.LLMJudgeMetric(MetricConfig(name="llm_as_judge"))
-    assert metric.get_doc_to_text("prompt") == "prompt"
+    assert metric.get_doc_to_text("prompt").startswith("prompt{% if mcq is defined and mcq %}")
     assert metric.get_generation_kwargs() == {"do_sample": False, "until": []}
+
+
+def test_llm_judge_prompt_adds_options_only_for_mcq_docs():
+    from lm_eval.utils import apply_template
+
+    metric = llm_judge_metric.LLMJudgeMetric(MetricConfig(name="llm_as_judge"))
+    template = metric.get_doc_to_text("{{instruction}}\n{{input}}")
+
+    mcq_doc = {"instruction": "Pick one", "input": "Q?", "mcq": ["alpha", "beta"]}
+    assert apply_template(template, mcq_doc) == (
+        "Pick one\nQ?\n\nالخيارات:\nA. alpha\nB. beta\n"
+    )
+    for doc in (
+        {"instruction": "Pick one", "input": "Q?"},
+        {"instruction": "Pick one", "input": "Q?", "mcq": None},
+        {"instruction": "Pick one", "input": "Q?", "mcq": []},
+    ):
+        assert apply_template(template, doc) == "Pick one\nQ?"
 
 
 def test_metric_processors_handle_non_list_results_consistently():

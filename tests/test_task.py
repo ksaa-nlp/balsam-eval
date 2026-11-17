@@ -539,6 +539,7 @@ def test_export_combines_custom_and_builtin_metrics(tmp_path, monkeypatch):
         process_results=processor,
     )
     custom.get_generation_kwargs.return_value = {"max_gen_toks": 8}
+    custom.get_doc_to_text.side_effect = lambda template: template
     registry = Mock()
     registry.detect_metric_type.side_effect = lambda name: (
         "custom" if name == "custom" else None
@@ -580,3 +581,34 @@ def test_export_validates_before_creating_outputs(tmp_path, monkeypatch):
     assert not (tmp_path / "empty.yaml").exists()
     assert not (tmp_path / "empty_test.json").exists()
     registry.detect_metric_type.assert_not_called()
+
+
+def test_export_combined_metrics_use_metric_prompt_template(tmp_path, monkeypatch):
+    def make_metric(name, template_suffix):
+        metric = Mock()
+        metric.config = SimpleNamespace(
+            name=name,
+            aggregation_name=None,
+            higher_is_better=True,
+            process_results=Mock(return_value={name: ["gold", "pred"]}),
+        )
+        metric.get_generation_kwargs.return_value = {"max_gen_toks": 8}
+        metric.get_doc_to_text.side_effect = lambda template: template + template_suffix
+        return metric
+
+    plain = make_metric("plain", "")
+    with_options = make_metric("with_options", " OPTIONS")
+    metrics = {"plain": plain, "with_options": with_options}
+    registry = Mock()
+    registry.detect_metric_type.side_effect = lambda name: name
+    registry.get.side_effect = metrics.get
+    monkeypatch.setattr(task_module, "get_metrics_registry", lambda: registry)
+    monkeypatch.setattr(combined_module, "CURRENT_COMBINED_FUNCTION", None)
+    write_json(tmp_path / "task.json", metric=["plain", "with_options"])
+    dataset = LMHDataset("task", str(tmp_path))
+
+    dataset.export()
+
+    text = (tmp_path / "task.yaml").read_text(encoding="utf-8")
+    assert "{{input}} OPTIONS" in text
+    with_options.get_doc_to_text.assert_called_once()

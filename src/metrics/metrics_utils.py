@@ -25,6 +25,25 @@ all_punctuations += "".join(char for char in OTHERS if char not in all_punctuati
 _PUNCTUATION_PATTERN = re.compile(f"([{re.escape(all_punctuations)}])")
 
 
+def append_mcq_options_template(original_doc_to_text: str) -> str:
+    """Append labeled MCQ options to a doc_to_text template.
+
+    The options block renders only when the doc has ``mcq``; docs without
+    options render exactly as ``original_doc_to_text``. ``is defined`` is
+    needed because lm-eval renders with StrictUndefined and datasets without
+    any options have no ``mcq`` column at all.
+    """
+    return (
+        f"{original_doc_to_text}"
+        "{% if mcq is defined and mcq %}\n\n"
+        "الخيارات:\n"
+        "{% for option in mcq %}"
+        '{{ "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[loop.index0] }}. {{ option }}\n'
+        "{% endfor %}"
+        "{% endif %}"
+    )
+
+
 def clamp_score(score: float) -> float:
     """Return a finite metric score constrained to the inclusive [0, 1] range."""
     value = float(score)

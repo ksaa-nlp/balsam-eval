@@ -25,7 +25,7 @@ from src.llm_judger.base_llm_judge import ModelConfig
 from src.llm_judger.generative_llm_judge import GenerativeLLMJudge
 from src.llm_judger.mcq_llm_judge import MCQLLMJudge
 from src.metrics_registry import BaseMetric, MetricConfig, get_metrics_registry
-from src.metrics.metrics_utils import clamp_score
+from src.metrics.metrics_utils import append_mcq_options_template, clamp_score
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +290,9 @@ class LLMJudgeMetric(BaseMetric):
     """Unified LLM-as-judge metric class."""
 
     def get_doc_to_text(self, original_doc_to_text: str) -> str:
-        return original_doc_to_text
+        # MCQ docs must show their options to the evaluated model before the
+        # judge scores the answer; non-MCQ docs keep the original prompt.
+        return append_mcq_options_template(original_doc_to_text)
 
     def get_generation_kwargs(self) -> Dict[str, Any]:
         return {"do_sample": False, "until": []}

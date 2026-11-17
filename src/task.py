@@ -672,6 +672,17 @@ class LMHDataset:
                         first_custom_metric.get_generation_kwargs()
                     )
 
+                # Use the prompt template of the first custom metric that
+                # changes it (e.g. adds MCQ options), so combined runs keep it.
+                original_doc_to_text = final_yaml["doc_to_text"]
+                for metric_obj in metric_objects:
+                    if metric_obj is None:
+                        continue
+                    doc_to_text = metric_obj.get_doc_to_text(original_doc_to_text)
+                    if doc_to_text != original_doc_to_text:
+                        final_yaml["doc_to_text"] = doc_to_text
+                        break
+
                 logger.info(
                     "Using combined process_results for %d metrics", len(metric_names)
                 )
