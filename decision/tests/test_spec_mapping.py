@@ -12,7 +12,7 @@ from decisioneval.evaluator import evaluate_question
 from decisioneval.models import DecisionResult, Question
 from decisioneval.spec.mapping import map_response
 from decisioneval.spec.model import SpecError, build_spec
-from decisioneval.spec.paths import MISSING, PathError, get, join, parse
+from decisioneval.spec.paths import MISSING, PathError, get, parse
 from decisioneval.spec.probe import Sample, probe, to_spec
 
 OPTION_IDS = ("A", "B", "C")
@@ -69,12 +69,6 @@ def test_get_returns_missing_rather_than_none_for_absent_paths():
     assert get(node, "l[1]") == 2
     assert get(node, "l[9]") is MISSING
     assert get(node, "l.x") is MISSING
-
-
-def test_join_prefixes_without_breaking_indices():
-    assert join("response", "answers.answer") == "response.answers.answer"
-    assert join("response", "[0].choice") == "response[0].choice"
-    assert join("", "a") == "a"
 
 
 def test_path_language_has_no_way_to_write_a_value():
@@ -332,8 +326,8 @@ def test_a_confidence_scalar_cannot_be_declared_as_a_distribution():
         )
 
 
-def test_auth_cannot_carry_an_inline_secret():
-    with pytest.raises(SpecError, match="token"):
+def test_a_spec_cannot_carry_a_request_block_or_a_secret():
+    with pytest.raises(SpecError, match="unknown key: request"):
         build_spec(
             {
                 "spec_version": 1,

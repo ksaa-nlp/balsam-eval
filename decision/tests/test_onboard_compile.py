@@ -35,7 +35,7 @@ def compiled_for(shape: str):
 @pytest.mark.parametrize("shape", ["system_one", "index_keyed", "ranked_pairs", "logits_only"])
 def test_the_compiled_transform_agrees_with_the_spec_engine(shape):
     document, transform = compiled_for(shape)
-    spec = build_spec({**document, "request": {"transport": "http", "url": "https://x.invalid"}})
+    spec = build_spec(document)
     for ids, texts, raw in replies(shape, 1):
         expected = map_response(spec, raw, ids, texts)
         got = check(evaluate(transform, {"reply": raw, "option_ids": list(ids), "options": list(texts)}), ids)

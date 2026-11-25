@@ -60,14 +60,3 @@ def get(node: Any, path: str) -> Any:
             return MISSING
         current = current[step]
     return current
-
-
-def join(prefix: str, path: str) -> str:
-    """Prefix `path` with the envelope `prefix`, if there is one."""
-    prefix = (prefix or "").strip()
-    path = (path or "").strip()
-    if not prefix:
-        return path
-    if not path:
-        return prefix
-    return f"{prefix}{path}" if path.startswith("[") else f"{prefix}.{path}"

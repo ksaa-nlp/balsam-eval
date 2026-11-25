@@ -9,7 +9,7 @@ anywhere in the ``response`` block: a future ``transform``, ``scale`` or
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from decisioneval.spec.paths import PathError, parse
@@ -19,44 +19,9 @@ SPEC_VERSION = 1
 CHOICE_KINDS = ("option_id", "option_text", "index0", "index1")
 PROB_KEYINGS = ("option_id", "option_text", "index0", "index1", "order", "pairs")
 BAD_SUM_POLICIES = ("unavailable", "reject")
-AUTH_KINDS = ("none", "bearer", "header", "query")
-TRANSPORTS = ("http", "subprocess")
 
 class SpecError(ValueError):
     """The spec file is unusable. The message lists every problem found."""
-
-
-@dataclass(frozen=True)
-class Auth:
-    kind: str = "none"
-    env: str | None = None
-    name: str | None = None
-    prefix: str = ""
-
-
-@dataclass(frozen=True)
-class Retry:
-    attempts: int = 1
-    backoff_s: float = 0.0
-    respect_retry_after: bool = True
-    on_status: tuple[int, ...] = ()
-
-
-@dataclass(frozen=True)
-class Request:
-    transport: str = "http"
-    url: str = ""
-    method: str = "POST"
-    headers: dict[str, str] = field(default_factory=dict)
-    body: Any = None
-    timeout_s: float = 60.0
-    auth: Auth = field(default_factory=Auth)
-    retry: Retry = field(default_factory=Retry)
-    # subprocess transport
-    command: tuple[str, ...] = ()
-    cwd: str | None = None
-    env: dict[str, str] = field(default_factory=dict)
-    warmup: int = 0
 
 
 @dataclass(frozen=True)
@@ -104,7 +69,6 @@ class ModelSpec:
     display_name: str
     access_type: str
     version: str
-    request: Request
     response: ResponseMap
     source_path: str = ""
     notes: str = ""
@@ -127,7 +91,7 @@ def _build(document: Any, source_path: str, problems: list[str]) -> ModelSpec | 
         return None
     _reject_unknown(document, {
         "spec_version", "name", "display_name", "access_type", "version",
-        "request", "response", "notes", "provider_confidence_note",
+        "response", "notes", "provider_confidence_note",
     }, "", problems)
 
     if document.get("spec_version") != SPEC_VERSION:
@@ -136,100 +100,19 @@ def _build(document: Any, source_path: str, problems: list[str]) -> ModelSpec | 
     access_type = str(document.get("access_type") or "")
     if access_type not in ("api", "local"):
         problems.append("access_type must be api or local")
-    request = _request(document.get("request"), problems)
     response = _response(document.get("response"), problems)
     if problems:
         return None
-    assert request is not None and response is not None
+    assert response is not None
     return ModelSpec(
         name=name,
         display_name=str(document.get("display_name") or name),
         access_type=access_type,
         version=str(document.get("version") or "spec-1"),
-        request=request,
         response=response,
         source_path=source_path,
         notes=str(document.get("notes") or ""),
         provider_confidence_note=str(document.get("provider_confidence_note") or ""),
-    )
-
-
-def _request(block: Any, problems: list[str]) -> Request | None:
-    if block is None:
-        return Request()
-    if not isinstance(block, dict):
-        problems.append("request is not an object")
-        return None
-    _reject_unknown(block, {
-        "transport", "url", "method", "headers", "body", "timeout_s", "auth",
-        "retry", "command", "cwd", "env", "warmup",
-    }, "request", problems)
-    transport = str(block.get("transport") or "http")
-    if transport not in TRANSPORTS:
-        problems.append(f"request.transport must be one of {TRANSPORTS}")
-    if transport == "http" and not str(block.get("url") or "").strip():
-        problems.append("request.url is required for the http transport")
-    command = tuple(str(part) for part in block.get("command") or ())
-    if transport == "subprocess" and not command:
-        problems.append("request.command is required for the subprocess transport")
-    auth = _auth(block.get("auth"), problems)
-    retry = _retry(block.get("retry"), problems)
-    if problems:
-        return None
-    assert auth is not None and retry is not None
-    return Request(
-        transport=transport,
-        url=str(block.get("url") or ""),
-        method=str(block.get("method") or "POST").upper(),
-        headers={str(k): str(v) for k, v in (block.get("headers") or {}).items()},
-        body=block.get("body"),
-        timeout_s=float(block.get("timeout_s") or 60.0),
-        auth=auth,
-        retry=retry,
-        command=command,
-        cwd=block.get("cwd"),
-        env={str(k): str(v) for k, v in (block.get("env") or {}).items()},
-        warmup=int(block.get("warmup") or 0),
-    )
-
-
-def _auth(block: Any, problems: list[str]) -> Auth | None:
-    if block is None:
-        return Auth()
-    if not isinstance(block, dict):
-        problems.append("request.auth is not an object")
-        return None
-    _reject_unknown(block, {"kind", "env", "name", "prefix"}, "request.auth", problems)
-    kind = str(block.get("kind") or "none")
-    if kind not in AUTH_KINDS:
-        problems.append(f"request.auth.kind must be one of {AUTH_KINDS}")
-    if kind != "none" and not str(block.get("env") or "").strip():
-        problems.append("request.auth.env is required: a credential is read from the environment, never written in a spec")
-    if kind in ("header", "query") and not str(block.get("name") or "").strip():
-        problems.append("request.auth.name is required for kind header or query")
-    return Auth(
-        kind=kind,
-        env=block.get("env"),
-        name=block.get("name"),
-        prefix=str(block.get("prefix") or ""),
-    )
-
-
-def _retry(block: Any, problems: list[str]) -> Retry | None:
-    if block is None:
-        return Retry()
-    if not isinstance(block, dict):
-        problems.append("request.retry is not an object")
-        return None
-    _reject_unknown(block, {"attempts", "backoff_s", "respect_retry_after", "on_status"}, "request.retry", problems)
-    attempts = int(block.get("attempts") or 1)
-    if attempts < 1:
-        problems.append("request.retry.attempts must be 1 or more")
-    return Retry(
-        attempts=max(attempts, 1),
-        backoff_s=float(block.get("backoff_s") or 0.0),
-        respect_retry_after=bool(block.get("respect_retry_after", True)),
-        on_status=tuple(int(code) for code in block.get("on_status") or ()),
     )
 
 
