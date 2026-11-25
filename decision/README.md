@@ -52,7 +52,7 @@ docker build -t decision-eval:local decision/
 mkdir -p run/.tasks && cp <some MCQ pool>.json run/.tasks/
 CONFIG=$(cd decision && uv run python -m decisioneval adapters request-config openai-decisions \
   --url http://host.docker.internal:8932/v1/decisions --model <model> --auth none)
-docker run --rm -v "$PWD/run:/home/runner/work" \
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/run:/home/runner/work" \
   -e REQUEST_CONFIG="$CONFIG" -e DECISION_EGRESS_ALLOW_PRIVATE=1 decision-eval:local
 cat run/.results/_decision-meta.json
 (cd decision && uv run python -m decisioneval audit ../run/.results/_run.json)
