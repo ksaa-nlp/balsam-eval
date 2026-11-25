@@ -32,11 +32,9 @@ async def probe_stage(
         try:
             checked = await seed_verdict(bound, key=key, client=client, worker=worker)
         except RunAborted as exc:
-            if exc.status in AUTH_REFUSED:
-                return outcome(STAGE, "failed", error_code=ONBOARDING_FAILED, error_detail=f"the model refused the key: {exc}")
-            if exc.status is not None:
-                continue  # this protocol's request is not what the endpoint expects
-            return outcome(STAGE, "failed", error_code=abort_code(exc), error_detail=str(exc))
+            if (failed := _aborted(exc)) is not None:
+                return failed
+            continue
         if checked is None or checked[1].verdict != "pass":
             continue
         full, verdict = checked
@@ -49,7 +47,11 @@ async def probe_stage(
         try:
             bound = bind(request.url, request.model, candidate.get("auth") or {}, candidate.get("adapter") or {})
             trial = await run_trial(bound, FULL_CASES, key=key, client=client, worker=worker)
-        except (AdapterConfigError, RunAborted):
+        except AdapterConfigError:
+            continue
+        except RunAborted as exc:
+            if (failed := _aborted(exc)) is not None:
+                return failed
             continue
         verdict = judge(trial.answers, trial.errors())
         if verdict.verdict == "pass":
@@ -58,3 +60,11 @@ async def probe_stage(
             ), validations=[verdict.as_validation()])
     return outcome(STAGE, "awaiting_curl")
 
+
+def _aborted(exc: RunAborted) -> dict[str, Any] | None:
+    """The run's failed outcome, or None when only this protocol's request doesn't fit the endpoint."""
+    if exc.status in AUTH_REFUSED:
+        return outcome(STAGE, "failed", error_code=ONBOARDING_FAILED, error_detail=f"the model refused the key: {exc}")
+    if exc.status is not None:
+        return None
+    return outcome(STAGE, "failed", error_code=abort_code(exc), error_detail=str(exc))

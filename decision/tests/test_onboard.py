@@ -161,6 +161,16 @@ async def test_a_private_address_is_refused_by_default(model):
     assert report["error_code"] == "DECISION_URL_NOT_PUBLIC" and state["seen"] == []
 
 
+async def test_a_refused_key_fails_the_probe_when_only_candidates_apply(model):
+    url, state = model
+    state["protocol"] = "unauthorized"
+    custom = {**seed_adapter("systemone"), "request_transform": CUSTOM_REQUEST, "response_transform": PICK_RESPONSE}
+    request = OnboardRequest(url=url, model="m-1", auth={"kind": "header", "name": "x-key"},
+                             candidates=({"auth": {"kind": "header", "name": "x-key"}, "adapter": custom},))
+    report = await run_stage("probe", request, key="k", allow_private=True)
+    assert report["outcome"] == "failed" and "refused the key" in report["error_detail"]
+
+
 async def test_a_known_version_for_the_host_is_verified_with_the_full_suite(model):
     url, state = model
     state["protocol"] = "custom"
