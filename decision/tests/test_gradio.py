@@ -66,7 +66,7 @@ async def space():
         if state["root_sleeping"]:
             state["root_sleeping"] -= 1
             return web.Response(status=503, text="Space is building")
-        return web.Response(text="<html>gradio</html>")
+        return web.Response(text=state.get("root_text", "<html>gradio</html>"))
 
     async def info(request):
         return web.json_response({"named_endpoints": {"/predict": {"parameters": [{"label": "question"}, {"label": "options"}]}}})
@@ -215,6 +215,21 @@ async def test_wake_polls_a_building_space_until_it_is_up(space):
         assert await wake(model, f"{base}/call/predict", sleep=no_sleep)
         state["root_sleeping"] = 99
         ticks = iter(range(1000))
+        assert not await wake(model, base, sleep=no_sleep, clock=lambda: next(ticks) * 100.0)
+
+
+async def test_a_running_space_titled_sleeping_is_awake(space):
+    base, state = space
+    state["root_text"] = "<html><title>Sleeping-posture classifier</title><script>window.gradio_config = {}</script></html>"
+    async with client() as model:
+        assert await wake(model, base, sleep=lambda _: pytest.fail("polled a running Space"))
+    state["root_text"] = "<html>This Space is sleeping due to inactivity</html>"
+    ticks = iter(range(1000))
+
+    async def no_sleep(_):
+        return None
+
+    async with client() as model:
         assert not await wake(model, base, sleep=no_sleep, clock=lambda: next(ticks) * 100.0)
 
 

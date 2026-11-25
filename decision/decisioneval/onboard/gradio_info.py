@@ -40,7 +40,9 @@ async def wake(
     while True:
         reply = await client.send(base, None, {}, method="GET")
         text = json.dumps(reply.payload, ensure_ascii=False).lower()
-        if reply.status < 500 and "building" not in text and "sleeping" not in text:
+        # A running app embeds its config; only a status page is read for these words, not a Space's own title.
+        status_page = "gradio_config" not in text and ("building" in text or "sleeping" in text)
+        if reply.status < 500 and not status_page:
             return True
         if clock() - started >= deadline_s:
             return False
