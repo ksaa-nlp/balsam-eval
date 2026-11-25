@@ -7,12 +7,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from decisioneval.egress import EgressRefused
-from decisioneval.onboard.canary import HELD_OUT, ORIGINAL, ROTATED, SEED_CHECK, VISIBLE, Answer, CanaryItem
+from decisioneval.onboard.canary import HELD_OUT, ORIGINAL, ROTATED, SEED_CHECK, VISIBLE, Answer, CanaryItem, Verdict, judge
 from decisioneval.remote.bound_adapter import BoundAdapter, load_bound_adapter
 from decisioneval.remote.contract import ADAPTER_ERROR, INVALID_CHOICE, MALFORMED
 from decisioneval.remote.execute import MALFORMED_RESPONSE, RunAborted, score_question
 from decisioneval.spec.transport import RedirectRefused
 from decisioneval.transforms.adapter import content_hash
+from decisioneval.transforms.seeds import request_input, seed_transforms
 from decisioneval.transforms.worker import TransformWorker
 from decisioneval.transport import ModelClient
 
@@ -74,6 +75,25 @@ async def run_trial(
         trial.answers.append(Answer(item=item, order=order, choice=scored.predicted_option_id))
         trial.mapped.append({"item": item.id, "order": order, "reply": raw.get("reply"), "mapped": raw.get("mapped")})
     return trial
+
+
+async def seed_verdict(
+    bound: BoundAdapter, *, key: str | None, client: ModelClient, worker: TransformWorker
+) -> tuple[Trial, Verdict] | None:
+    """The seed check, then the full canary suite; None when the seed's replies don't fit this endpoint."""
+    seed = await run_trial(bound, SEED_CASES, key=key, client=client, worker=worker)
+    if seed.structure_errors or not seed.answered:
+        return None
+    full = await run_trial(bound, FULL_CASES, key=key, client=client, worker=worker)
+    return full, judge(full.answers, full.errors())
+
+
+def seed_body(seed: str, model: str, worker: TransformWorker) -> Any:
+    """The body a seed sends for the first seed-check item, for the shape's request keys."""
+    question = SEED_CASES[0][0].as_question(SEED_CASES[0][1])
+    data = request_input(model=model, instruction=question.instruction, input_text=question.input,
+                         options=question.options, option_ids=question.option_ids)
+    return worker.run(seed_transforms(seed)[0], data)
 
 
 def abort_code(exc: RunAborted) -> str:

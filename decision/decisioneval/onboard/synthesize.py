@@ -22,10 +22,11 @@ from decisioneval.onboard.trial import (
     DELIVERY_UNCONFIRMED,
     FULL_CASES,
     ONBOARDING_FAILED,
-    SEED_CASES,
     abort_code,
     bind,
     run_trial,
+    seed_body,
+    seed_verdict,
 )
 from decisioneval.onboard.llm import LlmError, LlmProvider, extract_json
 from decisioneval.remote.bound_adapter import AdapterConfigError, place_key
@@ -179,21 +180,18 @@ async def _seeded(request: OnboardRequest, *, key, client, worker) -> dict[str, 
     for name in SEED_NAMES:
         bound = bind(request.url, request.model, request.auth, seed_adapter(name))
         try:
-            trial = await run_trial(bound, SEED_CASES, key=key, client=client, worker=worker)
+            checked = await seed_verdict(bound, key=key, client=client, worker=worker)
         except RunAborted as exc:
             if exc.status is not None and exc.status not in AUTH_REFUSED:
                 continue
             raise
-        if trial.structure_errors or not trial.answered:
+        if checked is None or checked[1].verdict != "pass":
             continue
-        full = await run_trial(bound, FULL_CASES, key=key, client=client, worker=worker)
-        verdict = judge(full.answers, full.errors())
-        if verdict.verdict == "pass":
-            reply = full.mapped[0]["reply"]
-            return outcome(STAGE, "active",
-                           adapter=adapter_report(seed_adapter(name), request.auth, bound.content_hash, origin="seeded", seed_name=name),
-                           shape=shape_of(request.url, (request.redacted_request or {}).get("body"), reply),
-                           validations=[verdict.as_validation()])
+        full, verdict = checked
+        return outcome(STAGE, "active",
+                       adapter=adapter_report(seed_adapter(name), request.auth, bound.content_hash, origin="seeded", seed_name=name),
+                       shape=shape_of(request.url, seed_body(name, request.model, worker), full.mapped[0]["reply"]),
+                       validations=[verdict.as_validation()])
     return None
 
 

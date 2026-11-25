@@ -8,13 +8,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from decisioneval.onboard.canary import SEED_CHECK, Verdict, behaviour_report, judge
+from decisioneval.onboard.canary import judge
 from decisioneval.onboard.report import OnboardRequest, adapter_report, outcome, shape_of
-from decisioneval.onboard.trial import AUTH_REFUSED, FULL_CASES, ONBOARDING_FAILED, SEED_CASES, abort_code, bind, run_trial
+from decisioneval.onboard.trial import AUTH_REFUSED, FULL_CASES, ONBOARDING_FAILED, abort_code, bind, run_trial, seed_body, seed_verdict
 from decisioneval.remote.bound_adapter import AdapterConfigError
 from decisioneval.remote.execute import RunAborted
 from decisioneval.transforms.adapter import SEEDED, seed_adapter
-from decisioneval.transforms.seeds import request_input, seed_transforms
 from decisioneval.transforms.worker import TransformWorker
 from decisioneval.transport import ModelClient
 
@@ -31,24 +30,20 @@ async def probe_stage(
         auth = request.auth
         bound = bind(request.url, request.model, auth, seed_adapter(name))
         try:
-            trial = await run_trial(bound, SEED_CASES, key=key, client=client, worker=worker)
+            checked = await seed_verdict(bound, key=key, client=client, worker=worker)
         except RunAborted as exc:
             if exc.status in AUTH_REFUSED:
                 return outcome(STAGE, "failed", error_code=ONBOARDING_FAILED, error_detail=f"the model refused the key: {exc}")
             if exc.status is not None:
                 continue  # this protocol's request is not what the endpoint expects
             return outcome(STAGE, "failed", error_code=abort_code(exc), error_detail=str(exc))
-        if not trial.structure_errors and trial.answered:
-            seed_check = Verdict(
-                "pass",
-                correct_original=sum(a.chosen_text == a.item.gold_text for a in trial.answers),
-                item_count=len(SEED_CHECK),
-                behaviour_report=behaviour_report(trial.answers),
-            ).as_validation("seed_check")
-            return outcome(STAGE, "active", adapter=adapter_report(
-                seed_adapter(name), auth, bound.content_hash, origin="seeded", seed_name=name,
-            ), shape=shape_of(request.url, _sent_body(name, request, worker), trial.mapped[0]["reply"]),
-                validations=[seed_check])
+        if checked is None or checked[1].verdict != "pass":
+            continue
+        full, verdict = checked
+        return outcome(STAGE, "active", adapter=adapter_report(
+            seed_adapter(name), auth, bound.content_hash, origin="seeded", seed_name=name,
+        ), shape=shape_of(request.url, seed_body(name, request.model, worker), full.mapped[0]["reply"]),
+            validations=[verdict.as_validation()])
 
     for candidate in request.candidates:
         try:
@@ -63,10 +58,3 @@ async def probe_stage(
             ), validations=[verdict.as_validation()])
     return outcome(STAGE, "awaiting_curl")
 
-
-def _sent_body(seed: str, request: OnboardRequest, worker: TransformWorker) -> Any:
-    """The body this seed sent for the first seed-check item, for the shape's request keys."""
-    question = SEED_CASES[0][0].as_question(SEED_CASES[0][1])
-    data = request_input(model=request.model, instruction=question.instruction, input_text=question.input,
-                         options=question.options, option_ids=question.option_ids)
-    return worker.run(seed_transforms(seed)[0], data)

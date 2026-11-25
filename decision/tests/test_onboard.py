@@ -106,7 +106,14 @@ async def test_a_system_one_endpoint_binds_the_seeded_version(model):
     assert report["outcome"] == "active"
     assert report["adapter"]["seed_name"] == "systemone" and report["adapter"]["origin"] == "seeded"
     assert report["adapter"]["content_hash"] == seed_hashes()["systemone/bearer"]
-    assert report["validations"][0]["split"] == "seed_check"
+    assert report["validations"][0]["split"] == "held_out" and report["validations"][0]["verdict"] == "pass"
+
+
+async def test_a_seeded_shape_that_answers_blind_is_not_bound(model):
+    url, state = model
+    state["mode"] = "middle"
+    report = await run_stage("probe", onboard_request(url), key="k", allow_private=True)
+    assert report["outcome"] == "awaiting_curl" and report["adapter"] is None
 
 
 async def test_a_custom_bearer_prefix_is_sent_and_bound(model):
