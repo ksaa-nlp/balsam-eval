@@ -117,10 +117,11 @@ def run_job(
         "content_hash": bound.content_hash,
         "response_transform": bound.response_transform,
     }
+    # Written in order, meta last: a meta file saying "complete" means every other file landed.
     documents: dict[str, Any] = {
-        META_FILE: meta_document(**meta, items=run["items"], state="complete"),
         RUN_FILE: run,
         **pool_results(pools, run, calibrated=not bound.derived_probabilities),
+        META_FILE: meta_document(**meta, items=run["items"], state="complete"),
     }
     files = _write(config, store, documents, key)
     return JobReport(succeeded=True, degraded=bound.degraded, files=files, content_hash=bound.content_hash)

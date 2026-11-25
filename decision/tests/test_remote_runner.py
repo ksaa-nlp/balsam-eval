@@ -385,6 +385,15 @@ def test_audit_checks_a_redacted_reply_against_its_stored_mapping_without_failin
     assert audit.passed and audit.unreplayed == 1
 
 
+def test_the_meta_file_is_written_after_every_result_file(bucket, tmp_path, server):
+    written = []
+    write_bytes = bucket.write_bytes
+    bucket.write_bytes = lambda path, data, **kwargs: written.append(path) or write_bytes(path, data, **kwargs)
+    report, _ = run(bucket, tmp_path, server[0])
+    results = [path for path in written if "/_checkpoint/" not in path]
+    assert report.succeeded and results[-1].endswith(META_FILE) and len(results) == len(report.files)
+
+
 def test_audit_catches_a_wrong_answer_marked_correct(bucket, tmp_path, server):
     _, config = run(bucket, tmp_path, server[0])
     document = read(bucket, config, RUN_FILE)
