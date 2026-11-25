@@ -38,9 +38,8 @@ class Question:
 class DecisionResult:
     """What an adapter returns for one question.
 
-    `predicted_option_id` and `predicted_answer` are both optional.
-    The evaluator accepts either one and rejects the item when both are
-    present and point at different options. `probabilities`, when a model
+    `predicted_option_id` must be one of the question's option ids, or the
+    item is invalid. `probabilities`, when a model
     actually returns them, are keyed by option id. This type never fills
     them in. `confidence` is the provider's own confidence, from 0 to 1 when
     the model returns it. Calibration metrics do not read it; they use
@@ -50,7 +49,6 @@ class DecisionResult:
     """
 
     predicted_option_id: str | None = None
-    predicted_answer: str | None = None
     probabilities: dict[str, float] | None = None
     confidence: float | None = None
     raw_response: Any = None
