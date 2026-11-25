@@ -356,7 +356,8 @@ def test_probabilities_a_transform_computes_are_marked_derived():
     from decisioneval.transforms.worker import TransformWorker
 
     item = ITEMS[0]
-    samples = [(item, {}, {"label": item.option_ids[1], "scores": {"x": 0.3, "y": 0.7}})]
+    samples = [(item, {}, {"label": item.option_ids[1], "scores": {"x": 0.3, "y": 0.7},
+                           "choices": [{"index": 0}], "usage": {"completion_tokens": 1}})]
     copied = '{"status": "answer", "choice": reply.label, "probabilities": {"A": reply.scores.x, "B": reply.scores.y}}'
     one_hot = '{"status": "answer", "choice": reply.label, "probabilities": {"A": 0, "B": 1}}'
     choice_only = '{"status": "answer", "choice": reply.label, "probabilities": null}'
@@ -364,3 +365,5 @@ def test_probabilities_a_transform_computes_are_marked_derived():
         assert _probability_flags(copied, samples, worker) == (False, False)
         assert _probability_flags(one_hot, samples, worker) == (False, True)
         assert _probability_flags(choice_only, samples, worker) == (True, False)
+        unhashable = '{"status": "answer", "choice": reply.label, "probabilities": {"A": [0.3], "B": 0.7}}'
+        assert _probability_flags(unhashable, samples, worker) == (False, False)  # the contract refuses it later

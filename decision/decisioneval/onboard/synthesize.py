@@ -257,8 +257,10 @@ def _probability_flags(transform: str, samples, worker: TransformWorker) -> tupl
         probabilities = mapped.get("probabilities") if isinstance(mapped, dict) else None
         if isinstance(probabilities, dict):
             degraded = False
-            # A transform may only copy a distribution; one it computed (one-hot, a softmax) is not the model's.
-            derived = derived or not set(probabilities.values()) <= _numbers(reply)
+            values = {value for value in probabilities.values() if isinstance(value, (int, float)) and not isinstance(value, bool)}
+            # A transform may only copy a distribution; one it computed (a softmax, or a one-hot whose 0 and 1
+            # any reply holds somewhere) is not the model's. Non-numbers are left to the contract to refuse.
+            derived = derived or values <= {0, 1} or not values <= _numbers(reply)
     return degraded, derived
 
 
