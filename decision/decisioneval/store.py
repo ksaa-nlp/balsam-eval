@@ -206,6 +206,12 @@ class KeyScrubFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg, record.args = scrub_key(record.getMessage(), self.key), ()
+        if record.exc_info:
+            # The formatter renders exc_info after filters run, so render and scrub it here instead.
+            record.exc_text = scrub_key(logging.Formatter().formatException(record.exc_info), self.key)
+            record.exc_info = None
+        elif record.exc_text:
+            record.exc_text = scrub_key(record.exc_text, self.key)
         return True
 
 

@@ -48,3 +48,24 @@ def test_log_lines_and_tracebacks_lose_the_key():
     record = logging.LogRecord("t", logging.ERROR, __file__, 1, "crashed:\n%s", (f"Traceback ... url?key={KEY}",), None)
     KeyScrubFilter(KEY).filter(record)
     assert "sk-live" not in record.getMessage()
+
+
+def test_an_exception_logged_with_exc_info_loses_the_key():
+    import io
+    import logging
+
+    from decisioneval.store import KeyScrubFilter
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.addFilter(KeyScrubFilter(KEY))
+    logger = logging.getLogger("test.scrub.exc_info")
+    logger.addHandler(handler)
+    try:
+        raise RuntimeError(f"GET https://m.example/v1?key={KEY} failed")
+    except RuntimeError:
+        logger.exception("call failed")
+    finally:
+        logger.removeHandler(handler)
+    assert "call failed" in stream.getvalue() and "RuntimeError" in stream.getvalue()
+    assert "sk-live" not in stream.getvalue()
