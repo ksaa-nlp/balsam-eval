@@ -1,4 +1,4 @@
-"""Object storage as read/write/list; GCS is imported lazily to keep the core dependency-free."""
+"""Object storage as read/write/list; GCS is imported lazily, so a local run never loads it."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ class GcsStore:
                 from google.cloud import storage
             except ImportError as exc:  # pragma: no cover - depends on the install
                 raise StorageError(
-                    "google-cloud-storage is not installed; install decisioneval[remote]"
+                    "google-cloud-storage is not installed; run `uv sync` in decision/"
                 ) from exc
             self._client = storage.Client()
         return self._client.bucket(self.bucket_name)

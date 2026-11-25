@@ -6,8 +6,6 @@ bytes it scored, the full per-item record so every number is re-derivable, and
 credential redaction so no secret can reach a run file. What was dropped is the
 BALSAM release manifest pinning, which belongs to that one dataset release
 rather than to a general platform.
-
-Runs are append-only: `write_run` never overwrites, it picks a free filename.
 """
 
 from __future__ import annotations

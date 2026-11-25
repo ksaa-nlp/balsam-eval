@@ -16,10 +16,5 @@ Invariants, inherited from the benchmark this was extracted from:
 3. Gold matching is literal string equality after `strip()`. Invalid output
    counts as wrong and stays in the accuracy denominator.
 4. Every stored number is re-derivable from the run's own raw records.
-5. The core has no third-party dependencies.
-6. Secrets never reach a run file.
+5. Secrets never reach a run file.
 """
-
-__version__ = "0.1.0"
-
-__all__ = ["__version__"]
