@@ -60,3 +60,12 @@ def test_request_config_prints_a_config_the_runner_accepts(capsys):
               "--model", "gpt-6-luna", "--auth", "bearer"])
     bound = load_bound_adapter(json.loads(capsys.readouterr().out))
     assert mapping_origin(bound) == "native" and bound.model == "gpt-6-luna"
+
+
+def test_an_empty_prefix_hashes_like_none_except_for_bearer():
+    from decisioneval.transforms.adapter import content_hash, seed_adapter
+
+    adapter = seed_adapter("systemone")
+    header = {"kind": "header", "name": "X-Key"}
+    assert content_hash(adapter, {**header, "prefix": ""}) == content_hash(adapter, header)
+    assert content_hash(adapter, {"kind": "bearer", "prefix": ""}) != content_hash(adapter, {"kind": "bearer"})

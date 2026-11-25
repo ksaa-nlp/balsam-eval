@@ -35,7 +35,11 @@ SEEDED: tuple[tuple[str, dict[str, str]], ...] = (
 
 
 def auth_placement(auth: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: auth[key] for key in AUTH_PLACEMENT_KEYS if auth.get(key) is not None}
+    placement = {key: auth[key] for key in AUTH_PLACEMENT_KEYS if auth.get(key) is not None}
+    # Only bearer tells an empty prefix from none; elsewhere both place the key alike, so they hash alike.
+    if placement.get("kind") != "bearer" and placement.get("prefix") == "":
+        del placement["prefix"]
+    return placement
 
 
 def content_hash(adapter: Mapping[str, Any], auth: Mapping[str, Any]) -> str:
