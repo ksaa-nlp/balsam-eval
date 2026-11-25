@@ -93,8 +93,15 @@ def test_the_request_config_is_read_from_base64():
 
 
 def test_a_bucket_without_its_paths_is_a_configuration_error():
-    with pytest.raises(ConfigError, match="POOL_FILES, RESULTS_PATH"):
+    with pytest.raises(ConfigError, match="POOL_FILES, RESULTS_PATH, JOB_ID, API_HOST, FINALIZE_TOKEN"):
         load_config({"REQUEST_CONFIG": "{}", "GCLOUD_BUCKET": "b"})
+
+
+def test_a_bucket_job_without_finalize_credentials_is_a_configuration_error():
+    environ = {"REQUEST_CONFIG": "{}", "GCLOUD_BUCKET": "b", "POOL_FILES": "p.json", "RESULTS_PATH": "r", "JOB_ID": "7"}
+    with pytest.raises(ConfigError, match="API_HOST, FINALIZE_TOKEN"):
+        load_config(environ)
+    assert load_config({**environ, "API_HOST": "https://api", "FINALIZE_TOKEN": "t"}).reports_outcome
 
 
 @pytest.mark.parametrize(

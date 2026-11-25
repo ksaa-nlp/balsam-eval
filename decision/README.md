@@ -16,7 +16,7 @@ An adapter is a pair of JSONata transforms (request and response) plus where the
 - `REQUEST_CONFIG_B64`: required. Base64 JSON holding `url`, `model`, `auth` and the bound `adapter` version.
 - `API_KEY`: the model's credential.
 - `GCLOUD_BUCKET`, `POOL_FILES` (comma-separated object paths) and `RESULTS_PATH`. Without a bucket, the runner reads `.tasks/*.json` and writes `.results/`.
-- `JOB_ID`, `API_HOST` and `FINALIZE_TOKEN`: these enable `POST {API_HOST}/evaluation-jobs/{JOB_ID}/finalize`.
+- `JOB_ID`, `API_HOST` and `FINALIZE_TOKEN`: these enable `POST {API_HOST}/evaluation-jobs/{JOB_ID}/finalize`, and are required when a bucket is set.
 - Optional: `EVALUATION_ID`, `MODEL`, `RUN_DEADLINE_S` and `RUNNER_IMAGE_DIGEST`.
 - `DECISION_EGRESS_ALLOW_PRIVATE=1` lets a local run reach localhost. It is ignored when a bucket is set.
 

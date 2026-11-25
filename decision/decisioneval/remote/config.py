@@ -57,6 +57,10 @@ def load_config(environ: Mapping[str, str], cwd: Path | None = None) -> RemoteCo
             for name, value in (
                 ("POOL_FILES", pool_files),
                 ("RESULTS_PATH", results_path),
+                # A cloud job that can't finalize leaves the backend waiting on it forever.
+                ("JOB_ID", _optional(environ, "JOB_ID")),
+                ("API_HOST", _optional(environ, "API_HOST")),
+                ("FINALIZE_TOKEN", _optional(environ, "FINALIZE_TOKEN")),
             )
             if not value
         ]
