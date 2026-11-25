@@ -22,7 +22,6 @@ class ConfigError(ValueError):
 @dataclass(frozen=True)
 class RemoteConfig:
     job_id: str
-    evaluation_id: str
     model: str
     model_version: str
     request_config: Mapping[str, Any]
@@ -69,7 +68,6 @@ def load_config(environ: Mapping[str, str], cwd: Path | None = None) -> RemoteCo
 
     return RemoteConfig(
         job_id=_optional(environ, "JOB_ID") or "local",
-        evaluation_id=_optional(environ, "EVALUATION_ID") or "",
         model=_optional(environ, "MODEL") or "decision-model",
         model_version=_optional(environ, "MODEL_VERSION") or "",
         request_config=_request_config(environ),
