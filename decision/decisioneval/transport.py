@@ -36,7 +36,9 @@ class RetryPolicy:
     def delay(self, attempt: int, retry_after: float | None) -> float:
         if retry_after is not None:
             return min(retry_after, MAX_RETRY_AFTER_S)
-        return random.uniform(0, min(self.max_backoff_s, self.backoff_s * (2 ** (attempt - 1))))
+        # A floor under the jitter, so a short 429 burst can't use up every attempt in a second or two.
+        base = min(self.max_backoff_s, self.backoff_s * (2 ** (attempt - 1)))
+        return random.uniform(base, min(self.max_backoff_s, 2 * base))
 
 
 class ModelClient:

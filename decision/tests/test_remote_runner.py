@@ -346,7 +346,8 @@ def test_main_scrubs_the_key_from_the_finalize_error(tmp_path, monkeypatch, serv
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".tasks").mkdir()
     (tmp_path / ".tasks" / "three.json").write_text(json.dumps(platform_pool("a", OPTIONS_3, True)))
-    config = request_config("http://127.0.0.1:9/decide", auth={"kind": "query", "name": "api_key"})
+    config = request_config("http://127.0.0.1:9/decide", auth={"kind": "query", "name": "api_key"},
+                            retry={**seed_adapter("systemone")["retry"], "backoff_s": 0})
 
     code = runner.main({**LOCAL, "API_KEY": "SUPERSECRET123", "REQUEST_CONFIG": json.dumps(config),
                         "JOB_ID": "80", "API_HOST": url, "FINALIZE_TOKEN": "t"})

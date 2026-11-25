@@ -113,3 +113,11 @@ async def test_concurrency_never_exceeds_the_limit(server):
     async with client(concurrency=2) as model:
         await asyncio.gather(*(model.send(f"{base}/slow", {}, {}) for _ in range(6)))
     assert state["peak"] == 2
+
+
+def test_a_retry_without_retry_after_waits_at_least_its_backoff():
+    policy = RetryPolicy(backoff_s=1.0, max_backoff_s=30.0)
+    assert all(1.0 <= policy.delay(1, None) <= 2.0 for _ in range(50))
+    assert all(2.0 <= policy.delay(2, None) <= 4.0 for _ in range(50))
+    assert RetryPolicy(backoff_s=20.0, max_backoff_s=30.0).delay(3, None) == 30.0
+    assert policy.delay(1, 5.0) == 5.0
