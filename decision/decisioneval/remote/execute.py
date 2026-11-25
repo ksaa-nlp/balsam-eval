@@ -116,9 +116,9 @@ async def score_question(
         return _scored(question, checked, {"error": str(exc)}, bound, None), True
     except TransportError as exc:
         raise RunAborted(f"could not reach the model: {exc}") from exc
-    if 400 <= reply.status < 500 and reply.status not in ABORTING_STATUS:
-        # This item's request was refused (too long, unparseable): score it invalid and let the breaker
-        # catch an adapter that does this to every item, instead of failing a job no relaunch can finish.
+    if 400 <= reply.status < 600 and reply.status not in ABORTING_STATUS:
+        # This item's request was refused (too long, unparseable, or it crashes the model): score it invalid
+        # and let the refusal streak catch an outage, instead of failing a job no relaunch can finish.
         checked = Checked(invalid_reason=ADAPTER_ERROR, distribution_problem=MISSING)
         raw = {
             "reply": reply.payload,

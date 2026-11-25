@@ -54,7 +54,7 @@ async def model_server():
         if behaviour["status"] != 200:
             return web.Response(status=behaviour["status"])
         if behaviour["refuse"] and behaviour["refuse"] in body.get("state", ""):
-            return web.json_response({"error": "context too long"}, status=413)
+            return web.json_response({"error": "context too long"}, status=behaviour.get("refuse_status", 413))
         reply = behaviour["reply"](body, gold_pick(body))
         return web.Response(text=reply) if isinstance(reply, str) else web.json_response(reply)
 
@@ -149,7 +149,7 @@ async def test_a_model_that_keeps_failing_aborts_the_run(model_server):
     url, behaviour, _ = model_server
     behaviour["status"] = 503
     with pytest.raises(RunAborted, match="503"):
-        await run(bound(url), questions(2))
+        await run(bound(url), questions(BREAKER_LIMIT + 2))
 
 
 async def test_an_unreachable_model_aborts_the_run():
@@ -164,6 +164,13 @@ async def test_one_item_the_model_refuses_with_a_4xx_is_invalid_and_the_run_fini
     assert len(items) == 6 and items[2].invalid
     assert items[2].raw_response["invalid_reason"] == "adapter_error" and items[2].raw_response["http_status"] == 413
     assert all(item.correct for index, item in enumerate(items) if index != 2)
+
+
+async def test_one_item_that_crashes_the_model_is_invalid_and_the_run_finishes(model_server):
+    url, behaviour, _ = model_server
+    behaviour["refuse"], behaviour["refuse_status"] = "سؤال 2", 500
+    items = await run(bound(url, retry={**seed_adapter("systemone")["retry"], "backoff_s": 0}), questions())
+    assert len(items) == 6 and items[2].invalid and items[2].raw_response["http_status"] == 500
 
 
 async def test_every_item_refused_with_a_4xx_aborts_as_the_account_not_the_adapter(model_server):
