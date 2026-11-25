@@ -96,6 +96,26 @@ async def test_a_seeded_protocol_scores_every_question_in_order(model_server, se
     assert all(headers["Authorization"] == "Bearer s3cret" for headers, _ in seen)
 
 
+async def test_checkpoint_writes_and_transforms_run_off_the_event_loop(model_server):
+    import threading
+
+    class Watched(TransformWorker):
+        threads: set = set()
+
+        def run(self, expression, data):
+            self.threads.add(threading.current_thread())
+            return super().run(expression, data)
+
+    url, _, _ = model_server
+    loop_thread, item_threads = threading.current_thread(), set()
+    async with ModelClient(retry=RetryPolicy(attempts=2, backoff_s=0.0), allow_private=True) as client:
+        with Watched() as worker:
+            await execute(bound(url), questions(), key="k", client=client, worker=worker,
+                          on_item=lambda item: item_threads.add(threading.current_thread()))
+    assert item_threads and loop_thread not in item_threads
+    assert Watched.threads and loop_thread not in Watched.threads
+
+
 async def test_the_key_never_reaches_a_transform_or_a_stored_record(model_server):
     url, _, seen = model_server
     echo_input = '{"model": model, "state": state, "questions": {"answer": {"criteria": criteria}}, "everything": $}'

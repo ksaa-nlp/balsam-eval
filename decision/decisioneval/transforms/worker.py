@@ -11,6 +11,7 @@ import json
 import select
 import subprocess
 import sys
+import threading
 from typing import Any
 
 from decisioneval.transforms.engine import TransformError
@@ -22,14 +23,19 @@ MAX_CACHED = 64
 
 
 class TransformWorker:
-    """The parent side. Not thread-safe: one call at a time."""
+    """The parent side. A lock serialises calls, so threads may share one worker."""
 
     def __init__(self, timeout_s: float = CALL_TIMEOUT_S):
         self.timeout_s = timeout_s
         self._process: subprocess.Popen[str] | None = None
+        self._lock = threading.Lock()
 
     def run(self, expression: str, data: Any) -> Any:
         """Evaluate `expression` on `data`. Raises `TransformError` on any failure."""
+        with self._lock:
+            return self._call(expression, data)
+
+    def _call(self, expression: str, data: Any) -> Any:
         process = self._start()
         assert process.stdin is not None and process.stdout is not None
         try:

@@ -51,6 +51,9 @@ async def execute(
 ) -> list[ItemResult]:
     """Score `questions` in order, handing each item to `on_item` as it finishes.
 
+    Transforms and `on_item` (a checkpoint write) run off the event loop, so they never stall
+    in-flight requests or add to their measured latency.
+
     Raises `RunAborted` or `CircuitBroken`.
     """
     results: dict[int, ItemResult] = {}
@@ -63,7 +66,7 @@ async def execute(
                 return
             item, breaker_error = await score_question(bound, question, key=key, client=client, worker=worker)
         results[index] = item
-        on_item(item)
+        await asyncio.to_thread(on_item, item)
         status = item.raw_response.get("http_status") if isinstance(item.raw_response, dict) else None
         state["refused"] = state["refused"] + 1 if status else 0
         if state["refused"] >= BREAKER_LIMIT:
@@ -103,7 +106,7 @@ async def score_question(
         option_ids=question.option_ids,
     )
     try:
-        body = worker.run(bound.request_transform, data)
+        body = await asyncio.to_thread(worker.run, bound.request_transform, data)
         url, headers, body = place_key(bound.auth, key, bound.url, body)
     except TransformError as exc:
         return _scored(question, Checked(invalid_reason=ADAPTER_ERROR, distribution_problem=MISSING),
@@ -134,7 +137,9 @@ async def score_question(
         checked = Checked(invalid_reason=MALFORMED_RESPONSE, distribution_problem=MISSING)
         return _scored(question, checked, raw, bound, reply.latency_ms), False
     try:
-        mapped = worker.run(bound.response_transform, response_input(reply.payload, question.option_ids, question.options))
+        mapped = await asyncio.to_thread(
+            worker.run, bound.response_transform, response_input(reply.payload, question.option_ids, question.options)
+        )
     except TransformError as exc:
         checked = Checked(invalid_reason=ADAPTER_ERROR, distribution_problem=MISSING)
         return _scored(question, checked, {**raw, "error": f"response transform: {exc}"}, bound, reply.latency_ms), True

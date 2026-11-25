@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from typing import Any
 
 from decisioneval.remote.storage import ObjectStore, join
@@ -28,6 +29,7 @@ class Checkpoint:
         self.prefix = join(results_path, f"_checkpoint/{content_hash}/{scope}")
         self._pending: list[dict[str, Any]] = []
         self._next_seq: int | None = None
+        self._lock = threading.Lock()  # items arrive from worker threads
 
     def load(self) -> list[dict[str, Any]]:
         """Every saved item, in the order saved, each item once."""
@@ -45,11 +47,16 @@ class Checkpoint:
         return items
 
     def add(self, item: dict[str, Any]) -> None:
-        self._pending.append(item)
-        if len(self._pending) >= CHUNK_ITEMS:
-            self.flush()
+        with self._lock:
+            self._pending.append(item)
+            if len(self._pending) >= CHUNK_ITEMS:
+                self._flush()
 
     def flush(self) -> None:
+        with self._lock:
+            self._flush()
+
+    def _flush(self) -> None:
         if not self._pending:
             return
         if self._next_seq is None:
