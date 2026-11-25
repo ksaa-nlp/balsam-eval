@@ -41,6 +41,8 @@ async def model():
             return web.Response(status=401)
         body = await request.json()
         state["seen"].append((dict(request.headers), body))
+        if state.get("fail") and state["fail"] in json.dumps(body, ensure_ascii=False):
+            return web.json_response({"error": "internal"}, status=503)
         protocol = state["protocol"]
         if protocol == "systemone":
             if not isinstance(body.get("questions"), dict):
@@ -191,6 +193,22 @@ async def test_a_known_version_that_answers_blind_is_not_reused(model):
     report = await run_stage("probe", onboard_request(url, candidates=({"auth": {"kind": "bearer"}, "adapter": custom},)),
                              key="k", allow_private=True)
     assert report["outcome"] == "awaiting_curl"
+
+
+async def test_a_5xx_on_one_canary_aborts_the_trial_instead_of_blaming_the_transforms(model):
+    from decisioneval.onboard.trial import FULL_CASES, bind, run_trial
+    from decisioneval.remote.execute import RunAborted
+    from decisioneval.transforms.worker import TransformWorker
+    from decisioneval.transport import ModelClient, RetryPolicy
+
+    url, state = model
+    state["fail"] = HELD_OUT[0].question
+    adapter = {**seed_adapter("systemone"), "retry": {**seed_adapter("systemone")["retry"], "backoff_s": 0}}
+    async with ModelClient(retry=RetryPolicy(attempts=1), allow_private=True) as client:
+        with TransformWorker() as worker:
+            with pytest.raises(RunAborted, match="503") as caught:
+                await run_trial(bind(url, "m-1", {"kind": "bearer"}, adapter), FULL_CASES, key="k", client=client, worker=worker)
+    assert caught.value.status == 503
 
 
 # -- synthesize stage ---------------------------------------------------------

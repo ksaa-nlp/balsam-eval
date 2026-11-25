@@ -68,6 +68,10 @@ async def run_trial(
     trial = Trial()
     for item, order, scored in await asyncio.gather(*(one(item, order) for item, order in cases)):
         raw = scored.raw_response
+        status = raw.get("http_status") or 0
+        if status >= 500:
+            # A server failure says nothing about the transforms, so it must not send them back for repair.
+            raise RunAborted(f"the model answered HTTP {status} after its retries", status=status)
         reason, problem = raw.get("invalid_reason"), raw.get("distribution_problem")
         if reason in STRUCTURE_REASONS or problem == MALFORMED:
             detail = raw.get("error") or (f"mapped to {raw.get('mapped')!r}" if "mapped" in raw else "")
