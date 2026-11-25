@@ -64,7 +64,9 @@ async def gradio_call(client: ModelClient, url: str, api_name: str, body: Any, h
                 raise GradioError(f"the complete event is not JSON: {data}") from exc
             return Reply(status=200, payload=payload, latency_ms=started.latency_ms + stream.latency_ms, headers=stream.headers)
         if event == "error":
-            raise GradioError(f"the Space reported an error: {data}")
+            # Usually a busy Space (queue full, GPU quota) or one input it can't handle, not a broken adapter.
+            return Reply(status=502, payload={"error": f"the Space reported an error: {data}"},
+                         latency_ms=started.latency_ms + stream.latency_ms, headers=stream.headers)
     raise GradioError("the event stream ended without a complete event")
 
 

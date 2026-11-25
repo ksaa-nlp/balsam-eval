@@ -123,13 +123,20 @@ async def test_a_sleeping_space_is_retried_until_it_wakes(space):
     assert reply.status == 200
 
 
-@pytest.mark.parametrize("mode,message", [("error", "reported an error"), ("silent", "without a complete")])
-async def test_an_error_or_a_stream_without_complete_is_a_gradio_error(space, mode, message):
+async def test_a_stream_without_complete_is_a_gradio_error(space):
     base, state = space
-    state["mode"] = mode
+    state["mode"] = "silent"
     async with client() as model:
-        with pytest.raises(GradioError, match=message):
+        with pytest.raises(GradioError, match="without a complete"):
             await gradio_call(model, base, "/predict", {"data": ["س", "a\nb"]}, {})
+
+
+async def test_an_error_event_is_a_5xx_reply_not_a_broken_adapter(space):
+    base, state = space
+    state["mode"] = "error"
+    async with client() as model:
+        reply = await gradio_call(model, base, "/predict", {"data": ["س", "a\nb"]}, {})
+    assert reply.status == 502 and "reported an error" in reply.payload["error"]
 
 
 def test_events_are_parsed_and_heartbeats_dropped():
@@ -165,7 +172,7 @@ async def test_an_eval_runs_through_a_gradio_adapter(space):
     assert item.correct and item.probabilities == {"A": 0.7, "B": 0.15, "C": 0.15}
 
 
-async def test_a_gradio_error_mid_eval_is_an_adapter_error(space):
+async def test_a_gradio_error_mid_eval_is_invalid_and_retried_on_resume(space):
     base, state = space
     state["mode"] = "error"
     auth = {"kind": "none"}
@@ -178,7 +185,7 @@ async def test_a_gradio_error_mid_eval_is_an_adapter_error(space):
     async with client() as model:
         with TransformWorker() as worker:
             [item] = await execute(bound, [question], key=None, client=model, worker=worker)
-    assert item.invalid and item.raw_response["invalid_reason"] == "adapter_error"
+    assert item.invalid and item.raw_response["http_status"] == 502  # http_status keeps it out of the checkpoint
 
 
 # -- onboarding a Space ------------------------------------------------------
