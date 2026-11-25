@@ -113,12 +113,12 @@ def _replay_adapter_run(items: list[Any], transform: str, audit: RunAudit) -> li
             where = f"{record.get('dataset')}/{record.get('item_id')}"
             raw = record.get("raw_response") if isinstance(record.get("raw_response"), dict) else {}
             option_ids = tuple(str(value) for value in record.get("option_ids") or ())
+            options = tuple(str(value) for value in record.get("options") or ())
             if "mapped" in raw and _has_redacted_value(raw.get("reply")):
                 audit.unreplayed += 1
                 checked = check(raw["mapped"], option_ids)
             elif "mapped" in raw:
                 try:
-                    options = tuple(str(value) for value in record.get("options") or ())
                     again = worker.run(transform, response_input(raw.get("reply"), option_ids, options))
                 except TransformError as exc:
                     audit.findings.append(Finding("transform", f"{where}: {exc}"))
@@ -135,11 +135,20 @@ def _replay_adapter_run(items: list[Any], transform: str, audit: RunAudit) -> li
                 )
             if (checked.choice is None) != bool(record.get("invalid")):
                 audit.findings.append(Finding("invalid", f"{where}: stored {record.get('invalid')}"))
+            if bool(record.get("correct")) != _replayed_correct(checked.choice, option_ids, options, record.get("gold_answer")):
+                audit.findings.append(Finding("correct", f"{where}: stored {record.get('correct')}"))
             if checked.distribution_problem != record.get("distribution_problem"):
                 audit.findings.append(Finding("distribution", f"{where}: stored {record.get('distribution_problem')!r}"))
             _compare_vector(where, record.get("probabilities"), checked.probabilities, audit)
             replayed.append(ItemResult.from_dict(record))
     return replayed
+
+
+def _replayed_correct(choice: str | None, option_ids: tuple[str, ...], options: tuple[str, ...], gold: Any) -> bool:
+    """Gold matching is by option text, as the evaluator scores it."""
+    if choice is None or len(options) != len(option_ids):
+        return False
+    return options[option_ids.index(choice)] == gold
 
 
 def _has_redacted_value(value: Any) -> bool:

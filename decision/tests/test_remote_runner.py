@@ -384,6 +384,15 @@ def test_audit_checks_a_redacted_reply_against_its_stored_mapping_without_failin
     assert audit.passed and audit.unreplayed == 1
 
 
+def test_audit_catches_a_wrong_answer_marked_correct(bucket, tmp_path, server):
+    _, config = run(bucket, tmp_path, server[0])
+    document = read(bucket, config, RUN_FILE)
+    wrong = next(item for item in document["items"] if not item["correct"])
+    wrong["correct"] = True
+    audit = audit_document(document)
+    assert not audit.passed and any(finding.scope == "correct" for finding in audit.findings)
+
+
 def test_an_item_the_model_refused_is_not_checkpointed(bucket, tmp_path, server):
     url, model = server
     model.mode = "refuse_one"
