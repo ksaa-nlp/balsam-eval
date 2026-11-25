@@ -124,7 +124,7 @@ async def synthesize_stage(
         except SynthesisFailed as exc:
             return outcome(STAGE, "failed", error_code=ONBOARDING_FAILED, error_detail=str(exc))
 
-        degraded = _choice_only(response_transform, samples, worker)
+        degraded, derived = _probability_flags(response_transform, samples, worker)
         adapter = {
             "interaction": interaction,
             "request_transform": request_transform,
@@ -133,7 +133,7 @@ async def synthesize_stage(
             "engine": ENGINE,
             "engine_version": ENGINE_VERSION,
             "degraded": degraded,
-            "derived_probabilities": False,
+            "derived_probabilities": derived,
         }
         try:
             bound = bind(request.url, request.model, auth, adapter)
@@ -246,15 +246,37 @@ def _response_transform(llm, request, samples, feedback, space, key) -> tuple[st
     return transform, "llm"
 
 
-def _choice_only(transform: str, samples, worker: TransformWorker) -> bool:
+def _probability_flags(transform: str, samples, worker: TransformWorker) -> tuple[bool, bool]:
+    """(degraded, derived): the transform never gives probabilities, or gives numbers no reply contains."""
+    degraded, derived = True, False
     for item, _, reply in samples:
         try:
             mapped = worker.run(transform, response_input(reply, item.option_ids, item.options))
         except TransformError:
-            return False  # the canary suite reports it as a structure failure
-        if isinstance(mapped, dict) and mapped.get("probabilities") is not None:
-            return False
-    return True
+            return False, False  # the canary suite reports it as a structure failure
+        probabilities = mapped.get("probabilities") if isinstance(mapped, dict) else None
+        if isinstance(probabilities, dict):
+            degraded = False
+            # A transform may only copy a distribution; one it computed (one-hot, a softmax) is not the model's.
+            derived = derived or not set(probabilities.values()) <= _numbers(reply)
+    return degraded, derived
+
+
+def _numbers(value: Any) -> set[float]:
+    if isinstance(value, dict):
+        return set().union(*(_numbers(item) for item in value.values()))
+    if isinstance(value, list):
+        return set().union(*(_numbers(item) for item in value))
+    if isinstance(value, bool):
+        return set()
+    if isinstance(value, (int, float)):
+        return {value}
+    if isinstance(value, str):
+        try:
+            return {float(value)}
+        except ValueError:
+            return set()
+    return set()
 
 
 def _ask(llm: LlmProvider, prompt: str, field: str, key: str | None) -> str:

@@ -339,3 +339,18 @@ def test_a_long_error_detail_is_cut_only_after_the_key_is_gone():
                 key=key, opener=opener)
     body = json.loads(sent[0])
     assert "sk-live" not in sent[0].decode() and len(body["error_detail"]) == 2000
+
+
+def test_probabilities_a_transform_computes_are_marked_derived():
+    from decisioneval.onboard.synthesize import _probability_flags
+    from decisioneval.transforms.worker import TransformWorker
+
+    item = ITEMS[0]
+    samples = [(item, {}, {"label": item.option_ids[1], "scores": {"x": 0.3, "y": 0.7}})]
+    copied = '{"status": "answer", "choice": reply.label, "probabilities": {"A": reply.scores.x, "B": reply.scores.y}}'
+    one_hot = '{"status": "answer", "choice": reply.label, "probabilities": {"A": 0, "B": 1}}'
+    choice_only = '{"status": "answer", "choice": reply.label, "probabilities": null}'
+    with TransformWorker() as worker:
+        assert _probability_flags(copied, samples, worker) == (False, False)
+        assert _probability_flags(one_hot, samples, worker) == (False, True)
+        assert _probability_flags(choice_only, samples, worker) == (True, False)
