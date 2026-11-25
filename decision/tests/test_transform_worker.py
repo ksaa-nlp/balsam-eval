@@ -79,3 +79,12 @@ def test_a_child_cannot_read_the_parents_environment_once_a_worker_started(monke
             capture_output=True, text=True,
         )
     assert "SECRETVALUE" not in probe.stdout
+
+
+def test_a_closed_worker_refuses_calls_instead_of_respawning():
+    worker = TransformWorker()
+    assert worker.run("1 + 1", {}) == 2
+    worker.close()
+    with pytest.raises(TransformError, match="closed"):
+        worker.run("1 + 1", {})
+    assert worker._process is None

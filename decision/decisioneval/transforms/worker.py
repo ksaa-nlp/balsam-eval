@@ -29,6 +29,7 @@ class TransformWorker:
         self.timeout_s = timeout_s
         self._process: subprocess.Popen[str] | None = None
         self._lock = threading.Lock()
+        self._closed = False
 
     def run(self, expression: str, data: Any) -> Any:
         """Evaluate `expression` on `data`. Raises `TransformError` on any failure."""
@@ -58,7 +59,10 @@ class TransformWorker:
         return reply.get("result")
 
     def close(self) -> None:
-        process, self._process = self._process, None
+        # Under the lock, so a thread still queued after a cancelled run can't respawn a child nobody closes.
+        with self._lock:
+            self._closed = True
+            process, self._process = self._process, None
         if process is None:
             return
         try:
@@ -75,6 +79,8 @@ class TransformWorker:
         self.close()
 
     def _start(self) -> subprocess.Popen[str]:
+        if self._closed:
+            raise TransformError("transform worker is closed")
         if self._process is None or self._process.poll() is not None:
             _hide_own_environment()
             self._process = subprocess.Popen(
