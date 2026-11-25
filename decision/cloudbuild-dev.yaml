@@ -1,0 +1,18 @@
+# Builds gcr.io/${PROJECT_ID}/decision-eval-dev:latest, the image the
+# backend's DECISION_EVALUATION_RUNNER_IMAGE points at.
+# Trigger: branch ^dev$, included files decision/**. By hand, from the repo root:
+#   gcloud builds submit --config decision/cloudbuild-dev.yaml
+steps:
+  - name: 'gcr.io/kaniko-project/executor:latest'
+    id: 'PREPARING_BUILD'
+    args:
+      - '--context=dir:///workspace/decision'
+      - '--dockerfile=/workspace/decision/Dockerfile'
+      - '--destination=gcr.io/${PROJECT_ID}/decision-eval-dev:latest'
+      - '--cache=true'
+      - '--cache-ttl=72h'
+      - '--cache-repo=gcr.io/${PROJECT_ID}/decision-eval-dev-cache'
+
+timeout: 1800s
+options:
+  logging: CLOUD_LOGGING_ONLY
