@@ -1,0 +1,12 @@
+{
+  "model": model,
+  "input": input,
+  "questions": [{
+    "type": "choice",
+    "name": "answer",
+    "instructions": instruction,
+    "choices": [$map($zip(option_ids, options), function($pair) {
+      {"value": $pair[0], "description": $pair[1]}
+    })]
+  }]
+}

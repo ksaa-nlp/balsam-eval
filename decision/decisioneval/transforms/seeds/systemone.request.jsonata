@@ -1,0 +1,7 @@
+{
+  "model": model,
+  "state": state,
+  "questions": {
+    "answer": {"type": "choice", "instructions": instruction, "criteria": criteria}
+  }
+}

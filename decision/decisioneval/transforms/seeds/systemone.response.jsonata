@@ -1,0 +1,13 @@
+(
+  $names := $keys(reply.answers);
+  $a := $exists(reply.answers.answer)
+    ? reply.answers.answer
+    : ($count($names) = 1 ? $lookup(reply.answers, $names[0]) : null);
+  $a.type = "refusal"
+    ? {"status": "refusal", "choice": null, "probabilities": null}
+    : {
+        "status": "answer",
+        "choice": $type($a.choice) = "string" ? $a.choice : null,
+        "probabilities": $exists($a.probabilities) ? $a.probabilities : null
+      }
+)

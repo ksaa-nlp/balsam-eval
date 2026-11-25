@@ -1,0 +1,18 @@
+(
+  $named := reply.answers[name = "answer"];
+  $a := $exists($named) ? $named[0] : reply.answers[0];
+  $rows := $a.probabilities;
+  $labels := $filter($rows.value, function($v) { $type($v) = "string" });
+  $clean := $count($rows) > 0 and $count($labels) = $count($rows) and $count($distinct($labels)) = $count($rows);
+  /* an empty, repeated or non-string value maps to the never-an-option key "", so the contract calls it malformed */
+  $vector := $exists($rows)
+    ? ($clean ? $merge($map($rows, function($row) { {$row.value: $row.probability} })) : {"": 0})
+    : null;
+  $a.type = "refusal"
+    ? {"status": "refusal", "choice": null, "probabilities": null}
+    : {
+        "status": "answer",
+        "choice": $type($a.choice) = "string" ? $a.choice : null,
+        "probabilities": $vector
+      }
+)
