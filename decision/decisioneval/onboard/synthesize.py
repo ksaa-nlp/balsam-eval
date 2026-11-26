@@ -85,10 +85,10 @@ async def synthesize_stage(
     space_info = None
     if interaction["pattern"] == "gradio-call":
         try:
-            if not await wake(client, request.url):
+            if not await wake(client, request.url, auth=auth, key=key):
                 return outcome(STAGE, "failed", error_code=ONBOARDING_FAILED,
                                error_detail="the Space did not wake within 3 minutes")
-            space_info = await endpoint_info(client, request.url)
+            space_info = await endpoint_info(client, request.url, auth=auth, key=key)
         except TransportError as exc:
             return _aborted(RunAborted(f"could not reach the Space: {exc}"))
 

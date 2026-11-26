@@ -9,7 +9,7 @@ from aiohttp import web
 
 from decisioneval.models import Question
 from decisioneval.onboard.canary import ITEMS
-from decisioneval.onboard.gradio_info import gradio_interaction, wake
+from decisioneval.onboard.gradio_info import endpoint_info, gradio_interaction, wake
 from decisioneval.onboard.report import OnboardRequest
 from decisioneval.onboard.synthesize import synthesize_stage
 from decisioneval.remote.bound_adapter import load_bound_adapter
@@ -63,12 +63,19 @@ async def space():
         return web.Response(text=payload, content_type="text/event-stream")
 
     async def root(request):
+        if state.get("require_bearer") and request.headers.get("Authorization") != f"Bearer {state['require_bearer']}":
+            return web.Response(
+                status=state.get("unauth_status", 404),
+                text="<html><title>Hugging Face – The AI community building the future.</title><h1>404</h1></html>",
+            )
         if state["root_sleeping"]:
             state["root_sleeping"] -= 1
             return web.Response(status=503, text="Space is building")
-        return web.Response(text=state.get("root_text", "<html>gradio</html>"))
+        return web.Response(status=state.get("root_status", 200), text=state.get("root_text", "<html>gradio</html>"))
 
     async def info(request):
+        if state.get("require_bearer") and request.headers.get("Authorization") != f"Bearer {state['require_bearer']}":
+            return web.Response(status=state.get("unauth_status", 404), text="not found")
         return web.json_response({"named_endpoints": {"/predict": {"parameters": [{"label": "question"}, {"label": "options"}]}}})
 
     app = web.Application()
@@ -273,3 +280,30 @@ async def test_a_query_key_rides_on_both_requests(space, path):
         reply = await gradio_call(model, f"{base}{path}?key=K", "/predict", {"data": ["س", "a\nb"]}, {})
     assert reply.status == 200
     assert seen[-2:] == [f"{base}/call/predict?key=K", f"{base}/call/predict/ev-1?key=K"]
+
+
+async def test_wake_and_endpoint_info_authenticate_private_spaces(space):
+    base, state = space
+    state["require_bearer"] = "hf_secret"
+    state["oracle"] = True
+    auth = {"kind": "bearer"}
+    async with client() as model:
+        assert await wake(model, f"{base}/call/predict", auth=auth, key="hf_secret",
+                          sleep=lambda _: pytest.fail("polled an awake private Space"))
+        info = await endpoint_info(model, f"{base}/call/predict", auth=auth, key="hf_secret")
+        assert "/predict" in info
+
+        llm = ScriptedLlm({"request_transform": REQUEST}, {"response_transform": PAIRS_RESPONSE})
+        request = OnboardRequest(url=f"{base}/call/predict", model="", auth=auth,
+                                 redacted_request={"url": f"{base}/call/predict", "body": {"data": ["q", "a"]}})
+        with TransformWorker() as worker:
+            report = await synthesize_stage(request, key="hf_secret", client=model, worker=worker, llm=llm)
+    assert report["outcome"] == "active", report
+    assert '"question"' in llm.prompts[0]
+
+
+async def test_wake_skips_body_field_auth_on_get(space):
+    base, _ = space
+    async with client() as model:
+        assert await wake(model, base, auth={"kind": "body_field", "path": "api_key"}, key="k",
+                          sleep=lambda _: pytest.fail("polled an awake Space"))
