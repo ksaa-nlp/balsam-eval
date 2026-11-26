@@ -89,6 +89,8 @@ async def synthesize_stage(
                 return outcome(STAGE, "failed", error_code=ONBOARDING_FAILED,
                                error_detail="the Space did not wake within 3 minutes")
             space_info = await endpoint_info(client, request.url, auth=auth, key=key)
+        except RunAborted as exc:
+            return _aborted(exc)
         except TransportError as exc:
             return _aborted(RunAborted(f"could not reach the Space: {exc}"))
 

@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from decisioneval.remote.bound_adapter import place_key
+from decisioneval.remote.execute import RunAborted
 from decisioneval.remote.gradio import CALL_PATH, space_base
 from decisioneval.transport import ModelClient
 
@@ -56,9 +57,19 @@ async def wake(
     started = clock()
     while True:
         reply = await client.send(f"{base}{query}", None, headers, method="GET")
+        if reply.status in (401, 403):
+            raise RunAborted(f"the Space refused the key (HTTP {reply.status})", status=reply.status)
+        if reply.status == 404:
+            raise RunAborted(
+                "the Space was not found (HTTP 404); check the URL and, if the Space is private, its token",
+                status=404,
+            )
         text = json.dumps(reply.payload, ensure_ascii=False).lower()
-        # A running app embeds its config; only a status page is read for these words, not a Space's own title.
-        status_page = "gradio_config" not in text and ("building" in text or "sleeping" in text)
+        # A running app embeds its config; only a 2xx status page is read for these words,
+        # never a Space's own title or an error page like HF's 404 ("building the future").
+        status_page = 200 <= reply.status < 300 and "gradio_config" not in text and (
+            "building" in text or "sleeping" in text
+        )
         if reply.status < 500 and not status_page:
             return True
         if clock() - started >= deadline_s:

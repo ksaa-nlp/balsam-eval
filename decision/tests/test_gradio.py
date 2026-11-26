@@ -13,7 +13,7 @@ from decisioneval.onboard.gradio_info import endpoint_info, gradio_interaction, 
 from decisioneval.onboard.report import OnboardRequest
 from decisioneval.onboard.synthesize import synthesize_stage
 from decisioneval.remote.bound_adapter import load_bound_adapter
-from decisioneval.remote.execute import execute
+from decisioneval.remote.execute import RunAborted, execute
 from decisioneval.remote.gradio import GradioError, gradio_call, parse_events, space_base
 from decisioneval.transforms.adapter import content_hash, seed_adapter
 from decisioneval.transforms.worker import TransformWorker
@@ -282,12 +282,34 @@ async def test_a_query_key_rides_on_both_requests(space, path):
     assert seen[-2:] == [f"{base}/call/predict?key=K", f"{base}/call/predict/ev-1?key=K"]
 
 
+async def test_wake_fails_fast_on_hf_404_page_instead_of_polling(space):
+    base, state = space
+    state["root_status"] = 404
+    state["root_text"] = "<html><title>Hugging Face – The AI community building the future.</title><h1>404</h1></html>"
+    async with client() as model:
+        with pytest.raises(RunAborted, match="HTTP 404") as exc:
+            await wake(model, f"{base}/call/predict", sleep=lambda _: pytest.fail("polled a 404 Space"))
+    assert exc.value.status == 404
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_wake_fails_fast_when_the_space_refuses_auth(space, status):
+    base, state = space
+    state["root_status"] = status
+    async with client() as model:
+        with pytest.raises(RunAborted, match=f"HTTP {status}") as exc:
+            await wake(model, base, sleep=lambda _: pytest.fail("polled an unauthorized Space"))
+    assert exc.value.status == status
+
+
 async def test_wake_and_endpoint_info_authenticate_private_spaces(space):
     base, state = space
     state["require_bearer"] = "hf_secret"
     state["oracle"] = True
     auth = {"kind": "bearer"}
     async with client() as model:
+        with pytest.raises(RunAborted, match="HTTP 404"):
+            await wake(model, base, sleep=lambda _: pytest.fail("polled a 404 private Space"))
         assert await wake(model, f"{base}/call/predict", auth=auth, key="hf_secret",
                           sleep=lambda _: pytest.fail("polled an awake private Space"))
         info = await endpoint_info(model, f"{base}/call/predict", auth=auth, key="hf_secret")
