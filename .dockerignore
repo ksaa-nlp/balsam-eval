@@ -119,3 +119,6 @@ ignores
 .tasks_audio
 .tasks_ominiaudio
 temp.py
+
+# The decision runner builds its own image from decision/
+decision/

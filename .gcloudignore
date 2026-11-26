@@ -65,6 +65,7 @@ docs/
 docs/**
 README.md
 *.md
+!decision/README.md
 LICENSE
 
 # Temporary files

@@ -1,0 +1,32 @@
+[project]
+name = "decisioneval"
+version = "0.3.0"
+description = "Evaluation and onboarding runner for decision models on the Benchmarks Platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "aiohttp>=3.11,<4",
+  "google-cloud-storage>=2.18,<4",
+  "jsonata-python==0.7.2",
+  "rfc8785==0.1.4",
+  "python-dotenv>=1.0,<2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "hypothesis>=6.100",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["decisioneval"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

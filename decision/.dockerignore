@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.env
+.env.*
+tests/
+.tasks/
+.results/
+Dockerfile
+.dockerignore
+cloudbuild*.yaml
